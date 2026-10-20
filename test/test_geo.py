@@ -175,6 +175,51 @@ class TestAlongTrackDistance:
         dist_by_lon = dict(zip(df["LONGITUDE"], result))
         assert dist_by_lon[1.0] < dist_by_lon[2.0]
 
+    # A track returning to an earlier position: station_col keeps the return leg
+    def test_station_col_separates_revisited_position(self):
+        df = pd.DataFrame({
+            "ID": [1, 2, 3],
+            "LATITUDE": [0.0, 0.0, 0.0],
+            "LONGITUDE": [0.0, 1.0, 0.0],
+        })
+        by_coords = along_track_distance(df)
+        by_id = along_track_distance(df, station_col="ID")
+        assert by_coords.iloc[2] == by_coords.iloc[0] == 0.0
+        assert 200.0 < float(by_id.iloc[2]) < 250.0
+        assert by_id.iloc[1] < by_id.iloc[2]
+
+    # A list of columns forms the station key, rows of one station (different depths) share a distance
+    def test_station_col_list_and_depth_rows(self):
+        df = pd.DataFrame({
+            "CRUISE": ["x", "x", "x"],
+            "ID": [1, 1, 2],
+            "LATITUDE": [0.0, 0.0, 0.0],
+            "LONGITUDE": [0.0, 0.0, 1.0],
+            "LEV_M": [0, 10, 0],
+        })
+        result = along_track_distance(df, station_col=["CRUISE", "ID"])
+        assert result.iloc[0] == result.iloc[1] == 0.0
+        assert result.iloc[2] > 0.0
+
+    # A station is placed by its earliest order value, not by its first row in df
+    def test_order_uses_earliest_value_per_station(self):
+        df = pd.DataFrame({
+            "ID": [1, 1, 2],
+            "LATITUDE": [0.0, 0.0, 0.0],
+            "LONGITUDE": [2.0, 2.0, 1.0],
+            "SEQ": [9, 1, 5],
+        })
+        result = along_track_distance(df, order_col="SEQ", station_col="ID")
+        # Station 1 (SEQ min(1,9)=1 ) comes first, station 2 (SEQ 5) is 1 degree further
+        assert result.iloc[0] == result.iloc[1] == 0.0
+        assert 100.0 < float(result.iloc[2]) < 125.0
+
+    # An unknown station column raises an error
+    def test_missing_station_col_raises(self):
+        df = pd.DataFrame({"LATITUDE": [0.0, 1.0], "LONGITUDE": [0.0, 0.0]})
+        with pytest.raises(KeyError):
+            along_track_distance(df, station_col="ID")
+
     # Output index matches the input DataFrame's index
     def test_preserves_index(self):
         df = pd.DataFrame({"LATITUDE": [0.0, 1.0], "LONGITUDE": [0.0, 0.0]}, index=[10, 20])

@@ -80,46 +80,61 @@ def _to_unit_sphere(lat_deg, lon_deg) -> np.ndarray:
 
 
 def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
-                         lon_col: str = "LONGITUDE", order_col: str | None = None) -> pd.Series:
+                         lon_col: str = "LONGITUDE", order_col: str | None = None,
+                         station_col: str | list[str] | None = None) -> pd.Series:
     """Cumulative great-circle distance along a track [km].
 
-    Collapses to unique ``(lat_col, lon_col)`` stations, orders them by
-    *order_col* (or by first appearance in *df* when ``None``) and sums
-    ``gsw.distance`` between consecutive stations. Rows sharing a station
-    (e.g. different depth levels of one profile) get the same value.
+    Orders the stations by *order_col* (or by first appearance in *df* if ``None``) and sums
+    ``gsw.distance`` between consecutive stations.
 
     Args:
         df (pandas.DataFrame): DataFrame with latitude/longitude columns.
         lat_col (str): Latitude column [°N].
         lon_col (str): Longitude column [°E].
-        order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``
-            or ``PROFILE_NUMBER``). Defaults to first-appearance order.
+        order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``).
+            Defaults to first-appearance order.
+        station_col (str or list[str]): Column(s) identifying a station
+            (e.g. ``"ID"``). Defaults to ``None``, i.e. stations at identical
+            ``(lat_col, lon_col)`` are treated as one.
     Returns:
         pandas.Series: Cumulative distance [km] from the first station,
         same index as df.
     """
+    # Label each row with its station
+    if station_col is None:
+        # Use lat/lon as station key
+        key = [lat_col, lon_col]
+    else:
+        # Use passed station column(s) as station key
+        key = [station_col] if isinstance(station_col, str) else list(station_col)
+    station_id = df.groupby(key, sort=False, dropna=False).ngroup().values  # give each station a unique int key
+
     # Reduce to one row per station, ordered along the track
-    cols = [lat_col, lon_col] if order_col is None else [lat_col, lon_col, order_col]
-    stations = df[cols].drop_duplicates([lat_col, lon_col])
+    per_row = pd.DataFrame({"lat": df[lat_col].values, "lon": df[lon_col].values, "station": station_id})
+    agg = {"lat": "first", "lon": "first"}
     if order_col is not None:
-        stations = stations.sort_values(order_col)
+        # Add column to order by to per_row and define aggregation
+        per_row["order"] = df[order_col].values
+        agg["order"] = "min"  # take earliest value
+    stations = per_row.groupby("station").agg(agg)  # collapse to one row per station
+    if order_col is not None:
+        # Apply optional station ordering ("stable" -> ties keep existing order)
+        stations = stations.sort_values("order", kind="stable")
 
     # Great-circle distance between consecutive stations
     if len(stations) < 2:
+        # No distance for one station possible
         cum_km = np.zeros(len(stations))
     else:
+        # Distance between >1 stations
         step_km = gsw.distance(
-            stations[lon_col].values.astype(float), stations[lat_col].values.astype(float)
+            stations["lon"].values.astype(float), stations["lat"].values.astype(float)
         ) / 1000.0
         cum_km = np.concatenate([[0.0], np.cumsum(step_km)])
 
-    # Broadcast each station's cumulative distance back onto every row
-    # sharing its (lat, lon), e.g. multiple depth levels of one profile
-    lookup = pd.Series(cum_km, index=pd.MultiIndex.from_arrays(
-        [stations[lat_col].values, stations[lon_col].values]
-    ))
-    keys = pd.MultiIndex.from_arrays([df[lat_col].values, df[lon_col].values])
-    return pd.Series(lookup.loc[keys].values, index=df.index)
+    # Broadcast each station's cumulative distance back onto every row of that station
+    lookup = pd.Series(cum_km, index=stations.index)
+    return pd.Series(lookup.reindex(station_id).values, index=df.index)
 
 
 def _get_coast_points(resolution, coastline_geom):
