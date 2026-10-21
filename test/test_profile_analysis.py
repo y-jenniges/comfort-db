@@ -122,6 +122,15 @@ class TestVerticalGradient:
         out = vertical_gradient(df)
         assert out["VAL_gradient"].notna().all()
 
+    # Repeated depths are averaged first, so both rows get the same finite gradient
+    def test_duplicate_depths_share_finite_gradient(self):
+        # Averaged levels: 10 (0 m), 7 (100 m), 4 (200 m) -> -0.03 everywhere
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1],
+                           "LEV_DBAR": [0, 100, 100, 200],
+                           "VAL": [10.0, 8.0, 6.0, 4.0]})
+        out = vertical_gradient(df)
+        assert np.allclose(out["VAL_gradient"], -0.03)
+
 
 class TestMixedLayerDepth:
     @staticmethod
@@ -300,6 +309,16 @@ class TestPycnoclineDepth:
         result = pycnocline_depth(df, density_col="sigma0")
         assert pd.isna(result["pycnocline_depth_m"].iloc[0])
 
+    # Repeated depths are averaged, so no zero depth step produces an infinite gradient
+    def test_duplicate_depths_give_finite_gradient(self):
+        # Averaged levels: 25.0 (0 m), 25.1 (50 m), 26.0 (100 m), 26.2 (150 m); max at 100 m
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 50.0, 100.0, 150.0],
+                           "sigma0": [25.0, 25.0, 25.2, 26.0, 26.2]})
+        result = pycnocline_depth(df, density_col="sigma0")
+        assert result["pycnocline_depth_m"].iloc[0] == 100.0
+        assert result["max_gradient"].iloc[0] == pytest.approx(0.011)
+
     # A profile with a single depth level has no gradient to compute
     def test_short_profile_skipped(self):
         df = pd.DataFrame({"PROFILE_NUMBER": [1], "LEV_DBAR": [0.0], "sigma0": [25.0]})
@@ -346,6 +365,14 @@ class TestInterpolateDepthLevels:
         v1 = p1[p1["LEV_DBAR"] == 50]["VAL"].iloc[0]
         v2 = p2[p2["LEV_DBAR"] == 50]["VAL"].iloc[0]
         assert v1 == pytest.approx(v2, abs=0.01)
+
+    # Repeated depths are averaged, not dropped in row order
+    def test_duplicate_depths_are_averaged(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [0.0, 100.0, 100.0],
+                           "VAL": [10.0, 8.0, 6.0]})
+        result = interpolate_depth_levels(df, target_depths=[100], method="linear")
+        assert result["VAL"].iloc[0] == pytest.approx(7.0)
 
     # method="linear" reproduces plain piecewise-linear interpolation
     def test_linear_method(self):

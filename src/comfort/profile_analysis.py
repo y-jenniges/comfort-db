@@ -35,6 +35,18 @@ def _profile_key_dict(profile_col: str | list[str], pid) -> dict:
     return {profile_col: pid}
 
 
+def _profile_levels(group: pd.DataFrame, depth_col: str, value_col: str) -> tuple[np.ndarray, np.ndarray]:
+    """Return the sorted unique depths of one profile and the mean value at each depth."""
+    # Drop NaN rows
+    levels = group[[depth_col, value_col]].dropna()
+
+    # Average per (and sort by) depth
+    levels = levels.groupby(depth_col)[value_col].mean()
+
+    # Return depth-sorted arrays (depth, values)
+    return levels.index.values, levels.values
+
+
 def _detect_param_col(df, param_col):
     """Return param_col if it exists, otherwise auto-detect the value column."""
     # Use param_col
@@ -143,7 +155,8 @@ def vertical_gradient(df: pd.DataFrame,
             ``"PROFILE_NUMBER"``.
     Returns:
         pandas.DataFrame: Copy of *df* with added column
-            ``<param_col>_gradient``.
+            ``<param_col>_gradient``. Repeated depths within a profile are
+            averaged before computing the gradient.
     """
     profile_col = _resolve_profile_col(df, profile_col)
     param_col = _detect_param_col(df, param_col)
@@ -155,14 +168,15 @@ def vertical_gradient(df: pd.DataFrame,
 
     # Compute gradient per profile using central differences
     for _, group in df_out.groupby(profile_col, sort=False):
-        # Drop nans
-        valid = group[[depth_col, param_col]].dropna()
-        if len(valid) < 2:
+        # Average duplicate depths, drop NaNs
+        depths, vals = _profile_levels(group, depth_col, param_col)
+        if len(depths) < 2:
             continue
 
-        # Compute gradient
-        dv = np.gradient(valid[param_col].values, valid[depth_col].values)
-        df_out.loc[valid.index, grad_col] = dv
+        # Compute gradient and map it back to every row at that depth
+        dv = pd.Series(np.gradient(vals, depths), index=depths)
+        valid = group[[depth_col, param_col]].dropna()
+        df_out.loc[valid.index, grad_col] = valid[depth_col].map(dv).values
 
     return df_out
 
@@ -280,21 +294,18 @@ def mixed_layer_depth(df: pd.DataFrame,
     # Iterate over profiles
     rows = []
     for pid, group in df.groupby(profile_col):
-        # Drop nans
-        valid = group[[depth_col, col]].dropna().sort_values(depth_col)
-        if len(valid) < 2:
+        # Average duplicate depths, drop NaNs
+        depths, vals = _profile_levels(group, depth_col, col)
+        if len(depths) < 2:
             logging.debug("mixed_layer_depth: profile %s has < 2 valid levels, skipped", pid)
             continue
 
-        z = valid[depth_col].values
-        v = valid[col].values
-
         # Find reference value at nearest depth
-        ref_idx = int(np.argmin(np.abs(z - reference_depth)))
-        v_ref = v[ref_idx]
+        ref_idx = int(np.argmin(np.abs(depths - reference_depth)))
+        v_ref = vals[ref_idx]
 
         # No usable reference level near the reference depth
-        if max_ref_distance is not None and abs(z[ref_idx] - reference_depth) > max_ref_distance:
+        if max_ref_distance is not None and abs(depths[ref_idx] - reference_depth) > max_ref_distance:
             logging.debug("mixed_layer_depth: Profile %s has no level within %s m of %s m",
                           pid, max_ref_distance, reference_depth)
             rows.append({**_profile_key_dict(profile_col, pid), "MLD_m": np.nan})
@@ -302,15 +313,15 @@ def mixed_layer_depth(df: pd.DataFrame,
 
         # Walk downward until threshold is exceeded
         mld = np.nan
-        for i in range(ref_idx + 1, len(z)):
+        for i in range(ref_idx + 1, len(depths)):
             # Threshold test for density/temperature
-            diff = v[i] - v_ref
+            diff = vals[i] - v_ref
             if (diff if one_sided else abs(diff)) > delta:
                 # Determine the crossed threshold (upper or lower)
-                target = v_ref + delta if v[i] > v_ref else v_ref - delta
+                target = v_ref + delta if vals[i] > v_ref else v_ref - delta
 
                 # Linear interpolation to estimate exact crossing depth
-                mld = float(z[i - 1] + (target - v[i - 1]) * (z[i] - z[i - 1]) / (v[i] - v[i - 1]))
+                mld = float(depths[i - 1] + (target - vals[i - 1]) * (depths[i] - depths[i - 1]) / (vals[i] - vals[i - 1]))
                 break
 
         rows.append({**_profile_key_dict(profile_col, pid), "MLD_m": mld})
@@ -350,23 +361,20 @@ def pycnocline_depth(df: pd.DataFrame,
     # Iterate over profiles
     rows = []
     for pid, group in df.groupby(profile_col):
-        # Drop nans
-        valid = group[[depth_col, density_col]].dropna().sort_values(depth_col)
-        if len(valid) < 2:
+        # Average duplicate depths, drop NaNs
+        depths, rho = _profile_levels(group, depth_col, density_col)
+        if len(depths) < 2:
             logging.debug("pycnocline_depth: profile %s has < 2 valid levels, skipped", pid)
             continue
 
-        z = valid[depth_col].values
-        rho = valid[density_col].values
-
         # Pycnocline = depth of maximum d(density)/dz (strongest increase with depth)
-        grad = np.gradient(rho, z)
+        grad = np.gradient(rho, depths)
         idx = int(np.argmax(grad))
 
         significant = grad[idx] > 0 and grad[idx] >= min_gradient
         rows.append({
             **_profile_key_dict(profile_col, pid),
-            "pycnocline_depth_m": float(z[idx]) if significant else np.nan,
+            "pycnocline_depth_m": float(depths[idx]) if significant else np.nan,
             "max_gradient": float(grad[idx]),
         })
 
@@ -440,17 +448,14 @@ def interpolate_depth_levels(df: pd.DataFrame,
     # Interpolate each profile
     chunks = []
     for pid, group in df.groupby(profile_col):
-        # Drop nans and duplicate depths (both interpolants need strictly increasing x)
-        valid = group[[depth_col, param_col]].dropna().drop_duplicates(subset=depth_col).sort_values(depth_col)
-        if len(valid) < 2:
+        # Average duplicate depths, drop nans (both interpolants need strictly increasing x)
+        depths, vals = _profile_levels(group, depth_col, param_col)
+        if len(depths) < 2:
             logging.debug("interpolate_depth_levels: profile %s has < 2 valid levels, skipped", pid)
             continue
 
-        z = valid[depth_col].values
-        v = valid[param_col].values
-
         # Only work with depths in the given range
-        in_range = (target_depths >= z.min()) & (target_depths <= z.max())
+        in_range = (target_depths >= depths.min()) & (target_depths <= depths.max())
         if not in_range.any():
             continue
 
@@ -458,13 +463,13 @@ def interpolate_depth_levels(df: pd.DataFrame,
         depths_sel = target_depths[in_range]
         if method == "pchip":
             from scipy.interpolate import PchipInterpolator
-            vals_interp = PchipInterpolator(z, v, extrapolate=False)(depths_sel)
+            vals_interp = PchipInterpolator(depths, vals, extrapolate=False)(depths_sel)
         else:
-            vals_interp = np.interp(depths_sel, z, v)
+            vals_interp = np.interp(depths_sel, depths, vals)
 
         # Drop targets whose measurements are too far apart
         if max_gap is not None:
-            keep = _bracket_gap(z, depths_sel) <= max_gap
+            keep = _bracket_gap(depths, depths_sel) <= max_gap
             depths_sel = depths_sel[keep]
             vals_interp = vals_interp[keep]
             if len(depths_sel) == 0:
