@@ -37,6 +37,12 @@ def _profile_key_dict(profile_col: str | list[str], pid) -> dict:
     return {profile_col: pid}
 
 
+def _empty_profile_frame(profile_col: str | list[str], columns: list[str]) -> pd.DataFrame:
+    """Empty result df with the profile key column(s) followed by *columns*."""
+    keys = profile_col if isinstance(profile_col, list) else [profile_col]
+    return pd.DataFrame(columns=[*keys, *columns])
+
+
 def _profile_levels(group: pd.DataFrame, depth_col: str, value_col: str) -> tuple[np.ndarray, np.ndarray]:
     """Return the sorted unique depths of one profile and the mean value at each depth."""
     # Drop NaN rows
@@ -233,6 +239,13 @@ def profile_completeness(df: pd.DataFrame,
             )
             row["coverage_fraction"] = covered / len(ref) if len(ref) else np.nan
         rows.append(row)
+    if not rows:
+        # Return empty df
+        return _empty_profile_frame(
+            profile_col,
+            ["n_levels", "depth_min", "depth_max", "depth_range"]
+            + (["coverage_fraction"] if reference_depths is not None else []),
+        )
     return pd.DataFrame(rows)
 
 
@@ -328,6 +341,9 @@ def mixed_layer_depth(df: pd.DataFrame,
 
         rows.append({**_profile_key_dict(profile_col, pid), "MLD_m": mld})
 
+    if not rows:
+        # Return empty df
+        return _empty_profile_frame(profile_col, ["MLD_m"])
     return pd.DataFrame(rows)
 
 
@@ -380,6 +396,9 @@ def pycnocline_depth(df: pd.DataFrame,
             "max_gradient": float(grad[idx]),
         })
 
+    if not rows:
+        # Return empty df
+        return _empty_profile_frame(profile_col, ["pycnocline_depth_m", "max_gradient"])
     return pd.DataFrame(rows)
 
 
@@ -484,5 +503,6 @@ def interpolate_depth_levels(df: pd.DataFrame,
         chunks.append(chunk)
 
     if not chunks:
-        return pd.DataFrame()
+        # Return empty df
+        return pd.DataFrame(columns=[depth_col, param_col, *profile_keys, *meta_cols])
     return pd.concat(chunks, ignore_index=True)

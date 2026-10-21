@@ -12,7 +12,7 @@ import gsw
 import numpy as np
 import pandas as pd
 
-from .profile_analysis import _resolve_profile_col, _profile_key_dict
+from .profile_analysis import _empty_profile_frame, _resolve_profile_col, _profile_key_dict
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,9 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
         for val, pmid in zip(n2, p_mid):
             rows.append({**_profile_key_dict(profile_col=group_cols, pid=pid), "pressure_mid": float(pmid), "N2": float(val)})
 
+    if not rows:
+        # Return empty df
+        return _empty_profile_frame(group_cols, ["pressure_mid", "N2"])
     return pd.DataFrame(rows)
 
 

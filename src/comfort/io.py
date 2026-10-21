@@ -57,6 +57,12 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
 # Depth levels (similar to Jenniges et al. 2025 (https://doi.org/10.1016/j.ecoinf.2025.103390)
 DEPTH_INTERVALS = np.array([0, 50, 100, 200, 300, 400, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000])
 
+# Columns of the info()/describe_variables() summaries (used for empty results)
+_INFO_COLUMNS = ["parameter", "n_samples", "depth_min_m", "depth_max_m", "date_min", "date_max"]
+_DESCRIBE_COLUMNS = ["parameter", "n_samples", "n_stations", "n_profiles", "n_instruments",
+                     "depth_min_m", "depth_max_m", "val_min", "val_max",
+                     "units", "instruments", "platforms"]
+
 
 def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
     """Print a quick summary of the COMFORT database without loading data.
@@ -76,7 +82,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
         params = list_parameters(conn)
         if not params:
             logger.warning("info: no parameter tables found")
-            return pd.DataFrame()
+            return pd.DataFrame(columns=_INFO_COLUMNS)
 
         # Collect sample count and depth/date range per parameter
         rows = []
@@ -259,7 +265,7 @@ def describe_variables(conn: sqlite3.Connection,
     # Warn if no parameter left
     if not params:
         logger.warning("describe_variables: no parameter tables found")
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_DESCRIBE_COLUMNS)
 
     # Compute aggregate statistics per parameter
     where = build_where_clause(quality_flags)

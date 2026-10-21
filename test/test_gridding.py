@@ -1169,3 +1169,34 @@ class TestTimeModes:
         dates = pd.date_range("2004-01-01", "2005-12-31", freq="D")
         # Equal sets: No date lands outside the nodes, and no node is left without a date
         assert set(_snap(grid, dates)) == set(grid.time_array.tolist())
+
+
+class TestEmptyMissingValueInfo:
+    """Missing-value summaries keep their documented columns for degenerate input."""
+
+    # No P_* columns at all: Empty summary
+    def test_offline_without_parameter_columns(self):
+        for df in (pd.DataFrame({"a": [1, 2]}), pd.DataFrame({"a": pd.Series(dtype=float)})):
+            result = get_missing_value_info_offline(df)
+            assert result.empty
+            assert list(result.columns) == ["parameter", "absolute", "relative"]
+
+    # The per-parameter variant returns exactly the documented columns
+    def test_offline_per_param_columns(self):
+        df = pd.DataFrame({
+            "LATITUDE": [1.0, 2.0], "LONGITUDE": [1.0, 2.0], "LEV_M": [0.0, 0.0],
+            "DATEANDTIME": ["2000", "2000"], "water": [True, True], "P_X": [1.0, np.nan],
+        })
+        result = get_missing_value_info_offline_per_param([df])
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
+
+    # A grid without any water cell does not divide by zero
+    def test_offline_per_param_zero_cells(self):
+        df = pd.DataFrame({
+            "LATITUDE": pd.Series(dtype=float), "LONGITUDE": pd.Series(dtype=float),
+            "LEV_M": pd.Series(dtype=float), "DATEANDTIME": pd.Series(dtype=object),
+            "water": pd.Series(dtype=bool), "P_X": pd.Series(dtype=float),
+        })
+        result = get_missing_value_info_offline_per_param([df])
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
+        assert result["relative"].iloc[0] == 0.0

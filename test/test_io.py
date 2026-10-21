@@ -1082,3 +1082,31 @@ class TestMissingMetadataIds:
         assert sorted(set(scattered["NITRATE_instrument"].values)) == ["1", "unknown"]
         assert sorted(set(gridded["instrument"].values)) == ["1", "unknown"]
         assert "-1" not in gridded["instrument"].values
+
+
+class TestEmptySummaries:
+    """info/describe_variables on a database without parameter tables keep the normal columns."""
+
+    @pytest.fixture
+    def bare_conn(self):
+        # DB without parameter tables (only station table)
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE station (ID INTEGER PRIMARY KEY, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)")
+        yield conn
+        conn.close()
+
+    # describe_variables: same columns, same order as a non-empty result
+    def test_describe_variables_columns(self, bare_conn, comfort_db):
+        empty = describe_variables(bare_conn)
+        conn = sqlite3.connect(comfort_db)
+        normal = describe_variables(conn)
+        conn.close()
+        assert empty.empty
+        assert list(empty.columns) == list(normal.columns)
+
+    # info: same columns, same order as a non-empty result
+    def test_info_columns(self, bare_conn, comfort_db):
+        empty = info(bare_conn)
+        normal = info(comfort_db)
+        assert empty.empty
+        assert list(empty.columns) == list(normal.columns)

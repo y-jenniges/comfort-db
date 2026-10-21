@@ -488,3 +488,53 @@ class TestDetectDepthCol:
                            "VAL": [10.0, 8.0, 6.0]})
         result = vertical_gradient(df)
         assert "VAL_gradient" in result.columns
+
+
+class TestEmptyResults:
+    """A function that finds no profile still returns its documented columns."""
+
+    _cols = ["ID", "PROFILE_NUMBER", "LEV_M", "SIGMA0"]
+
+    def _empty(self):
+        # An empty df
+        return pd.DataFrame({c: pd.Series(dtype=float) for c in self._cols})
+
+    def _single_level(self):
+        # A single-level profile (cannot be analysed)
+        return pd.DataFrame({"ID": [1], "PROFILE_NUMBER": [1], "LEV_M": [0.0], "SIGMA0": [25.0]})
+
+    # profile_completeness keeps the key and statistic columns, with and without reference depths
+    def test_profile_completeness(self):
+        result = profile_completeness(self._empty())
+        assert result.empty
+        assert list(result.columns) == ["ID", "PROFILE_NUMBER", "n_levels", "depth_min", "depth_max", "depth_range"]
+        result = profile_completeness(self._empty(), reference_depths=[0, 10])
+        assert list(result.columns)[-1] == "coverage_fraction"
+
+    # mixed_layer_depth keeps the key and MLD_m columns
+    def test_mixed_layer_depth(self):
+        for df in (self._empty(), self._single_level()):
+            result = mixed_layer_depth(df, density_col="SIGMA0")
+            assert result.empty
+            assert list(result.columns) == ["ID", "PROFILE_NUMBER", "MLD_m"]
+
+    # pycnocline_depth keeps the key, depth and gradient columns
+    def test_pycnocline_depth(self):
+        for df in (self._empty(), self._single_level()):
+            result = pycnocline_depth(df, density_col="SIGMA0")
+            assert result.empty
+            assert list(result.columns) == ["ID", "PROFILE_NUMBER", "pycnocline_depth_m", "max_gradient"]
+
+    # interpolate_depth_levels keeps the columns of a normal result (depth, value, key)
+    def test_interpolate_depth_levels(self):
+        normal = pd.DataFrame({"ID": [1, 1], "PROFILE_NUMBER": [1, 1], "LEV_M": [0.0, 10.0], "SIGMA0": [25.0, 26.0]})
+        expected = list(interpolate_depth_levels(normal, [0.0, 5.0], param_col="SIGMA0").columns)
+        for df in (self._empty(), self._single_level()):
+            result = interpolate_depth_levels(df, [0.0, 5.0], param_col="SIGMA0")
+            assert result.empty
+            assert list(result.columns) == expected
+
+    # A custom profile_col is used as column in empty result
+    def test_custom_profile_col(self):
+        result = mixed_layer_depth(self._empty(), density_col="SIGMA0", profile_col="PROFILE_NUMBER")
+        assert list(result.columns) == ["PROFILE_NUMBER", "MLD_m"]

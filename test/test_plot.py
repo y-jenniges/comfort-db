@@ -524,3 +524,34 @@ class TestPlotMissingValueInfoMapJoint:
         result = plot_missing_value_info_map_joint(_missing_value_wide_df(), ["P_NITRATE"], ax=ax)
         assert result is ax
         plt.close()
+
+
+class TestEmptyCoverageResults:
+    """Coverage helpers on empty input return their documented columns."""
+
+    # An empty df has no year range -> Nothing to count
+    def test_count_samples_over_time_year_empty(self):
+        df = pd.DataFrame({"DATEANDTIME": pd.Series(dtype="datetime64[ns]")})
+        result = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
+        assert result.empty
+        assert list(result.columns) == ["YEAR", "COUNT"]
+
+    # No parameters requested: Empty df with the documented columns
+    def test_count_negative_samples_no_parameters(self, demo_conn):
+        result = count_negative_samples(demo_conn, [])
+        assert result.empty
+        assert list(result.columns) == [
+            "parameter", "number of samples", "number of negative samples", "proportion of negative samples",
+        ]
+
+    # No duplicates found: Empty summary with defined columns
+    def test_duplicates_summary_empty(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE P_X (ID INTEGER, LEV_M REAL, VAL REAL)")
+        result = detect_and_plot_spatiotemporal_duplicates(conn, ["X"])
+        conn.close()
+        assert result.empty
+        assert list(result.columns) == [
+            "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
+            "proportion of row duplicates", "proportion of time loc duplicates",
+        ]

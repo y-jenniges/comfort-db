@@ -1192,8 +1192,8 @@ def get_missing_value_info_offline_per_param(mapped_dataframes: list[pd.DataFram
     grid = grid.drop_duplicates()
     num_grid_cells = len(grid)
     num_nulls["absolute"] = num_grid_cells - num_nulls["complete"]
-    num_nulls["relative"] = num_nulls["absolute"] / num_grid_cells * 100
-    return num_nulls.sort_values("relative")
+    num_nulls["relative"] = num_nulls["absolute"] / num_grid_cells * 100 if num_grid_cells else 0.0
+    return num_nulls[["parameter", "absolute", "relative"]].sort_values("relative")
 
 
 def get_missing_value_info_offline(df_wide: pd.DataFrame) -> pd.DataFrame:
@@ -1209,7 +1209,7 @@ def get_missing_value_info_offline(df_wide: pd.DataFrame) -> pd.DataFrame:
 
     # Compute absolute missingness
     rows = [{"parameter": p, "absolute": df_wide[p].isna().sum()} for p in param_tables]
-    num_nulls = pd.DataFrame(rows)
+    num_nulls = pd.DataFrame(rows, columns=["parameter", "absolute"])
 
     # Compute relative missingness
     num_grid_cells = len(df_wide)

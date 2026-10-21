@@ -247,6 +247,13 @@ class TestComputeBuoyancyFrequency:
         assert list(result.columns[:1]) == ["PROFILE_NUMBER"]
         assert len(result) == 4
 
+    # Without any profile (empty input) the result still has the key and N2 columns
+    def test_empty_input_keeps_columns(self):
+        df = pd.DataFrame({c: pd.Series(dtype=float) for c in ["ID", "PROFILE_NUMBER", "LEV_DBAR", "SA", "CT"]})
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        assert result.empty
+        assert list(result.columns) == ["ID", "PROFILE_NUMBER", "pressure_mid", "N2"]
+
 
 class TestComputePotentialVorticity:
     # Output is a pandas Series
