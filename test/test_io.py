@@ -1049,3 +1049,26 @@ class TestLoadComfortErrorHandling:
     def test_convert_units_without_lookup_tables_raises(self, comfort_db):
         with pytest.raises(ValueError):
             load_comfort(comfort_db, parameters=["NITRATE"], convert_units=True, as_xarray=False)
+
+
+class TestMissingMetadataIds:
+    """Missing instrument/platform IDs resolve to "unknown", never to "-1"."""
+
+    # No PLATFORM_ID column in station: Platform is "unknown" on both xarray paths
+    def test_missing_platform_is_unknown(self, comfort_db):
+        scattered = load_comfort(comfort_db, parameters=["NITRATE"])
+        gridded = load_comfort(comfort_db, parameters=["NITRATE"], target_depths=[0, 100])
+        assert set(scattered["NITRATE_platform"].values) == {"unknown"}
+        assert set(gridded["platform"].values) == {"unknown"}
+
+    # NULL INSTRUMENT_ID does not crash and resolves to "unknown" on both paths
+    def test_null_instrument_id_is_unknown(self, comfort_db):
+        conn = sqlite3.connect(comfort_db)
+        conn.execute("UPDATE P_NITRATE SET INSTRUMENT_ID = NULL WHERE ID = 2")
+        conn.commit()
+        conn.close()
+        scattered = load_comfort(comfort_db, parameters=["NITRATE"])
+        gridded = load_comfort(comfort_db, parameters=["NITRATE"], target_depths=[0, 100])
+        assert sorted(set(scattered["NITRATE_instrument"].values)) == ["1", "unknown"]
+        assert sorted(set(gridded["instrument"].values)) == ["1", "unknown"]
+        assert "-1" not in gridded["instrument"].values

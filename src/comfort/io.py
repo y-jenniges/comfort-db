@@ -702,15 +702,15 @@ def load_comfort(
             key = pid if isinstance(pid, tuple) else (None, pid)
             if key not in meta:
                 row = group.iloc[0]
-                sid = int(row["ID"]) if "ID" in row.index and row["ID"] is not None else -1
+                sid = int(row["ID"]) if "ID" in row.index and pd.notna(row["ID"]) else np.nan
                 meta[key] = {
                     "latitude": row.get("LATITUDE", np.nan),
                     "longitude": row.get("LONGITUDE", np.nan),
                     "time": row.get("DATEANDTIME", None),
                     "station_id": sid,
-                    "profile_number": int(row["PROFILE_NUMBER"]) if "PROFILE_NUMBER" in row.index else -1,
-                    "instrument_id": int(row["INSTRUMENT_ID"]) if "INSTRUMENT_ID" in row.index else -1,
-                    "platform_id": _station_platform.get(sid, -1),
+                    "profile_number": int(row["PROFILE_NUMBER"]),
+                    "instrument_id": row.get("INSTRUMENT_ID", np.nan),
+                    "platform_id": _station_platform.get(sid, np.nan),
                 }
 
     # Pivot each parameter's interpolated values onto the shared grid
@@ -739,25 +739,19 @@ def load_comfort(
     # Build coordinate arrays from profile metadata
     lats = np.array([meta.get(p, {}).get("latitude", np.nan) for p in all_profiles])
     lons = np.array([meta.get(p, {}).get("longitude", np.nan) for p in all_profiles])
-    station_ids = np.array([meta.get(p, {}).get("station_id", -1) for p in all_profiles])
-    profile_numbers = np.array([meta.get(p, {}).get("profile_number", -1) for p in all_profiles])
-    instrument_ids = np.array([meta.get(p, {}).get("instrument_id", -1) for p in all_profiles])
-    platform_ids = np.array([meta.get(p, {}).get("platform_id", -1) for p in all_profiles])
+    station_ids = np.array([meta.get(p, {}).get("station_id", np.nan) for p in all_profiles])
+    profile_numbers = np.array([meta[p]["profile_number"] for p in all_profiles])
+    instrument_ids = [meta.get(p, {}).get("instrument_id", np.nan) for p in all_profiles]
+    platform_ids = [meta.get(p, {}).get("platform_id", np.nan) for p in all_profiles]
     raw_times = [meta.get(p, {}).get("time") for p in all_profiles]
     try:
         times = pd.to_datetime(raw_times)
     except (ValueError, TypeError):
         times = np.array(raw_times, dtype=object)
 
-    # Resolve instrument IDs to names; fall back to stringified IDs
-    instruments = np.array([
-        _instrument_map.get(int(iid), str(int(iid))) for iid in instrument_ids
-    ])
-
-    # Resolve platform IDs to names; fall back to stringified IDs
-    platforms = np.array([
-        _platform_map.get(int(pid), str(int(pid))) for pid in platform_ids
-    ])
+    # Resolve instrument and platform IDs to names
+    instruments = _id_names(instrument_ids, _instrument_map)
+    platforms = _id_names(platform_ids, _platform_map)
 
     # Assemble xarray Dataset
     ds = xr.Dataset(
@@ -790,6 +784,13 @@ def load_comfort(
     ds["latitude"].attrs["units"] = "degrees_north"
     ds["longitude"].attrs["units"] = "degrees_east"
     return ds
+
+
+def _id_names(ids, lookup: dict) -> np.ndarray:
+    """Resolve IDs to names: ``"unknown"`` for a missing ID, the stringified ID if not in *lookup*."""
+    return np.array([
+        "unknown" if pd.isna(i) else lookup.get(int(i), str(int(i))) for i in ids
+    ])
 
 
 def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
@@ -826,16 +827,12 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
         coords[f"{param}_profile_number"] = (dim, df["PROFILE_NUMBER"].to_numpy(dtype=int))
 
         # Get instrument IDs
-        instrument_ids = df["INSTRUMENT_ID"].to_numpy(dtype=int) if "INSTRUMENT_ID" in df.columns else np.full(n, -1)
-        coords[f"{param}_instrument"] = (
-            dim, np.array([instrument_map.get(int(i), str(int(i))) for i in instrument_ids])
-        )
+        instrument_ids = df["INSTRUMENT_ID"] if "INSTRUMENT_ID" in df.columns else np.full(n, np.nan)
+        coords[f"{param}_instrument"] = (dim, _id_names(instrument_ids, instrument_map))
 
         # Get platform IDs
-        platform_ids = np.array([station_platform.get(int(sid), -1) for sid in station_ids])
-        coords[f"{param}_platform"] = (
-            dim, np.array([platform_map.get(int(p), str(int(p))) for p in platform_ids])
-        )
+        platform_ids = [station_platform.get(int(sid), np.nan) for sid in station_ids]
+        coords[f"{param}_platform"] = (dim, _id_names(platform_ids, platform_map))
 
     ds = xr.Dataset(data_vars, coords=coords)
 
