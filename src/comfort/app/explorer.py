@@ -42,10 +42,7 @@ try:
 except ImportError:
     load_dotenv = None
 
-from ..database.information import (
-    does_table_exist,
-    get_names_of_all_parameter_tables,
-)
+from ..database.information import get_names_of_all_parameter_tables
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
@@ -1193,7 +1190,6 @@ def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
     if _csv_cache["df"] is None or not param_col:
         raise PreventUpdate
 
-    depths = _csv_cache.get("depths", [])
     times = _csv_cache.get("times", [])
 
     # Resolve time slider index range to actual time values
