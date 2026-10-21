@@ -306,7 +306,7 @@ class ConversionFormulas:
     def milliEquivalentPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
                                                     use_density: bool = False,
                                                     density_fallback: str = "constant") -> pd.DataFrame:
-        """Convert meq/L to umol/kg (App. C: lab_dens)."""
+        """Convert meq/L to umol/kg (App. C: lab_dens). Valid for alkalinity."""
         logger.debug("milliEquivalentPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)

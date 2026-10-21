@@ -954,6 +954,8 @@ def average_duplicate_locations(
     can carry more than one measurement of the same parameter
     at an identical (lat, lon, depth, time).
 
+    Locations are matched by exact equality of the *loc_cols* values (no tolerance, time is matched to the second).
+
     Args:
         raw (dict[str, pandas.DataFrame]): Per-parameter DataFrames.
         other_params (list[str]): Parameters to average over identical locations

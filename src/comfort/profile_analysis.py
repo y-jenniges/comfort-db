@@ -106,6 +106,8 @@ def average_duplicate_records_per_profile(
     """Average duplicate records within the same profile at the same depth
     (e.g. repeated sensor readings within a single cast).
 
+    Depths are matched by exact equality (no tolerance).
+
     Args:
         raw (dict[str, pandas.DataFrame]): Per-parameter DataFrames, as
             returned by ``load_comfort(as_xarray=False)``.
