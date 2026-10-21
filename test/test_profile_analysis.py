@@ -148,7 +148,7 @@ class TestMixedLayerDepth:
         # 100m: delta=0.04 > 0.03 → crossing interpolated between 50m and 100m
         # target = 25.0 + 0.03 = 25.03 → 50 + (25.03-25.0)*(100-50)/(25.04-25.0) = 87.5
         result = mixed_layer_depth(self._profile_with_mld_at_100(),
-                                    density_col="sigma0", delta_density=0.03)
+                                   density_col="sigma0", delta_density=0.03, max_ref_distance=None)
         assert result["MLD_m"].iloc[0] == pytest.approx(87.5)
 
     # When the threshold is never crossed, there is no valid MLD
@@ -164,10 +164,35 @@ class TestMixedLayerDepth:
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1],
                            "LEV_DBAR": [0.0, 50.0, 100.0, 200.0],
                            "CT": [15.0, 15.0, 14.75, 12.0]})
-        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2)
+        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2, max_ref_distance=None)
         # ref=15.0, 100m: |14.75-15.0|=0.25>0.2 → crossing interpolated between 50m and 100m
         # target = 15.0 - 0.2 = 14.8 → 50 + (14.8-15.0)*(100-50)/(14.75-15.0) = 90.0
         assert result["MLD_m"].iloc[0] == pytest.approx(90.0)
+
+    # Density decreasing with depth does not end the mixed layer
+    def test_density_decrease_is_not_exceedance(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [10.0, 100.0, 200.0],
+                           "sigma0": [25.0, 24.9, 24.8]})
+        result = mixed_layer_depth(df, density_col="sigma0", delta_density=0.03)
+        assert pd.isna(result["MLD_m"].iloc[0])
+
+    # Temperature increase counts
+    def test_temperature_increase_counts(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [10.0, 100.0, 200.0],
+                           "CT": [10.0, 10.0, 10.5]})
+        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2)
+        assert result["MLD_m"].iloc[0] == pytest.approx(140.0)
+
+    # No level near the reference depth means no valid MLD
+    def test_reference_too_far_returns_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [80.0, 100.0, 200.0],
+                           "sigma0": [25.0, 25.0, 25.2]})
+        assert pd.isna(mixed_layer_depth(df, density_col="sigma0")["MLD_m"].iloc[0])
+        result = mixed_layer_depth(df, density_col="sigma0", max_ref_distance=None)
+        assert not pd.isna(result["MLD_m"].iloc[0])
 
     # When both are given, density_col takes priority over temp_col
     def test_density_preferred_over_temp(self):

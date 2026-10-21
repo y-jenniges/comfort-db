@@ -227,17 +227,18 @@ def mixed_layer_depth(df: pd.DataFrame,
                       profile_col: str | list[str] | None = None,
                       delta_density: float = 0.03,
                       delta_temp: float = 0.2,
-                      reference_depth: float = 10.0
+                      reference_depth: float = 10.0,
+                      max_ref_distance: float | None = 5.0
                       ) -> pd.DataFrame:
-    """Estimate mixed layer depth (MLD) using the threshold method
-    (De Boyer Montégut, C., Madec, G., Fischer, A. S., Lazar, A., & Iudicone, D. (2004).
+    """Estimate mixed layer depth (MLD) using the threshold method.
+    If the threshold is not exceeded within the profile or no level lies close enough to the reference depth,
+    there is no valid MLD and ``MLD_m`` is ``NaN``.
+
+    Reference:
+    De Boyer Montégut, C., Madec, G., Fischer, A. S., Lazar, A., & Iudicone, D. (2004).
     Mixed layer depth over the global ocean: An examination of profile data and
     a profile-based climatology. Journal of Geophysical Research: Oceans,
-    109, C12003. https://doi.org/10.1029/2004JC002378).
-
-    MLD is the depth where density (or temperature) first differs from its reference value by
-    more than the threshold. If the threshold is never exceeded within the profile,
-    there is no valid MLD and ``MLD_m`` is ``NaN``.
+    109, C12003. https://doi.org/10.1029/2004JC002378
 
     Args:
         df (pandas.DataFrame): Input DataFrame with density or
@@ -254,10 +255,13 @@ def mixed_layer_depth(df: pd.DataFrame,
         reference_depth (float): Reference depth [m]. The nearest
             measured depth is used when no exact match exists.
             Default 10.0m.
+        max_ref_distance (float or None): Maximum allowed distance [m] between
+            ``reference_depth`` and the nearest measured depth. ``None`` disables
+            the check. Default 5.0m.
     Returns:
         pandas.DataFrame: One row per profile with columns
             [profile_col, ``'MLD_m'``] (``NaN`` when the threshold is never
-            exceeded).
+            exceeded or the reference level is too far from ``reference_depth``).
     """
     # Get column names
     if density_col is None and temp_col is None:
@@ -269,6 +273,9 @@ def mixed_layer_depth(df: pd.DataFrame,
     # Select variable and threshold (density preferred over temperature)
     col = density_col if density_col is not None else temp_col
     delta = delta_density if density_col is not None else delta_temp
+
+    # Density only counts an increase with depth, temperature either direction
+    one_sided = density_col is not None
 
     # Iterate over profiles
     rows = []
@@ -286,11 +293,19 @@ def mixed_layer_depth(df: pd.DataFrame,
         ref_idx = int(np.argmin(np.abs(z - reference_depth)))
         v_ref = v[ref_idx]
 
+        # No usable reference level near the reference depth
+        if max_ref_distance is not None and abs(z[ref_idx] - reference_depth) > max_ref_distance:
+            logging.debug("mixed_layer_depth: Profile %s has no level within %s m of %s m",
+                          pid, max_ref_distance, reference_depth)
+            rows.append({**_profile_key_dict(profile_col, pid), "MLD_m": np.nan})
+            continue
+
         # Walk downward until threshold is exceeded
         mld = np.nan
         for i in range(ref_idx + 1, len(z)):
             # Threshold test for density/temperature
-            if abs(v[i] - v_ref) > delta:
+            diff = v[i] - v_ref
+            if (diff if one_sided else abs(diff)) > delta:
                 # Determine the crossed threshold (upper or lower)
                 target = v_ref + delta if v[i] > v_ref else v_ref - delta
 
