@@ -158,8 +158,9 @@ def read_parameter(conn: sqlite3.Connection, param_name: str,
             Longhurst province) instead of or in addition to the lat/lon box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
         region_name_col (str): Region name column for *region*.
-        limit (int): Maximum number of rows to return. ``None`` returns all.
-            Useful as a safeguard for large tables.
+        limit (int): Maximum number of rows to return (the first rows in
+            table order). ``None`` returns all. Useful as a safeguard for
+            large tables.
         extra_station_cols (list[str]): Additional ``station`` columns to
             include (e.g. ``["CRUISE_ID", "ST_NUMBER_ORIGIN"]``).
     Returns:
@@ -195,9 +196,9 @@ def read_parameter(conn: sqlite3.Connection, param_name: str,
         f"LEFT JOIN station s ON p.ID = s.ID {where}"
     )
 
-    # Add optional limit to query
+    # Add optional limit, ORDER BY rowid takes the first rows in table order (reproducible)
     if limit is not None:
-        sql += f" LIMIT {int(limit)}"
+        sql += f" ORDER BY p.rowid LIMIT {int(limit)}"
 
     # Fetch data from database into a df, then refine SQL's bbox to the exact region polygon
     df = pd.read_sql_query(sql + ";", conn, params=params)
@@ -535,9 +536,9 @@ def load_comfort(
             density cannot be computed (missing/NaN salinity, temperature or
             position): ``'constant'`` (default, use 1.025 kg/L), ``'drop'`` or
             ``'raise'``. Counts are logged.
-        limit (int): Maximum number of rows to load per parameter.
-            ``None`` loads all matching rows. Useful as a safeguard for
-            large tables like TEMPERATURE or SALINITY.
+        limit (int): Maximum number of rows to return (the first rows in
+            table order). ``None`` returns all. Useful as a safeguard for
+            large tables.
     Returns:
         xarray.Dataset or dict[str, pandas.DataFrame].
         For the dict path each DataFrame has the measurement column named
@@ -924,9 +925,9 @@ def _read_with_geo(conn, param_name, quality_flags,
     # T/S sub-query values come first in the SQL text, so they come first in the parameters
     params = ts_params + params
 
-    # Add optional limit to query
+    # Add optional limit, ORDER BY rowid takes the first rows in table order (reproducible)
     if limit is not None:
-        query += f" LIMIT {int(limit)}"
+        query += f" ORDER BY p.rowid LIMIT {int(limit)}"
 
     # Execute query with parametrised geo/date values
     return pd.read_sql_query(query, conn, params=params)

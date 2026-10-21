@@ -822,6 +822,16 @@ class TestLoadComfortLimit:
         result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, limit=None)
         assert len(result["NITRATE"]) == 6
 
+    # limit returns the first rows in table order, on both readers (load_comfort, read_parameter)
+    def test_limit_returns_first_rows_in_table_order(self, comfort_db):
+        loaded = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, limit=4)["NITRATE"]
+        conn = sqlite3.connect(comfort_db)
+        read = read_parameter(conn, "NITRATE", limit=4)
+        conn.close()
+        for df in (loaded, read):
+            assert list(df["ID"]) == [1, 1, 1, 2]
+            assert list(df["LEV_M"]) == [0.0, 100.0, 200.0, 0.0]
+
 
 class TestLoadComfortUnitConversion:
     """Tests for load_comfort(convert_units=True): T/S enrichment, on_missing policy, unit attrs."""
