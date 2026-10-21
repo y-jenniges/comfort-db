@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
 
+logger = logging.getLogger(__name__)
+
 # Columns that are never the measured-value column
 _KNOWN_NON_VALUE_COLS = frozenset({
     "PROFILE_NUMBER", "LEV_DBAR", "LEV_M", "LATITUDE", "LONGITUDE",
@@ -56,7 +58,7 @@ def _detect_param_col(df, param_col):
     # Infer potential candidates
     candidates = [c for c in df.columns if c not in _KNOWN_NON_VALUE_COLS]
     if len(candidates) == 1:
-        logging.debug("_detect_param_col: auto-detected %r", candidates[0])
+        logger.debug("_detect_param_col: auto-detected %r", candidates[0])
         return candidates[0]
 
     # Fallback
@@ -79,7 +81,7 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
     # Use fallback (if depth_col does not exist)
     fallback = "LEV_DBAR" if depth_col == "LEV_M" else "LEV_M"
     if fallback in df.columns:
-        logging.debug("detect_depth_col: %r not found, using %r", depth_col, fallback)
+        logger.debug("detect_depth_col: %r not found, using %r", depth_col, fallback)
         return fallback
 
     # Raise error if no depth column was found
@@ -133,7 +135,7 @@ def average_duplicate_records_per_profile(
             if c in df.columns and c not in group_cols:
                 agg[c] = "first"
         avg = df.groupby(group_cols, as_index=False).agg(agg)
-        logging.info("average_duplicate_records_per_profile: %s %d -> %d", param, len(df), len(avg))
+        logger.info("average_duplicate_records_per_profile: %s %d -> %d", param, len(df), len(avg))
         averaged[param] = avg
 
     return averaged
@@ -297,7 +299,7 @@ def mixed_layer_depth(df: pd.DataFrame,
         # Average duplicate depths, drop NaNs
         depths, vals = _profile_levels(group, depth_col, col)
         if len(depths) < 2:
-            logging.debug("mixed_layer_depth: profile %s has < 2 valid levels, skipped", pid)
+            logger.debug("mixed_layer_depth: profile %s has < 2 valid levels, skipped", pid)
             continue
 
         # Find reference value at nearest depth
@@ -306,7 +308,7 @@ def mixed_layer_depth(df: pd.DataFrame,
 
         # No usable reference level near the reference depth
         if max_ref_distance is not None and abs(depths[ref_idx] - reference_depth) > max_ref_distance:
-            logging.debug("mixed_layer_depth: Profile %s has no level within %s m of %s m",
+            logger.debug("mixed_layer_depth: Profile %s has no level within %s m of %s m",
                           pid, max_ref_distance, reference_depth)
             rows.append({**_profile_key_dict(profile_col, pid), "MLD_m": np.nan})
             continue
@@ -364,7 +366,7 @@ def pycnocline_depth(df: pd.DataFrame,
         # Average duplicate depths, drop NaNs
         depths, rho = _profile_levels(group, depth_col, density_col)
         if len(depths) < 2:
-            logging.debug("pycnocline_depth: profile %s has < 2 valid levels, skipped", pid)
+            logger.debug("pycnocline_depth: profile %s has < 2 valid levels, skipped", pid)
             continue
 
         # Pycnocline = depth of maximum d(density)/dz (strongest increase with depth)
@@ -451,7 +453,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
         # Average duplicate depths, drop nans (both interpolants need strictly increasing x)
         depths, vals = _profile_levels(group, depth_col, param_col)
         if len(depths) < 2:
-            logging.debug("interpolate_depth_levels: profile %s has < 2 valid levels, skipped", pid)
+            logger.debug("interpolate_depth_levels: profile %s has < 2 valid levels, skipped", pid)
             continue
 
         # Only work with depths in the given range

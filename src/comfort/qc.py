@@ -9,6 +9,8 @@ from collections import namedtuple
 
 from .util import validate_identifier
 
+logger = logging.getLogger(__name__)
+
 # Map of comparison operator strings to their Python equivalents
 _OP_MAP = {
     ">=": op.ge,
@@ -197,7 +199,7 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     mask = (absolute - df[oxy]).between(min_diff, max_diff).fillna(False)
     if mask.any():
         # Print how common the issue is in this DataFrame
-        logging.warning(
+        logger.warning(
             "flag_salinity_like_oxygen: %d of %d rows (%.2f%%) look like mislabelled salinity",
             int(mask.sum()), len(df), 100 * mask.mean(),
         )

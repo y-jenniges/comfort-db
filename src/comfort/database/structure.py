@@ -11,6 +11,8 @@ from .information import get_names_of_all_parameter_tables, does_table_exist
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
 
+logger = logging.getLogger(__name__)
+
 
 def remove_tables_like(conn: sqlite3.Connection, like_pattern: str, escape_char: str = "|",
                        table_type: str = "view", tables_except: list[str] | None = None) -> None:
@@ -33,7 +35,7 @@ def remove_tables_like(conn: sqlite3.Connection, like_pattern: str, escape_char:
     cur = conn.cursor()
     for name in table_names:
         query = f"DROP {table_type} {name};"
-        logging.info(f"remove_tables_like: {query}")
+        logger.info(f"remove_tables_like: {query}")
         cur.execute(query)
 
     conn.commit()
@@ -82,7 +84,7 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
                 f"FROM P_{p.upper()} {quality_statement}"
             )
         else:
-            logging.warning(f"create_combined_parameter_table: P_{p.upper()} does not exist - skipping")
+            logger.warning(f"create_combined_parameter_table: P_{p.upper()} does not exist - skipping")
 
     # Build combined query and execute
     query = (f"CREATE {table_type} IF NOT EXISTS P_COMBINED AS "

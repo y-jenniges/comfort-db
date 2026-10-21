@@ -14,6 +14,8 @@ import pandas as pd
 
 from .profile_analysis import _resolve_profile_col, _profile_key_dict
 
+logger = logging.getLogger(__name__)
+
 
 def _to1d(x):
     """Convert x to a 1D float64 numpy array."""
@@ -87,14 +89,14 @@ def resolve_pressure(df: pd.DataFrame, pressure_col: str = "LEV_DBAR",
         # Depth as proxy for pressure
         proxy = pressure.isna() & depth.notna()
         if proxy.any():
-            logging.warning("resolve_pressure: %d of %d rows without pressure and latitude, "
+            logger.warning("resolve_pressure: %d of %d rows without pressure and latitude, "
                             "using depth [m] as a proxy for dbar", int(proxy.sum()), len(df))
             pressure = pressure.fillna(depth)
 
     # Count the remaining number of NaN pressure values
     n_nan = int(pressure.isna().sum())
     if n_nan:
-        logging.warning("resolve_pressure: %d of %d rows have no pressure information (NaN)", n_nan, len(df))
+        logger.warning("resolve_pressure: %d of %d rows have no pressure information (NaN)", n_nan, len(df))
     return pressure
 
 
@@ -227,7 +229,7 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
         cols = [pressure_col, sa_col, ct_col] + ([lat_col] if lat_available else [])
         valid = group[cols].dropna().sort_values(pressure_col)
         if len(valid) < 2:
-            logging.debug("compute_buoyancy_frequency: profile %s has < 2 levels, skipped", pid)
+            logger.debug("compute_buoyancy_frequency: profile %s has < 2 levels, skipped", pid)
             continue
 
         # Fall back to equatorial gravity if latitude not available

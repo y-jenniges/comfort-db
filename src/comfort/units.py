@@ -13,6 +13,8 @@ import pandas as pd
 from .physics import convert_salinity, convert_temperature, resolve_pressure
 from .util.sqlite_utils import validate_identifier
 
+logger = logging.getLogger(__name__)
+
 DENSITY_FALLBACKS = ("constant", "drop", "raise")
 
 
@@ -39,7 +41,7 @@ class UnitsConverter:
         self.df_default_units = default_units
         self.df_units = units
         self.formulas = ConversionFormulas()
-        logging.info("Initialised UnitsConverter")
+        logger.info("Initialised UnitsConverter")
 
     @classmethod
     def from_connection(cls, conn: sqlite3.Connection) -> UnitsConverter:
@@ -102,7 +104,7 @@ class UnitsConverter:
         # Check if default unit exists
         target = self.default_unit_id(param_table_name)
         if target is None:
-            logging.warning("convert_dataframe: no default unit for %s", param_table_name)
+            logger.warning("convert_dataframe: no default unit for %s", param_table_name)
             return df
 
         # Get used unit IDs
@@ -137,7 +139,7 @@ class UnitsConverter:
             # Look up conversion formula
             formula = self.formulas.conversions.get((int(uid), target))
             if formula is None:
-                logging.warning(f"Conversion from unit {int(uid)} to {target} not implemented "
+                logger.warning(f"Conversion from unit {int(uid)} to {target} not implemented "
                                 f"for {param_table_name}")
                 if on_missing == "raise":
                     raise ValueError(f"{param_table_name}: no conversion from unit "
@@ -166,12 +168,12 @@ class UnitsConverter:
         # Report unconvertible rows
         action = "kept unconverted" if on_missing == "keep" else "dropped"
         if n_no_units_id:
-            logging.warning("%s: %d rows without UNITS_ID %s", param_table_name, n_no_units_id, action)
+            logger.warning("%s: %d rows without UNITS_ID %s", param_table_name, n_no_units_id, action)
         if n_no_formula:
-            logging.warning("%s: %d rows with no conversion formula to unit %d %s",
+            logger.warning("%s: %d rows with no conversion formula to unit %d %s",
                             param_table_name, n_no_formula, target, action)
         if n_missing_input:
-            logging.warning("%s: %d rows missing temperature/salinity inputs %s",
+            logger.warning("%s: %d rows missing temperature/salinity inputs %s",
                             param_table_name, n_missing_input, action)
 
         if not parts:
@@ -234,7 +236,7 @@ class UnitsConverter:
         new_tables = {}
         for table in tables:
             validate_identifier(table)
-            logging.info("UnitsConverter: converting %s", table)
+            logger.info("UnitsConverter: converting %s", table)
 
             # Get data as df
             ex = self.connection.cursor().execute(f"SELECT * FROM {table};")
@@ -252,7 +254,7 @@ class UnitsConverter:
                 new_table_name = table if override_old_tables else f"converted_{table}"
                 if_exists = "replace" if override_old_tables else "fail"
                 df_new.to_sql(new_table_name, self.connection, if_exists=if_exists, index=False)
-                logging.info("  rows removed during conversion: %d", old_len - len(df_new))
+                logger.info("  rows removed during conversion: %d", old_len - len(df_new))
                 new_tables[table] = new_table_name
             else:
                 new_tables[table] = table
@@ -305,7 +307,7 @@ class ConversionFormulas:
                                                     use_density: bool = False,
                                                     density_fallback: str = "constant") -> pd.DataFrame:
         """Convert meq/L to umol/kg (App. C: lab_dens)."""
-        logging.debug("milliEquivalentPerLiter -> micromolPerKilogram")
+        logger.debug("milliEquivalentPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)
 
@@ -313,7 +315,7 @@ class ConversionFormulas:
                                                use_density: bool = False,
                                                density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ug/L to ug/kg (App. C: real_dens for chlorophyll, lab_dens otherwise)."""
-        logging.debug("microgramPerLiter -> microgramPerKilogram")
+        logger.debug("microgramPerLiter -> microgramPerKilogram")
         density_fn = (self.real_density if param_name.upper().endswith("CHLOROPHYLL") else self.lab_density)
         temp, dens = self._with_density(df, density_fn, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] / dens, UNITS_ID=14)
@@ -322,7 +324,7 @@ class ConversionFormulas:
                                              use_density: bool = False,
                                              density_fallback: str = "constant") -> pd.DataFrame:
         """Convert mmol/L to umol/kg (App. C: lab_dens)."""
-        logging.debug("millimolPerLiter -> micromolPerKilogram")
+        logger.debug("millimolPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)
 
@@ -330,14 +332,14 @@ class ConversionFormulas:
                                                use_density: bool = False,
                                                density_fallback: str = "constant") -> pd.DataFrame:
         """Convert nmol/kg to fmol/kg."""
-        logging.debug("nanomolPerKilogram -> femtomolPerKilogram")
+        logger.debug("nanomolPerKilogram -> femtomolPerKilogram")
         return df.copy().assign(VAL=df["VAL"] * 1_000_000, UNITS_ID=19)
 
     def milliliterPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
                                                use_density: bool = False,
                                                density_fallback: str = "constant") -> pd.DataFrame:
         """Convert mL/L to umol/kg (oxygen-specific, factor 44.661; App. C: real_dens)."""
-        logging.debug("milliliterPerLiter -> micromolPerKilogram (oxygen-specific, factor 44.661)")
+        logger.debug("milliliterPerLiter -> micromolPerKilogram (oxygen-specific, factor 44.661)")
         temp, real_dens = self._with_density(df, self.real_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 44.661 / real_dens, UNITS_ID=3)
 
@@ -345,7 +347,7 @@ class ConversionFormulas:
                                                  use_density: bool = False,
                                                  density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ug/kg to umol/kg using molar mass."""
-        logging.debug("microgramPerKilogram -> micromolPerKilogram")
+        logger.debug("microgramPerKilogram -> micromolPerKilogram")
         temp = df.copy()
         molar_mass = self.get_molar_mass(param_name)
         return temp.assign(VAL=temp["VAL"] / molar_mass, UNITS_ID=3)
@@ -354,7 +356,7 @@ class ConversionFormulas:
                                               use_density: bool = False,
                                               density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ug/L to umol/kg using molar mass (App. C: lab_dens)."""
-        logging.debug("microgramPerLiter -> micromolPerKilogram")
+        logger.debug("microgramPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         molar_mass = self.get_molar_mass(param_name)
         return temp.assign(VAL=temp["VAL"] / (molar_mass * lab_dens), UNITS_ID=3)
@@ -363,7 +365,7 @@ class ConversionFormulas:
                                                      use_density: bool = False,
                                                      density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ugAtom/kg to umol/kg (1:1 equivalence)."""
-        logging.debug("microgramAtomPerKilogram -> micromolPerKilogram")
+        logger.debug("microgramAtomPerKilogram -> micromolPerKilogram")
         return df.copy().assign(UNITS_ID=3)
 
     def percent_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
@@ -376,14 +378,14 @@ class ConversionFormulas:
         longitude when available (see :meth:`_potential_temperature_for_o2sol`), otherwise falls
         back to in-situ temperature as an approximation.
         """
-        logging.debug("percent -> micromolPerKilogram (gsw.O2sol_SP_pt)")
+        logger.debug("percent -> micromolPerKilogram (gsw.O2sol_SP_pt)")
         temp = df.copy()
         sal_col = _get_column(df, "SALINITY")
         temp_col = _get_column(df, "TEMPERATURE")
 
         # Check if salinity and temperature columns are given
         if sal_col is None or temp_col is None:
-            logging.warning("percent -> micromolPerKilogram: temperature/salinity columns "
+            logger.warning("percent -> micromolPerKilogram: temperature/salinity columns "
                             "missing - cannot compute oxygen saturation")
             return temp.assign(VAL=np.nan, UNITS_ID=3)
 
@@ -407,7 +409,7 @@ class ConversionFormulas:
 
         if pressure is None or pressure.isna().all() or lon_col is None:
             # Pressure, lat or lon missing
-            logging.warning("percent -> micromolPerKilogram: pressure/latitude/longitude "
+            logger.warning("percent -> micromolPerKilogram: pressure/latitude/longitude "
                             "missing, using in-situ temperature as an approximation to "
                             "potential temperature")
             return df[temp_col].to_numpy(dtype=float)
@@ -495,5 +497,5 @@ class ConversionFormulas:
             raise ValueError(f"density: {n} of {len(df)} rows undefined - {reason}")
         # Use constant density
         action = "using constant density 1.025 kg/L" if density_fallback == "constant" else "dropped"
-        logging.warning("density: %d of %d rows undefined (%s) - %s", n, len(df), reason, action)
+        logger.warning("density: %d of %d rows undefined (%s) - %s", n, len(df), reason, action)
         return rho.fillna(1.025) if density_fallback == "constant" else rho

@@ -11,6 +11,8 @@ import pandas as pd
 if TYPE_CHECKING:
     import geopandas as gpd
 
+logger = logging.getLogger(__name__)
+
 
 # Mean Earth radius for haversine distance calculations
 _EARTH_RADIUS_KM = 6371.0
@@ -44,7 +46,7 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     # Load coastline vertices
     coast_pts = _get_coast_points(resolution, coastline_geom)
     if coast_pts is None or len(coast_pts) == 0:
-        logging.error("distance_to_coast: no coastline points could be loaded")
+        logger.error("distance_to_coast: no coastline points could be loaded")
         return pd.Series(np.nan, index=df.index)
 
     # Get observes lat/lon
@@ -55,7 +57,7 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     valid = (np.isfinite(obs_lat) & np.isfinite(obs_lon) & (np.abs(obs_lat) <= 90) & (np.abs(obs_lon) <= 180))
     if not valid.all():
         # Log count of invalid coordinates
-        logging.warning("distance_to_coast: %d of %d rows have missing or invalid "
+        logger.warning("distance_to_coast: %d of %d rows have missing or invalid "
                         "coordinates and get NaN", int((~valid).sum()), len(valid))
 
     result = np.full(len(df), np.nan)
@@ -539,7 +541,7 @@ def _to_lonlat(geo):
     """Reproject a GeoDataFrame/GeoSeries to EPSG:4326. If no CRS is given, assume lon/lat."""
     if geo.crs is None:
         # No CRS given -> warn and use lon/lat
-        logging.warning("Regions have no CRS; assuming lon/lat degrees (EPSG:4326)")
+        logger.warning("Regions have no CRS; assuming lon/lat degrees (EPSG:4326)")
         _check_lonlat(list(zip(range(len(geo)), geo.geometry)))
         return geo
 
@@ -632,7 +634,7 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
         available = df["LEV_M"].unique()
         closest = float(available[np.abs(available - depth).argmin()])
         if closest != depth:
-            logging.info(
+            logger.info(
                 "load_jenniges_provinces: requested depth %.1f m, "
                 "using closest available %.1f m", depth, closest,
             )

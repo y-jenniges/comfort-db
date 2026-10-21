@@ -12,6 +12,8 @@ import pandas as pd
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
 
+logger = logging.getLogger(__name__)
+
 
 def does_table_exist(conn: sqlite3.Connection, table_name: str, table_type: str = "table") -> bool:
     """Check if a table/view exists (case-sensitive).
@@ -79,7 +81,7 @@ def get_num_samples(conn: sqlite3.Connection, table_name: str, table_type: str =
 
     # Check if table exists
     if not does_table_exist(conn, table_name, table_type):
-        logging.error(f"No such {table_type}: {table_name}")
+        logger.error(f"No such {table_type}: {table_name}")
         return 0
 
     # Execute counting query
@@ -143,7 +145,7 @@ def get_names_of_all_parameter_tables(conn: sqlite3.Connection, like_pattern: st
     else:
         query = f"SELECT name FROM sqlite_master WHERE type='{table_type}' {digits_filter};"
 
-    logging.debug(query)
+    logger.debug(query)
 
     # Execute query
     result = conn.cursor().execute(query).fetchall()
@@ -175,7 +177,7 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
     # Determine how to convert the raw SQL result to the requested type
     converters = {"float": float, "int": int, "datetime64": np.datetime64}
     if column_type not in converters:
-        logging.error(f"get_minmax: conversion to {column_type} is not implemented")
+        logger.error(f"get_minmax: conversion to {column_type} is not implemented")
         return None, None
     convert = converters[column_type]
 

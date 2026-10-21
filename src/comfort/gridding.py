@@ -19,6 +19,8 @@ from .util import sqlite_utils
 from .util.sqlite_utils import validate_identifier
 from .database.information import does_table_exist, get_table_as_df, get_names_of_all_parameter_tables
 
+logger = logging.getLogger(__name__)
+
 
 def _param_table_name(name: str) -> str:
     """Normalise a parameter name to its P_* table name.
@@ -364,7 +366,7 @@ class Grid:
         if self.has_time:
             q +=" AND s.DATEANDTIME >= ? AND s.DATEANDTIME <= ?"
             bind += [str(self.time_min), str(self.time_max)]
-        logging.debug(q)
+        logger.debug(q)
 
         # Execute query
         cur = connection.execute(q, bind)
@@ -457,7 +459,7 @@ class Grid:
             # Drop cells that are on land and have no data for any parameter
             n_before = len(df_wide)
             df_wide = drop_land_cells(df_wide).reset_index(drop=True)
-            logging.info("map_dataframes: dropped %d empty land cells (%d -> %d rows)",
+            logger.info("map_dataframes: dropped %d empty land cells (%d -> %d rows)",
                         n_before - len(df_wide), n_before, len(df_wide))
         return df_wide
 
@@ -618,7 +620,7 @@ class Grid:
         Returns:
             list[str]: Names of the mapped tables in the database.
         """
-        logging.info("Mapping tables to grid...")
+        logger.info("Mapping tables to grid...")
         connection.create_aggregate("median", 1, sqlite_utils.Median)
         connection.create_aggregate("std", 1, sqlite_utils.Std)
 
@@ -638,7 +640,7 @@ class Grid:
             # Check if table should be replaced
             if existing and not replace_existing:
                 # Append existing table name
-                logging.info(f"Skipping already-mapped table {table}_{self.grid_id}")
+                logger.info(f"Skipping already-mapped table {table}_{self.grid_id}")
                 mapped_tables.append(f"{table}_{self.grid_id}")
                 continue
             elif existing:
@@ -646,18 +648,18 @@ class Grid:
 
             # Build SQL query to get table data, joining LATITUDE/LONGITUDE/DATEANDTIME from STATION
             df = self._fetch_parameter(connection, table, include_z_max)
-            logging.info(f"  {table}: fetched {len(df)} rows")
+            logger.info(f"  {table}: fetched {len(df)} rows")
 
             # Bin onto grid cells (and time steps), aggregating (mean, median, std, count)
             df_grouped = self.bin(df, "VAL", agg=["mean", "median", "std", "count"])
-            logging.info(f"  {table}: binned to {len(df_grouped)} occupied cells")
+            logger.info(f"  {table}: binned to {len(df_grouped)} occupied cells")
 
             grid_name = f"grid_{self.grid_id}"
             # Add grid to database (if not yet included)
             if not does_table_exist(connection, grid_name, "table"):
                 self.grid.to_sql(grid_name, connection, if_exists="replace",
                                  index=True, index_label="idx")
-                logging.warning(
+                logger.warning(
                     "Grid was added to the database without a GridManager - "
                     "it will not appear in grid_info."
                 )
@@ -849,7 +851,7 @@ class GridManager:
         """
         # Check if grid exists
         if not self.does_grid_exist(grid_id):
-            logging.warning(f"Grid with ID {grid_id} does not exist")
+            logger.warning(f"Grid with ID {grid_id} does not exist")
             return None
 
         # Get grid info
@@ -912,7 +914,7 @@ class GridManager:
             )
             self.add_grid(grid)
         else:
-            logging.info(f"Grid already exists with ID {grid_id}; loading")
+            logger.info(f"Grid already exists with ID {grid_id}; loading")
             grid = self.load_grid(grid_id, bathymetry_grid_path=bathymetry_grid_path,
                                   lat_variable=lat_variable, lon_variable=lon_variable,
                                   depth_variable=depth_variable)
@@ -974,7 +976,7 @@ def average_duplicate_locations(
     if temperature_col in raw:
         t_avg = raw[temperature_col].groupby(loc_cols, as_index=False).agg(
             {temperature_col: "mean", "LEV_DBAR": "mean"})
-        logging.info("average_duplicate_locations: %s %d -> %d",
+        logger.info("average_duplicate_locations: %s %d -> %d",
                      temperature_col, len(raw[temperature_col]), len(t_avg))
         averaged[temperature_col] = t_avg
 
@@ -983,7 +985,7 @@ def average_duplicate_locations(
         if param not in raw:
             continue
         avg = raw[param].groupby(loc_cols, as_index=False).agg({param: "mean"})
-        logging.info("average_duplicate_locations: %s %d -> %d", param, len(raw[param]), len(avg))
+        logger.info("average_duplicate_locations: %s %d -> %d", param, len(raw[param]), len(avg))
         averaged[param] = avg
 
     return averaged

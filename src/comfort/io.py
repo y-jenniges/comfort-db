@@ -20,6 +20,8 @@ from .geo import region_bbox, water_mass_masks
 from .qc import QCFilter, build_where_clause, qc_conditions
 from .util.sqlite_utils import validate_identifier
 
+logger = logging.getLogger(__name__)
+
 
 def _refine_to_region(df, region, region_name_col):
     """Drop rows outside the exact region polygon(s), e.g. after SQL-level bounding box filtering."""
@@ -29,7 +31,7 @@ def _refine_to_region(df, region, region_name_col):
 
     # Check if latitude and longitude columns are given
     if "LATITUDE" not in df.columns or "LONGITUDE" not in df.columns:
-        logging.warning("Region filter requested but LATITUDE/LONGITUDE columns not found - filter skipped.")
+        logger.warning("Region filter requested but LATITUDE/LONGITUDE columns not found - filter skipped.")
         return df
 
     # Filter for exact regions
@@ -73,7 +75,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
     try:
         params = list_parameters(conn)
         if not params:
-            logging.warning("info: no parameter tables found")
+            logger.warning("info: no parameter tables found")
             return pd.DataFrame()
 
         # Collect sample count and depth/date range per parameter
@@ -106,7 +108,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
             })
 
         result = pd.DataFrame(rows)
-        logging.info(result.to_string(index=False))
+        logger.info(result.to_string(index=False))
         return result
     finally:
         if own_conn:
@@ -256,7 +258,7 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Warn if no parameter left
     if not params:
-        logging.warning("describe_variables: no parameter tables found")
+        logger.warning("describe_variables: no parameter tables found")
         return pd.DataFrame()
 
     # Compute aggregate statistics per parameter
@@ -331,7 +333,7 @@ def describe_variables(conn: sqlite3.Connection,
     # Warn about mixed units
     for _, row in result.iterrows():
         if len(row["units_ids"]) > 1:
-            logging.warning(
+            logger.warning(
                 "%s contains %d different units (%s) - values may not be comparable",
                 row["parameter"], len(row["units_ids"]), row["units"],
             )
@@ -373,7 +375,7 @@ def _load_lookup_map(conn, table: str, id_col: str = "ID", name_col: str = "NAME
 
     # Check for missing columns
     if id_col.upper() not in columns or name_col.upper() not in columns:
-        logging.debug("_load_lookup_map: %s lacks %s/%s", table, id_col, name_col)
+        logger.debug("_load_lookup_map: %s lacks %s/%s", table, id_col, name_col)
         return {}
 
     cur.execute(f"SELECT {id_col}, {name_col} FROM {table};")
@@ -422,7 +424,7 @@ def subset_region(df: pd.DataFrame,
         if bound_val is None:
             return mask
         if col not in df.columns:
-            logging.warning(
+            logger.warning(
                 "subset_region: %r requested but column %r not found - filter skipped",
                 bound_name, col,
             )
@@ -443,7 +445,7 @@ def subset_region(df: pd.DataFrame,
     # Date range filter
     if date_min is not None or date_max is not None:
         if "DATEANDTIME" not in df.columns:
-            logging.warning(
+            logger.warning(
                 "subset_region: date filter requested but column 'DATEANDTIME' not found - filter skipped"
             )
         else:
@@ -597,7 +599,7 @@ def load_comfort(
         # Load each parameter with SQL-level filtering
         dfs = {}
         for param in parameters:
-            logging.info("load_comfort: Loading %s...", param)
+            logger.info("load_comfort: Loading %s...", param)
             # Get target unit
             p_up = param.upper()
             target = _converter.default_unit_id(f"P_{p_up}") if _converter else None
@@ -626,7 +628,7 @@ def load_comfort(
                             _units_map.get(int(u), str(int(u)))
                             for u in sorted(uid_set)
                         )
-                        logging.warning(
+                        logger.warning(
                             "%s contains %d different units (%s) - "
                             "values may not be comparable; consider convert_units=True",
                             param, len(uid_set), names,
@@ -640,7 +642,7 @@ def load_comfort(
                                                       density_fallback=density_fallback)
                     # Empty df warning
                     if df.empty:
-                        logging.warning("load_comfort: no %s rows left after unit conversion", param)
+                        logger.warning("load_comfort: no %s rows left after unit conversion", param)
                         continue
 
                     # Update unit IDs
@@ -656,7 +658,7 @@ def load_comfort(
             conn.close()
 
     if not dfs:
-        logging.warning("load_comfort: no data found for the given filters")
+        logger.warning("load_comfort: no data found for the given filters")
         if as_xarray:
             import xarray as xr
             return xr.Dataset()
