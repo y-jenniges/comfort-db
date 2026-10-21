@@ -1190,12 +1190,23 @@ class TestEmptyMissingValueInfo:
         result = get_missing_value_info_offline_per_param([df])
         assert list(result.columns) == ["parameter", "absolute", "relative"]
 
-    # A grid without any water cell does not divide by zero
+    # Relative missingness of a grid without any rows is 0 instead of a division by zero (0 grid cells)
     def test_offline_per_param_zero_cells(self):
         df = pd.DataFrame({
             "LATITUDE": pd.Series(dtype=float), "LONGITUDE": pd.Series(dtype=float),
             "LEV_M": pd.Series(dtype=float), "DATEANDTIME": pd.Series(dtype=object),
             "water": pd.Series(dtype=bool), "P_X": pd.Series(dtype=float),
+        })
+        result = get_missing_value_info_offline_per_param([df])
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
+        assert result["relative"].iloc[0] == 0.0
+
+    # Relative missingness of a grid with only land cells without data is 0 instead of a division by zero
+    # (land cells without data are not counted as grid cells)
+    def test_offline_per_param_all_land_cells(self):
+        df = pd.DataFrame({
+            "LATITUDE": [1.0], "LONGITUDE": [1.0], "LEV_M": [0.0],
+            "DATEANDTIME": ["2000"], "water": [False], "P_X": [np.nan],
         })
         result = get_missing_value_info_offline_per_param([df])
         assert list(result.columns) == ["parameter", "absolute", "relative"]
