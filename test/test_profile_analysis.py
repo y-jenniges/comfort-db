@@ -272,15 +272,33 @@ class TestPycnoclineDepth:
         assert pd.isna(result["pycnocline_depth_m"].iloc[0])
         assert not pd.isna(result["max_gradient"].iloc[0])
 
-    # The pycnocline is placed at the depth of maximum |d(density)/dz|
+    # The pycnocline is placed at the depth of maximum d(density)/dz
     def test_pycnocline_at_correct_depth(self):
         result = pycnocline_depth(self._profile_with_pycno_at_100(), density_col="sigma0")
         assert result["pycnocline_depth_m"].iloc[0] == 100.0
 
-    # max_gradient is reported as a magnitude, not signed
+    # max_gradient is the strongest density increase with depth, so positive
     def test_max_gradient_positive(self):
         result = pycnocline_depth(self._profile_with_pycno_at_100(), density_col="sigma0")
         assert result["max_gradient"].iloc[0] > 0
+
+    # A density inversion stronger than the stable gradient is ignored
+    def test_strong_inversion_ignored(self):
+        # Gradients: -0.02 (0m, inversion), -0.01, 0.005, 0.006 (150m, max increase), 0.002
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 100.0, 150.0, 200.0],
+                           "sigma0": [25.0, 24.0, 24.0, 24.5, 24.6]})
+        result = pycnocline_depth(df, density_col="sigma0")
+        assert result["pycnocline_depth_m"].iloc[0] == 150.0
+        assert result["max_gradient"].iloc[0] == pytest.approx(0.006)
+
+    # A profile without any density increase has no pycnocline
+    def test_fully_inverted_profile_gives_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 100.0, 150.0, 200.0],
+                           "sigma0": [26.0, 25.5, 25.0, 24.5, 24.0]})
+        result = pycnocline_depth(df, density_col="sigma0")
+        assert pd.isna(result["pycnocline_depth_m"].iloc[0])
 
     # A profile with a single depth level has no gradient to compute
     def test_short_profile_skipped(self):

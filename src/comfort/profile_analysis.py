@@ -324,11 +324,10 @@ def pycnocline_depth(df: pd.DataFrame,
                      profile_col: str | list[str] | None = None,
                      min_gradient: float = 0.0
                      ) -> pd.DataFrame:
-    """Find the depth of maximum density gradient (pycnocline depth).
+    """Find the depth of maximum density increase with depth (pycnocline depth).
 
-    Pass ``min_gradient`` to require a minimum strength: Profiles whose
-    maximum gradient falls short have no valid pycnocline and get
-    ``pycnocline_depth_m = NaN``.
+    Profiles without any positive gradient or whose maximum gradient is
+    smaller than ``min_gradient`` do not have a valid pycnocline and get ``pycnocline_depth_m = NaN``.
 
     Args:
         df (pandas.DataFrame): Input DataFrame with density and depth columns.
@@ -343,7 +342,7 @@ def pycnocline_depth(df: pd.DataFrame,
         pandas.DataFrame: One row per profile with columns
             [profile_col, ``'pycnocline_depth_m'``, ``'max_gradient'``].
             ``pycnocline_depth_m`` is ``NaN`` when the maximum gradient is
-            below ``min_gradient``.
+            not positive or below ``min_gradient``.
     """
     profile_col = _resolve_profile_col(df, profile_col)
     depth_col = detect_depth_col(df, depth_col)
@@ -360,11 +359,11 @@ def pycnocline_depth(df: pd.DataFrame,
         z = valid[depth_col].values
         rho = valid[density_col].values
 
-        # Pycnocline = depth of maximum |d(density)/dz|
+        # Pycnocline = depth of maximum d(density)/dz (strongest increase with depth)
         grad = np.gradient(rho, z)
-        idx = int(np.argmax(np.abs(grad)))
+        idx = int(np.argmax(grad))
 
-        significant = abs(grad[idx]) >= min_gradient
+        significant = grad[idx] > 0 and grad[idx] >= min_gradient
         rows.append({
             **_profile_key_dict(profile_col, pid),
             "pycnocline_depth_m": float(z[idx]) if significant else np.nan,
