@@ -437,7 +437,8 @@ class Grid:
         """
         # Custom aggregation function
         if bin_fn is None:
-            bin_fn = lambda df, value_col: self.bin(df, value_col, agg=agg)
+            def bin_fn(df, value_col):
+                return self.bin(df, value_col, agg=agg)
 
         # Start from the full grid template
         df_wide = self.grid.copy()
