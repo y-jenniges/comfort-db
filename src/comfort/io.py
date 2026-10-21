@@ -82,20 +82,19 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
             validate_identifier(param)
             table = f"P_{param}"
             cur = conn.cursor()
+
+            # Get depth range
             cur.execute(
                 f"SELECT COUNT(*), MIN(LEV_M), MAX(LEV_M) FROM {table};"
             )
             n, dmin, dmax = cur.fetchone()
 
             # Get date range via station join
-            try:
-                cur.execute(
-                    f"SELECT MIN(s.DATEANDTIME), MAX(s.DATEANDTIME) "
-                    f"FROM {table} p JOIN station s ON p.ID = s.ID;"
-                )
-                date_min, date_max = cur.fetchone()
-            except Exception:
-                date_min, date_max = None, None
+            cur.execute(
+                f"SELECT MIN(s.DATEANDTIME), MAX(s.DATEANDTIME) "
+                f"FROM {table} p JOIN station s ON p.ID = s.ID;"
+            )
+            date_min, date_max = cur.fetchone()
 
             rows.append({
                 "parameter": param,
@@ -298,15 +297,12 @@ def describe_variables(conn: sqlite3.Connection,
         # Get platform IDs via station join
         platform_ids: list[int] = []
         if has_platform_id:
-            try:
-                cur.execute(
-                    f"SELECT DISTINCT s.PLATFORM_ID "
-                    f"FROM {table} p JOIN station s ON p.ID = s.ID "
-                    f"{qc_where_aliased};"
-                )
-                platform_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
-            except Exception:
-                pass
+            cur.execute(
+                f"SELECT DISTINCT s.PLATFORM_ID "
+                f"FROM {table} p JOIN station s ON p.ID = s.ID "
+                f"{qc_where_aliased};"
+            )
+            platform_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
 
         rows.append({
             "parameter": param,
@@ -365,25 +361,29 @@ def _load_lookup_map(conn, table: str, id_col: str = "ID", name_col: str = "NAME
     """Return a dict mapping id_col -> name_col, or {} when the table is absent."""
     from .database.information import does_table_exist
 
-    try:
-        if not does_table_exist(conn, table):
-            return {}
-        cur = conn.cursor()
-        cur.execute(f"SELECT {id_col}, {name_col} FROM {table};")
-        return {row[0]: row[1] for row in cur.fetchall()}
-    except Exception as exc:
-        logging.debug("_load_lookup_map: could not resolve %s (%s)", table, exc)
+    # Check if table exists
+    if not does_table_exist(conn, table):
         return {}
+    cur = conn.cursor()
+
+    # Get table info
+    cur.execute(f"PRAGMA table_info({table});")
+    columns = {row[1].upper() for row in cur.fetchall()}
+
+    # Check for missing columns
+    if id_col.upper() not in columns or name_col.upper() not in columns:
+        logging.debug("_load_lookup_map: %s lacks %s/%s", table, id_col, name_col)
+        return {}
+
+    cur.execute(f"SELECT {id_col}, {name_col} FROM {table};")
+    return {row[0]: row[1] for row in cur.fetchall()}
 
 
 def _station_has_column(conn, column: str) -> bool:
     """Check whether the station table has a given column."""
-    try:
-        cur = conn.cursor()
-        cur.execute("PRAGMA table_info(station);")
-        return any(row[1].upper() == column.upper() for row in cur.fetchall())
-    except Exception:
-        return False
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(station);")
+    return any(row[1].upper() == column.upper() for row in cur.fetchall())
 
 
 def subset_region(df: pd.DataFrame,
@@ -561,34 +561,34 @@ def load_comfort(
     conn = sqlite3.connect(db_path_or_conn) if own_conn else db_path_or_conn
     try:
         # Default to all available parameters
+        available = list_parameters(conn)
         if parameters is None:
-            parameters = list_parameters(conn)
+            parameters = available
+        else:
+            # Fail (before loading anything) if a requested parameter table is missing
+            unknown = {p for p in parameters if p.upper() not in {a.upper() for a in available}}
+            if unknown:
+                raise ValueError(f"Unknown parameters: {sorted(unknown)}")
 
         # Resolve lookup tables for xarray coordinates
         _instrument_map = _load_lookup_map(conn, "INSTRUMENT")
         _platform_map = _load_lookup_map(conn, "PLATFORM")
         _units_map = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
 
-        # Station → platform_id mapping (when column exists)
+        # Station -> platform_id mapping (when column exists)
         _station_platform: dict[int, int] = {}
         if _station_has_column(conn, "PLATFORM_ID"):
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT ID, PLATFORM_ID FROM station;")
-                _station_platform = {
-                    row[0]: row[1] for row in cur.fetchall() if row[1] is not None
-                }
-            except Exception:
-                pass
+            cur = conn.cursor()
+            cur.execute("SELECT ID, PLATFORM_ID FROM station;")
+            _station_platform = {
+                row[0]: row[1] for row in cur.fetchall() if row[1] is not None
+            }
 
         # Build unit converter when requested
         _converter = None
         if convert_units:
-            try:
-                from .units import UnitsConverter
-                _converter = UnitsConverter.from_connection(conn)
-            except ValueError:
-                logging.info("load_comfort: UNITS/DATABASE_TABLES not found, skipping unit conversion")
+            from .units import UnitsConverter
+            _converter = UnitsConverter.from_connection(conn)
 
         # Track per-parameter unit IDs for xarray attrs and warnings
         _param_unit_ids: dict[str, set] = {}
@@ -607,14 +607,10 @@ def load_comfort(
                 p_up == "OXYGEN" or (use_density and p_up == "CHLOROPHYLL"))
             with_salinity = may_need_density and (use_density or p_up == "OXYGEN")
 
-            try:
-                # Load param with space, time and optionally T and S columns
-                df = _read_with_geo(conn, param, quality_flags, limit=limit,
-                                    with_temperature=with_temperature,
-                                    with_salinity=with_salinity, **geo_kwargs)
-            except Exception as exc:
-                logging.warning("load_comfort: could not read %s (%s)", param, exc)
-                continue
+            # Load param with space, time and optionally T and S columns
+            df = _read_with_geo(conn, param, quality_flags, limit=limit,
+                                with_temperature=with_temperature,
+                                with_salinity=with_salinity, **geo_kwargs)
 
             # Refine to exact polygon refine (SQL only filters for region bbox)
             df = _refine_to_region(df, region, region_name_col)
@@ -750,7 +746,7 @@ def load_comfort(
     raw_times = [meta.get(p, {}).get("time") for p in all_profiles]
     try:
         times = pd.to_datetime(raw_times)
-    except Exception:
+    except (ValueError, TypeError):
         times = np.array(raw_times, dtype=object)
 
     # Resolve instrument IDs to names; fall back to stringified IDs
@@ -820,7 +816,7 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
         coords[f"{param}_longitude"] = (dim, df["LONGITUDE"].to_numpy(dtype=float))
         try:
             times = pd.to_datetime(df["DATEANDTIME"]).to_numpy()
-        except Exception:
+        except (ValueError, TypeError):
             times = df["DATEANDTIME"].to_numpy(dtype=object)
         coords[f"{param}_time"] = (dim, times)
 

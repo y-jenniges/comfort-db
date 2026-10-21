@@ -1030,3 +1030,22 @@ class TestLoadComfortUnitConversion:
         assert "salinity" not in df.columns
         assert "temperature" not in df.columns
         assert df["SALINITY"].iloc[0] == 35.0
+
+
+class TestLoadComfortErrorHandling:
+    """Tests for load_comfort's parameter check and the missing-lookup-table check."""
+
+    # An unknown parameter raises before anything is loaded
+    def test_unknown_parameter_raises(self, comfort_db):
+        with pytest.raises(ValueError, match="Unknown parameters.*DOESNOTEXIST"):
+            load_comfort(comfort_db, parameters=["NITRATE", "DOESNOTEXIST"], as_xarray=False)
+
+    # Parameter names are matched case-insensitively
+    def test_parameter_check_is_case_insensitive(self, comfort_db):
+        result = load_comfort(comfort_db, parameters=["nitrate"], as_xarray=False)
+        assert len(result) == 1
+
+    # convert_units=True without UNITS/DATABASE_TABLES raises instead of silently skipping conversion
+    def test_convert_units_without_lookup_tables_raises(self, comfort_db):
+        with pytest.raises(ValueError):
+            load_comfort(comfort_db, parameters=["NITRATE"], convert_units=True, as_xarray=False)
