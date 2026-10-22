@@ -2,13 +2,14 @@
 This file describes known data issues in the COMFORT database. 
 
 ## 1. Salinity-like oxygen values
-There are 9,507,497 oxygen values (14.7%) that resemble their co-located salinity values with a Pearson correlation of 1.0. 
-After filtering with the `comfort.qc.QC_GOOD` preset, this number reduces to 329,731 samples (0.8%). 
-The values can be flagged by the `comfort.qc.flag_salinity_like_oxygen` function. 
+There are 9,492,323 oxygen values (14.34% of the oxygen values with a co-located salinity) that are an exact copy of their 
+co-located (same station, depth, bottle and profile) practical salinity values. 
+All but three carry PQF2 = 4 (passed primary QC). 96.6% of them have PQF1 = 0 and are removed by the `comfort.qc.QC_GOOD` preset, leaving 321,087 values (3.4%) with PQF1 = 4.
+These values can be flagged by the `comfort.qc.flag_salinity_like_oxygen` function.
+The numbers come from `issue1_salinity_like_oxygen.py`.
 
-There are 54,758 oxygen values (0.135%) below 40 umol/kg that do not have co-located salinity values, so 
-`flag_salinity_like_oxygen` cannot check them. Most fall within known oxygen minimum zones or are close by
-(open-ocean OMZs, Black Sea, Baltic Sea, etc.), though a small fraction of unphysical values could not be ruled out.
+There are 54,470 oxygen values below 40 µmol/kg (0.081% of all oxygen values) that do not have salinity values at the same station and depth, so 
+`flag_salinity_like_oxygen` cannot check them. 
 
 ## 2. No unit conversion formulas for PAR, FLUORESCENCE, TURBIDITY
 Some samples were recorded in a unit that cannot be converted to the default parameter unit:

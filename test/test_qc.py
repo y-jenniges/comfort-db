@@ -214,8 +214,6 @@ class TestApplyQcFlags:
 
 
 class TestFlagSalinityLikeOxygen:
-    _SP_TO_SA = 35.16504 / 35
-
     def _df(self):
         """Two genuine oxygen rows and one salinity value mislabelled as oxygen."""
         sp = 35.0
@@ -231,12 +229,18 @@ class TestFlagSalinityLikeOxygen:
         assert list(mask) == [False, False, True]
         assert "mislabelled salinity" in caplog.text
 
-    # SA (Absolute Salinity) is used instead of Practical Salinity when present
-    def test_sa_column_preferred_over_salinity(self):
+    # Only exact copies are flagged by default
+    def test_float_noise_needs_tolerance(self):
         df = self._df()
-        df["SA"] = df["SALINITY"] * self._SP_TO_SA
-        mask = flag_salinity_like_oxygen(df)
-        assert list(mask) == [False, False, True]
+        df.loc[2, "OXYGEN"] += 1e-9
+        assert not flag_salinity_like_oxygen(df).any()
+        assert list(flag_salinity_like_oxygen(df, tol=1e-6)) == [False, False, True]
+
+    # A value that is merely close is not flagged
+    def test_close_but_not_identical_not_flagged(self):
+        df = self._df()
+        df.loc[2, "OXYGEN"] = 35.0 * 35.16504 / 35
+        assert not flag_salinity_like_oxygen(df).any()
 
     # Column detection is case-insensitive
     def test_lowercase_salinity_column(self):
@@ -262,13 +266,19 @@ class TestFlagSalinityLikeOxygen:
         with pytest.raises(ValueError, match="OXYGEN"):
             flag_salinity_like_oxygen(pd.DataFrame({"SALINITY": [35.0]}))
 
-    # A salinity column (SA or SALINITY) is required
+    # A salinity column is required
     def test_missing_salinity_column_raises(self):
         with pytest.raises(ValueError, match="SALINITY"):
             flag_salinity_like_oxygen(pd.DataFrame({"OXYGEN": [250.0]}))
 
-    # min_diff/max_diff narrow or widen the matching range
-    def test_custom_range(self):
+    # tol widens the matching range: a 0.0005 difference is only flagged with a larger tol
+    def test_custom_tolerance(self):
         df = self._df()
-        mask = flag_salinity_like_oxygen(df, min_diff=1.0, max_diff=2.0)
-        assert not mask.any()
+        df.loc[2, "OXYGEN"] += 0.0005
+        assert not flag_salinity_like_oxygen(df).any()
+        assert list(flag_salinity_like_oxygen(df, tol=1e-3)) == [False, False, True]
+
+    # Negative tolerance raises
+    def test_negative_tolerance_raises(self):
+        with pytest.raises(ValueError, match="tol"):
+            flag_salinity_like_oxygen(self._df(), tol=-1.0)

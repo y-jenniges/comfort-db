@@ -139,36 +139,30 @@ def apply_qc_flags(df: pd.DataFrame,
     return df[mask].copy()
 
 
-# TEOS-10 reference-scale factor: Absolute Salinity [g/kg] per unit Practical Salinity
-_SP_TO_SA = 35.16504 / 35
-
-
 def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
                               salinity_col: str | None = None,
-                              min_diff: float = 0.05, max_diff: float = 0.30) -> pd.Series:
-    """Flag oxygen values that numerically match co-located salinity.
-
-    Detects a known COMFORT data issue: ~0.8% of ``P_OXYGEN`` rows likely
-    carry a salinity value mislabelled as oxygen (µmol/kg) in the raw
-    dataset.
+                              tol: float = 0.0) -> pd.Series:
+    """Flag oxygen values that are identical to the co-located Practical Salinity
+    (known COMFORT data issue, about 14% of oxygen rows are affected).
+    See ``known_data_issues/known_data_issues.md``.
 
     Args:
-        df (pandas.DataFrame): Must contain *oxygen_col* and a salinity
-            column - either Absolute Salinity (``SA``) or Practical Salinity
-            (``SALINITY``/``salinity``, converted with the TEOS-10
-            reference-scale factor 35.16504/35 before comparison).
+        df (pandas.DataFrame): Must contain *oxygen_col* and a Practical
+            Salinity column (``SALINITY``/``salinity``).
         oxygen_col (str): Oxygen value column. Default ``'OXYGEN'``.
-        salinity_col (str): Salinity column to compare against. ``None``
-            auto-detects ``SA`` first, then ``SALINITY``/``salinity``.
-            A column named ``SA`` (any casing) is treated as Absolute
-            Salinity, anything else as Practical Salinity.
-        min_diff (float): Lower bound of the suspect band. Default 0.05.
-        max_diff (float): Upper bound of the suspect band. Default 0.30.
+        salinity_col (str): Practical Salinity column to compare against.
+            ``None`` auto-detects ``SALINITY``/``salinity``.
+        tol (float): Maximum absolute difference between oxygen and salinity
+            for a row to be flagged. Default 0 flags exact copies only.
     Returns:
         pandas.Series: Bool mask aligned with df (True = suspect row).
     Raises:
-        ValueError: If the oxygen or salinity column cannot be found.
+        ValueError: If the oxygen or salinity column cannot be found, or if *tol* is negative.
     """
+    if tol < 0:
+        # Tolerance must be positive (or zero)
+        raise ValueError(f"flag_salinity_like_oxygen: tol must be >= 0, got {tol}")
+
     # Resolve column names case-insensitively
     def _find(name):
         for col in df.columns:
@@ -181,22 +175,18 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     if oxy is None:
         raise ValueError(f"flag_salinity_like_oxygen: column {oxygen_col!r} not found")
 
-    # Auto-detect the salinity column when not given explicitly (SA preferred over SALINITY)
+    # Auto-detect the salinity column when not given explicitly
     if salinity_col is None:
-        sal = _find("SA") or _find("SALINITY")
+        sal = _find("SALINITY")
         if sal is None:
-            raise ValueError("flag_salinity_like_oxygen: no SA or SALINITY column found")
+            raise ValueError("flag_salinity_like_oxygen: No SALINITY column found")
     else:
         sal = _find(salinity_col)
         if sal is None:
-            raise ValueError(f"flag_salinity_like_oxygen: column {salinity_col!r} not found")
+            raise ValueError(f"flag_salinity_like_oxygen: Column {salinity_col!r} not found")
 
-    # Convert Practical Salinity to the Absolute Salinity
-    absolute = df[sal] if sal.lower() == "sa" else df[sal] * _SP_TO_SA
-
-    # Suspect rows: Oxygen sits within [min_diff, max_diff] of the salinity
-    # value - a real oxygen reading would likely not track salinity this closely
-    mask = (absolute - df[oxy]).between(min_diff, max_diff).fillna(False)
+    # Suspect rows: Oxygen equals the salinity value
+    mask = (df[oxy] - df[sal]).abs() <= tol
     if mask.any():
         # Print how common the issue is in this DataFrame
         logger.warning(

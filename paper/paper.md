@@ -38,7 +38,7 @@ bibliography: paper.bib
 with isopycnals in $kg~m^{-3}$ (dashed lines, reference pressure 0 dbar, computed as density-anomaly) 
 of oxygen measurements from the COMFORT dataset. 
 Only quality-controlled (`QC_GOOD`) data are loaded, units are harmonised (`comfort.units`) and
-oxygen values that are approximately equal to their co-located absolute salinity are dropped (`flag_salinity_like_oxygen`). 
+oxygen values that are identical to their co-located practical salinity are dropped (`flag_salinity_like_oxygen`). 
 Duplicate spatio-temporal locations are averaged (`average_duplicate_locations`) and temperature, salinity and oxygen inner-joined. 
 Absolute Salinity ($S_A$) and Conservative Temperature ($\Theta$) are derived via TEOS-10 (`comfort.physics`). 
 The remaining 40,425,889 data points (out of 67,085,418 oxygen observations in the dataset) are averaged into hexagonal bins and coloured by oxygen concentration. 
