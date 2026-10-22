@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
 
@@ -306,11 +306,7 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Resolve unit IDs to names
     id_to_unit = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
-    result["units"] = result["units_ids"].apply(
-        lambda ids: " / ".join(
-            id_to_unit.get(i, str(i)) for i in sorted(ids)
-        ) if ids else None
-    )
+    result["units"] = result["units_ids"].apply(lambda ids: _join_names(ids, id_to_unit))
     # Warn about mixed units
     for _, row in result.iterrows():
         if len(row["units_ids"]) > 1:
@@ -322,20 +318,12 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Resolve instrument IDs to names
     id_to_instrument = _load_lookup_map(conn, "INSTRUMENT")
-    result["instruments"] = result["instrument_ids"].apply(
-        lambda ids: " / ".join(
-            id_to_instrument.get(i, str(i)) for i in sorted(ids)
-        ) if ids else None
-    )
+    result["instruments"] = result["instrument_ids"].apply(lambda ids: _join_names(ids, id_to_instrument))
     result = result.drop(columns="instrument_ids")
 
     # Resolve platform IDs to names
     id_to_platform = _load_lookup_map(conn, "PLATFORM")
-    result["platforms"] = result["platform_ids"].apply(
-        lambda ids: " / ".join(
-            id_to_platform.get(i, str(i)) for i in sorted(ids)
-        ) if ids else None
-    )
+    result["platforms"] = result["platform_ids"].apply(lambda ids: _join_names(ids, id_to_platform))
     result = result.drop(columns="platform_ids")
 
     return result
@@ -368,6 +356,31 @@ def _station_has_column(conn, column: str) -> bool:
     cur = conn.cursor()
     cur.execute("PRAGMA table_info(station);")
     return any(row[1].upper() == column.upper() for row in cur.fetchall())
+
+
+class _Lookups(NamedTuple):
+    """Name maps for the xarray coordinates and unit attributes of load_comfort."""
+    instrument: dict
+    platform: dict
+    units: dict
+    station_platform: dict
+
+
+def _load_lookups(conn) -> _Lookups:
+    """Read the instrument, platform and unit ID->name maps and the station->platform_id map."""
+    # Station -> platform_id mapping (if column exists)
+    station_platform: dict[int, int] = {}
+    if _station_has_column(conn, "PLATFORM_ID"):
+        cur = conn.cursor()
+        cur.execute("SELECT ID, PLATFORM_ID FROM station;")
+        station_platform = {row[0]: row[1] for row in cur.fetchall() if row[1] is not None}
+
+    return _Lookups(
+        instrument=_load_lookup_map(conn, "INSTRUMENT"),
+        platform=_load_lookup_map(conn, "PLATFORM"),
+        units=_load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT"),
+        station_platform=station_platform,
+    )
 
 
 def subset_region(df: pd.DataFrame,
@@ -555,18 +568,7 @@ def load_comfort(
                 raise ValueError(f"Unknown parameters: {sorted(unknown)}")
 
         # Resolve lookup tables for xarray coordinates
-        _instrument_map = _load_lookup_map(conn, "INSTRUMENT")
-        _platform_map = _load_lookup_map(conn, "PLATFORM")
-        _units_map = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
-
-        # Station -> platform_id mapping (when column exists)
-        _station_platform: dict[int, int] = {}
-        if _station_has_column(conn, "PLATFORM_ID"):
-            cur = conn.cursor()
-            cur.execute("SELECT ID, PLATFORM_ID FROM station;")
-            _station_platform = {
-                row[0]: row[1] for row in cur.fetchall() if row[1] is not None
-            }
+        lookups = _load_lookups(conn)
 
         # Build unit converter when requested
         _converter = None
@@ -599,10 +601,7 @@ def load_comfort(
                     uid_set = set(df["UNITS_ID"].dropna().unique())
                     _param_unit_ids[param] = uid_set
                     if len(uid_set) > 1 and _converter is None:
-                        names = ", ".join(
-                            _units_map.get(int(u), str(int(u)))
-                            for u in sorted(uid_set)
-                        )
+                        names = _join_names(uid_set, lookups.units, sep=", ")
                         logger.warning(
                             "%s contains %d different units (%s) - "
                             "values may not be comparable; consider convert_units=True",
@@ -643,9 +642,7 @@ def load_comfort(
     if target_depths is None:
         if not as_xarray:
             return dfs
-        return _build_scattered_dataset(
-            dfs, _instrument_map, _platform_map, _units_map, _station_platform, _param_unit_ids,
-        )
+        return _build_scattered_dataset(dfs, lookups=lookups, param_unit_ids=_param_unit_ids)
 
     # target_depths given: Project every parameter onto it
     depths = np.asarray(target_depths, dtype=float)
@@ -657,6 +654,15 @@ def load_comfort(
     if not as_xarray:
         return interp_dfs
 
+    return _build_profile_dataset(dfs, interp_dfs=interp_dfs, depths=depths, lookups=lookups, param_unit_ids=_param_unit_ids)
+
+
+def _build_profile_dataset(dfs, interp_dfs, depths, lookups, param_unit_ids):
+    """Build an xr.Dataset on a shared (profile, depth) grid from depth-interpolated parameters.
+
+    Profiles are identified by (station ID, profile number). Their coordinates (position, time,
+    instrument, platform) come from the first row of each profile in the un-interpolated *dfs*.
+    """
     # Build xarray Dataset with a shared (profile, depth) grid
     import xarray as xr
 
@@ -688,7 +694,7 @@ def load_comfort(
                     "station_id": sid,
                     "profile_number": int(row["PROFILE_NUMBER"]),
                     "instrument_id": row.get("INSTRUMENT_ID", np.nan),
-                    "platform_id": _station_platform.get(sid, np.nan),
+                    "platform_id": lookups.station_platform.get(sid, np.nan),
                 }
 
     # Pivot each parameter's interpolated values onto the shared grid
@@ -728,8 +734,8 @@ def load_comfort(
         times = np.array(raw_times, dtype=object)
 
     # Resolve instrument and platform IDs to names
-    instruments = _id_names(instrument_ids, _instrument_map)
-    platforms = _id_names(platform_ids, _platform_map)
+    instruments = _id_names(instrument_ids, lookups.instrument)
+    platforms = _id_names(platform_ids, lookups.platform)
 
     # Assemble xarray Dataset
     ds = xr.Dataset(
@@ -747,21 +753,30 @@ def load_comfort(
     )
 
     # Attach resolved unit names as variable attributes
-    for param in data_vars:
-        uid_set = _param_unit_ids.get(param, set())
-        if len(uid_set) == 1:
-            uid = next(iter(uid_set))
-            ds[param].attrs["units"] = _units_map.get(int(uid), str(int(uid)))
-        elif len(uid_set) > 1:
-            ds[param].attrs["units"] = " / ".join(
-                _units_map.get(int(u), str(int(u))) for u in sorted(uid_set)
-            )
+    _attach_unit_attrs(ds, params=data_vars, param_unit_ids=param_unit_ids, units_map=lookups.units)
 
     # Climate and Forecast (CF) compliant metadata
     ds["depth"].attrs.update({"units": "m", "positive": "down"})
     ds["latitude"].attrs["units"] = "degrees_north"
     ds["longitude"].attrs["units"] = "degrees_east"
     return ds
+
+
+def _join_names(ids, lookup: dict, sep: str = " / ") -> str | None:
+    """Join the names of *ids* (sorted, falling back to its stringified ID). ``None`` without IDs."""
+    if len(ids) == 0:
+        return None
+    return sep.join(lookup.get(int(i), str(int(i))) for i in sorted(ids))
+
+
+def _attach_unit_attrs(ds, params, param_unit_ids, units_map) -> None:
+    """Set each parameter's ``units`` attribute to the resolved name(s) of the units found in its data."""
+    # Iterate over params
+    for param in params:
+        uid_set = param_unit_ids.get(param, set())  # get unit ids of the parameter
+        if uid_set:
+            # Resolve unit ID names
+            ds[param].attrs["units"] = _join_names(ids=uid_set, lookup=units_map)
 
 
 def _id_names(ids, lookup: dict) -> np.ndarray:
@@ -771,8 +786,7 @@ def _id_names(ids, lookup: dict) -> np.ndarray:
     ])
 
 
-def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
-                             station_platform, param_unit_ids):
+def _build_scattered_dataset(dfs, lookups, param_unit_ids):
     """Build an xr.Dataset with each parameter on its own observation
     dimension, at native measured depths (no interpolation, no shared grid).
 
@@ -806,24 +820,16 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
 
         # Get instrument IDs
         instrument_ids = df["INSTRUMENT_ID"] if "INSTRUMENT_ID" in df.columns else np.full(n, np.nan)
-        coords[f"{param}_instrument"] = (dim, _id_names(instrument_ids, instrument_map))
+        coords[f"{param}_instrument"] = (dim, _id_names(instrument_ids, lookups.instrument))
 
         # Get platform IDs
-        platform_ids = [station_platform.get(int(sid), np.nan) for sid in station_ids]
-        coords[f"{param}_platform"] = (dim, _id_names(platform_ids, platform_map))
+        platform_ids = [lookups.station_platform.get(int(sid), np.nan) for sid in station_ids]
+        coords[f"{param}_platform"] = (dim, _id_names(platform_ids, lookups.platform))
 
     ds = xr.Dataset(data_vars, coords=coords)
 
     # Attach resolved unit names as variable attributes
-    for param in dfs:
-        uid_set = param_unit_ids.get(param, set())
-        if len(uid_set) == 1:
-            uid = next(iter(uid_set))
-            ds[param].attrs["units"] = units_map.get(int(uid), str(int(uid)))
-        elif len(uid_set) > 1:
-            ds[param].attrs["units"] = " / ".join(
-                units_map.get(int(u), str(int(u))) for u in sorted(uid_set)
-            )
+    _attach_unit_attrs(ds, dfs, param_unit_ids, lookups.units)
 
     # Metadata per parameter
     for param in dfs:
