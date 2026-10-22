@@ -811,6 +811,43 @@ class TestInfo:
         assert len(result) == 2
 
 
+class TestReadWithGeoSharedQuery:
+    """_read_with_geo serves read_parameter and load_comfort:
+    Its optional arguments (profiles and extra_station_cols) combine correctly."""
+
+    # profiles and extra_station_cols together with a T/S sub-query keep the placeholder order right
+    def test_profiles_extra_cols_and_salinity_join(self):
+        # Dummy DB
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE station (ID INTEGER PRIMARY KEY, LATITUDE REAL, LONGITUDE REAL, "
+                     "DATEANDTIME TEXT, CRUISE_ID TEXT)")
+        conn.executemany("INSERT INTO station VALUES (?,?,?,?,?)",
+                         [(1, 45.0, -30.0, "2000-01-15", "A"), (2, 55.0, -20.0, "2005-06-10", "B")])
+        ddl = ("CREATE TABLE {tbl} (ID INTEGER, LEV_DBAR REAL, LEV_M REAL, VAL REAL, PQF1 INTEGER, PQF2 INTEGER, "
+               "SQF INTEGER, BOTTLE_NUMBER INTEGER, PROFILE_NUMBER INTEGER, PROFILE_BEST INTEGER, "
+               "UNITS_ID INTEGER, INSTRUMENT_ID INTEGER)")
+        for tbl in ("P_OXYGEN", "P_SALINITY"):
+            conn.execute(ddl.format(tbl=tbl))
+        conn.executemany("INSERT INTO P_OXYGEN VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
+            (1, 0.0, 0.0, 200.0, 1, 3, 0, 1, 1, 1, 3, 1),
+            (1, 0.0, 0.0, 210.0, 1, 3, 0, 1, 2, 1, 3, 1),
+            (2, 0.0, 0.0, 220.0, 1, 3, 0, 1, 1, 1, 3, 1),
+        ])
+        conn.executemany("INSERT INTO P_SALINITY VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
+            (1, 0.0, 0.0, 35.0, 1, 3, 0, 1, 1, 1, 2, 1),
+            (2, 0.0, 0.0, 36.0, 1, 3, 0, 1, 1, 1, 2, 1),
+        ])
+
+        result = _read_with_geo(conn, "OXYGEN", None, lat_min=40.0, lat_max=50.0, profiles=[1],
+                                with_salinity=True, extra_station_cols=["CRUISE_ID"])
+        conn.close()
+
+        # Only station 1 lies in the box, profile 1 only, its salinity (not station 2's) is attached
+        assert list(result["VAL"]) == [200.0]
+        assert list(result["salinity"]) == [35.0]
+        assert list(result["CRUISE_ID"]) == ["A"]
+
+
 class TestLoadComfortLimit:
     # limit argument caps the number of rows returned
     def test_limit_restricts_rows(self, comfort_db):

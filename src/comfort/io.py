@@ -174,42 +174,17 @@ def read_parameter(conn: sqlite3.Connection, param_name: str,
     Returns:
         pandas.DataFrame
     """
-    # Validate identifiers
-    validate_identifier(param_name)
-    for col in extra_station_cols or []:
-        validate_identifier(col)
-
     # Bounding box of the region (ANDed with the explicit bounds in the SQL query)
     region_box = region_bbox(region, region_name_col) if region is not None else None
 
-    # Build query with geo, profile and quality filters
-    params: list = []
-    conditions = qc_conditions(quality_flags, "p")
-    if profiles is not None:
-        placeholders = ",".join("?" * len(profiles))
-        conditions.append(f"p.PROFILE_NUMBER IN ({placeholders})")
-        params.extend(profiles)
-    _append_geo_conditions(
-        conditions, params, "s.", "s.", "p.", "s.",
-        lat_min, lat_max, lon_min, lon_max,
-        depth_min, depth_max, date_min, date_max,
-        region_box=region_box,
-    )
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    extra_select = "".join(f", s.{col}" for col in (extra_station_cols or []))
-    sql = (
-        f"SELECT p.*, s.LATITUDE, s.LONGITUDE{extra_select}, "
-        f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME "
-        f"FROM P_{param_name.upper()} p "
-        f"LEFT JOIN station s ON p.ID = s.ID {where}"
-    )
+    # Get the data from the database
+    df = _read_with_geo(conn, param_name, quality_flags,
+                        lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max,
+                        depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
+                        limit=limit, region_box=region_box,
+                        profiles=profiles, extra_station_cols=extra_station_cols)
 
-    # Add optional limit, ORDER BY rowid takes the first rows in table order (reproducible)
-    if limit is not None:
-        sql += f" ORDER BY p.rowid LIMIT {int(limit)}"
-
-    # Fetch data from database into a df, then refine SQL's bbox to the exact region polygon
-    df = pd.read_sql_query(sql + ";", conn, params=params)
+    # Refine SQL's bbox to exact region polygon
     return _refine_to_region(df, region, region_name_col)
 
 
@@ -862,21 +837,31 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
 def _read_with_geo(conn, param_name, quality_flags,
                    lat_min=None, lat_max=None, lon_min=None, lon_max=None,
                    depth_min=None, depth_max=None, date_min=None, date_max=None,
-                   limit=None, with_temperature=False, with_salinity=False, region_box=None):
+                   limit=None, with_temperature=False, with_salinity=False, region_box=None,
+                   profiles=None, extra_station_cols=None):
     """Read a parameter table with lat/lon/time, pushing all filters to SQL.
 
     Joins ``P_*`` with ``station``. *with_temperature*/*with_salinity* additionally
     attach the co-located temperature/salinity (needed for unit conversions).
     *region_box* is the bounding box of a region (see :func:`_append_geo_conditions`).
+    *profiles* restricts to profile numbers, *extra_station_cols* adds ``station`` columns.
+    This is the query behind both :func:`read_parameter` and :func:`load_comfort`.
     """
     from .database.information import does_table_exist
 
-    # Validate identifier
+    # Validate identifiers
     validate_identifier(param_name)
+    for col in extra_station_cols or []:
+        validate_identifier(col)
 
     # Join P_* with station to get geo columns
     params = []
     conditions = qc_conditions(quality_flags, "p")
+    if profiles is not None:
+        # Filter for profile numbers
+        placeholders = ",".join("?" * len(profiles))
+        conditions.append(f"p.PROFILE_NUMBER IN ({placeholders})")
+        params.extend(profiles)
     _append_geo_conditions(
         conditions, params, "s.", "s.", "p.", "s.",
         lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
@@ -919,8 +904,12 @@ def _read_with_geo(conn, param_name, quality_flags,
                     f"ON sal.ID = p.ID AND sal.LEV_M = p.LEV_M ")
         ts_params.extend(sal_params)
 
+    # Select additional columns from the station table
+    extra_select = "".join(f", s.{col}" for col in (extra_station_cols or []))
+
+    # Assemble the query
     query = (
-        f"SELECT p.*, s.LATITUDE, s.LONGITUDE, "
+        f"SELECT p.*, s.LATITUDE, s.LONGITUDE{extra_select}, "
         f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME{ts_select} "
         f"FROM P_{param_name.upper()} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
     )
