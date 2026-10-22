@@ -606,15 +606,9 @@ def load_comfort(
         dfs = {}
         for param in parameters:
             logger.info("load_comfort: Loading %s...", param)
-            # Get target unit
-            p_up = param.upper()
-            target = _converter.default_unit_id(f"P_{p_up}") if _converter else None
-
             # Check if temperature and/or salinity are required for unit conversions
-            may_need_density = target in (3, 14)
-            with_temperature = may_need_density and (
-                p_up == "OXYGEN" or (use_density and p_up == "CHLOROPHYLL"))
-            with_salinity = may_need_density and (use_density or p_up == "OXYGEN")
+            with_temperature, with_salinity = (
+                _converter.required_inputs(f"P_{param.upper()}", use_density) if _converter else (False, False))
 
             # Load param with space, time and optionally T and S columns
             df = _read_with_geo(conn, param, quality_flags, limit=limit,

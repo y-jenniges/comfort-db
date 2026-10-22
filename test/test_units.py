@@ -372,6 +372,118 @@ class TestConvertDataframe:
             uc.convert_dataframe(df, "P_OXYGEN", on_missing="bogus")
 
 
+class TestParameterRestrictions:
+    """Conversions listed in allowed_parameters are only applied to those parameters."""
+
+    # Every restricted pair is a registered conversion (guards against typos in the registry)
+    def test_restricted_pairs_are_registered(self):
+        formulas = ConversionFormulas()
+        assert set(formulas.allowed_parameters) <= set(formulas.conversions)
+
+    # Checks for is_allowed
+    def test_is_allowed(self):
+        formulas = ConversionFormulas()
+        assert formulas.is_allowed(5, 3, "P_ALKALINITY")  # listed param
+        assert formulas.is_allowed(5, 3, "p_alkalinity")  # case-insensitive
+        assert not formulas.is_allowed(5, 3, "P_NITRATE")  # restricted pair (only for alkalinity)
+        assert formulas.is_allowed(12, 19, "P_ANYTHING")  # unrestricted pair
+
+    # on_missing="drop" (default) drops and logs entries of a parameter that a conversion was not written for
+    def test_disallowed_parameter_dropped(self, caplog):
+        uc = _make_converter(table="P_NITRATE")
+        df = pd.DataFrame({"VAL": [1.0, 2.0], "UNITS_ID": [21, 3]})
+        with caplog.at_level(logging.WARNING):
+            result = uc.convert_dataframe(df, "P_NITRATE")
+        assert list(result["VAL"]) == [2.0]
+        assert "not implemented for P_NITRATE" in caplog.text
+
+    # on_missing="keep" retains the rows with their original value and unit
+    def test_disallowed_parameter_kept(self):
+        uc = _make_converter(table="P_NITRATE")
+        df = pd.DataFrame({"VAL": [1.0], "UNITS_ID": [21]})
+        result = uc.convert_dataframe(df, "P_NITRATE", on_missing="keep")
+        assert result["VAL"].iloc[0] == 1.0
+        assert result["UNITS_ID"].iloc[0] == 21
+
+    # on_missing="raise" raises
+    def test_disallowed_parameter_raises(self):
+        uc = _make_converter(table="P_NITRATE")
+        df = pd.DataFrame({"VAL": [1.0], "UNITS_ID": [21]})
+        with pytest.raises(ValueError, match="no conversion"):
+            uc.convert_dataframe(df, "P_NITRATE", on_missing="raise")
+
+    # A mass concentration of a parameter without molar mass follows on_missing policy
+    def test_unknown_molar_mass_parameter_follows_on_missing(self):
+        uc = _make_converter(table="P_UNKNOWN_PARAM")
+        df = pd.DataFrame({"VAL": [1.0, 2.0], "UNITS_ID": [4, 3]})
+        assert list(uc.convert_dataframe(df, "P_UNKNOWN_PARAM")["VAL"]) == [2.0]
+        with pytest.raises(ValueError, match="no conversion"):
+            uc.convert_dataframe(df, "P_UNKNOWN_PARAM", on_missing="raise")
+
+
+class TestRequiredInputs:
+    """UnitsConverter.required_inputs tells load_comfort which co-located T/S to join."""
+
+    @staticmethod
+    def _converter():
+        # Dummy converters
+        tables = {"P_OXYGEN": 3, "P_CHLOROPHYLL": 14, "P_AMMONIUM": 14, "P_DIC": 3, "P_NITRATE": 3, "P_AOU": 3, "P_SALINITY": 2}
+        default_units = pd.DataFrame({"NAME_TABLE": list(tables), "UNITS_ID_DEFAULT": list(tables.values())})
+        units = pd.DataFrame({"ID": list(range(30)), "NAME_SHORT": [str(i) for i in range(30)]})
+        return UnitsConverter(connection=None, default_units=default_units, units=units)
+
+    # Oxygen % saturation always needs T and S (independent of density setting)
+    @pytest.mark.parametrize("use_density", [False, True])
+    def test_oxygen_needs_temperature_and_salinity(self, use_density):
+        assert self._converter().required_inputs("P_OXYGEN", use_density=use_density) == (True, True)
+
+    # Chlorophyll uses real_dens, which requires T and S (only with use_density)
+    def test_chlorophyll(self):
+        uc = self._converter()
+        assert uc.required_inputs("P_CHLOROPHYLL", use_density=False) == (False, False)
+        assert uc.required_inputs("P_CHLOROPHYLL", use_density=True) == (True, True)
+
+    # lab_dens parameters only need salinity (only with use_density)
+    @pytest.mark.parametrize("table", ["P_AMMONIUM", "P_DIC", "P_NITRATE"])
+    def test_lab_density_parameters(self, table):
+        uc = self._converter()
+        assert uc.required_inputs(table, False) == (False, False)
+        assert uc.required_inputs(table, True) == (False, True)
+
+    # No conversion into the default unit (or no default unit) needs nothing
+    @pytest.mark.parametrize("table", ["P_AOU", "P_SALINITY", "P_NOT_REGISTERED"])
+    @pytest.mark.parametrize("use_density", [False, True])
+    def test_parameters_without_conversion(self, table, use_density):
+        assert self._converter().required_inputs(table, use_density) == (False, False)
+
+    # The declared inputs match what the formulas really use:
+    # - With all inputs the computed density is used
+    # - Without a needed column the constant is used
+    # - Without an unneeded column nothing changes
+    @pytest.mark.parametrize("source,target,table", [
+        (5, 3, "P_ALKALINITY"), (7, 3, "P_DIC"), (4, 3, "P_NITRATE"),
+        (4, 14, "P_AMMONIUM"), (4, 14, "P_CHLOROPHYLL"), (21, 3, "P_OXYGEN"),
+    ])
+    def test_declared_inputs_match_formulas(self, source, target, table):
+        uc = _make_converter(default_unit=target, table=table)
+        full = pd.DataFrame({"VAL": [2.0], "UNITS_ID": [source], "salinity": [35.0], "temperature": [10.0],
+                             "LATITUDE": [45.0], "LONGITUDE": [-30.0]})
+        def convert(df, use_density):
+            # Conversion returning only first row
+            return float(uc.convert_dataframe(df, table, use_density=use_density)["VAL"].iloc[0])
+
+        # Conversion results with/without density differ (-> computed density is used)
+        constant = convert(full, use_density=False)
+        computed = convert(full, use_density=True)
+        assert not np.isclose(computed, constant)
+
+        # Conversion without T/S
+        declared = uc.formulas.t_s_inputs_needed(source, target, table, True)  # infer if T and/or S are needed
+        for column in ("temperature", "salinity"):
+            without = convert(full.drop(columns=column), use_density=True)  # no T/S conversion
+            assert np.isclose(without, constant if column in declared else computed)  # close to conversion without density (if T/S was required)
+
+
 class TestDefaultUnitName:
     # A default UNITS_ID resolves to its short name
     def test_known_unit(self):

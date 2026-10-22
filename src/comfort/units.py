@@ -138,13 +138,19 @@ class UnitsConverter:
 
             # Look up conversion formula
             formula = self.formulas.conversions.get((int(uid), target))
+            if formula is not None and not self.formulas.is_allowed(int(uid), target, param_table_name):
+                # If a formula was found for the conversion, but is not allowed
+                # (e.g. only valid for a specific parameter), set to None
+                formula = None
             if formula is None:
-                logger.warning(f"Conversion from unit {int(uid)} to {target} not implemented "
-                                f"for {param_table_name}")
+                # No formula found
+                logger.warning(f"Conversion from unit {int(uid)} to {target} not implemented for {param_table_name}")
+                # Missing formula policy
                 if on_missing == "raise":
-                    raise ValueError(f"{param_table_name}: no conversion from unit "
-                                     f"{int(uid)} to {target}")
+                    # Raise error
+                    raise ValueError(f"{param_table_name}: no conversion from unit {int(uid)} to {target}")
                 if on_missing == "keep":
+                    # Keep the values
                     parts.append(chunk)
                 n_no_formula += len(chunk)
                 continue
@@ -195,6 +201,31 @@ class UnitsConverter:
         if not mask.any():
             return None
         return int(self.df_default_units.loc[mask, "UNITS_ID_DEFAULT"].iloc[0])
+
+    def required_inputs(self, param_table_name: str, use_density: bool = False) -> tuple[bool, bool]:
+        """Returns which co-located measurements a conversions potentially need.
+
+        Combines requirements of all conversions into the parameter's default unit
+        (see :meth:`ConversionFormulas.is_allowed`).
+
+        Args:
+            param_table_name (str): Table name (e.g. ``'P_OXYGEN'``).
+            use_density (bool): If densities are computed (``True``) or the constant is used.
+        Returns:
+            tuple[bool, bool]: ``(needs_temperature, needs_salinity)``.
+        """
+        target = self.default_unit_id(param_table_name)  # default unit ID
+        needs: set[str] = set()  # list of required co-located parameters
+
+        # Iterate over all potential targets
+        if target is not None:
+            # Iterate over all conversions with default unit ID as target
+            for source, conversion_target in self.formulas.conversions:
+                # Check if the formula is allowed for the parameter
+                if conversion_target == target and self.formulas.is_allowed(source, target, param_table_name):
+                    # Check if the conversion requires temperature and/or salinity
+                    needs |= self.formulas.t_s_inputs_needed(source, target, param_table_name, use_density)
+        return "temperature" in needs, "salinity" in needs
 
     def default_unit_name(self, param_table_name: str) -> str | None:
         """Return the human-readable name of a parameter's default unit.
@@ -295,6 +326,60 @@ class ConversionFormulas:
             (26, 3): self.microgramAtomPerKilogram_micromolPerKilogram,
             (10, 3): self.percent_micromolPerKilogram,
         }
+
+        # Parameter tables each conversion may be applied to (not-listed pairs have no restrictions)
+        molar_mass_tables = frozenset(self.molar_masses["NAME_TABLE"])
+        self.allowed_parameters = {
+            (5, 3): frozenset({"P_ALKALINITY"}),
+            (7, 3): frozenset({"P_DIC", "P_BARIUM"}),
+            (21, 3): frozenset({"P_OXYGEN"}),
+            (10, 3): frozenset({"P_OXYGEN"}),
+            (4, 14): frozenset({"P_AMMONIUM", "P_DIN", "P_CHLOROPHYLL"}),
+            (4, 3): molar_mass_tables,
+            (14, 3): molar_mass_tables,
+            (26, 3): molar_mass_tables,
+        }
+
+    def t_s_inputs_needed(self, source_unit_id: int, target_unit_id: int, param_table_name: str,
+                          use_density: bool = False) -> set[str]:
+        """Check if the conversion needs co-located temperature and/or salinity measurements.
+        Depends on whether density should be used (lab_dens needs salinity, real_dens needs both)
+
+        Args:
+            source_unit_id (int): Unit ID of the values.
+            target_unit_id (int): Unit ID to convert to.
+            param_table_name (str): Table name (e.g. ``'P_CHLOROPHYLL'``), case-insensitive.
+            use_density (bool): Whether densities are computed (``True``) or the constant is used.
+        Returns:
+            set[str]: Subset of ``{'temperature', 'salinity'}``.
+        """
+        pair = (source_unit_id, target_unit_id)
+        if pair == (10, 3):
+            # Requires T, S (independent of density-setting)
+            return {"temperature", "salinity"}
+        if not use_density:
+            # No density for conversions -> No T, S needed
+            return set()
+        if pair == (21, 3) or (pair == (4, 14) and param_table_name.upper().endswith("CHLOROPHYLL")):
+            # Conversions using real_dens
+            return {"temperature", "salinity"}
+        if pair in ((5, 3), (7, 3), (4, 3), (4, 14)):
+            # Conversions using lab_dens
+            return {"salinity"}
+        return set()
+
+    def is_allowed(self, source_unit_id: int, target_unit_id: int, param_table_name: str) -> bool:
+        """Check if a registered conversion may be applied to a parameter.
+
+        Args:
+            source_unit_id (int): Unit ID of the values.
+            target_unit_id (int): Unit ID to convert to.
+            param_table_name (str): Table name (e.g. ``'P_OXYGEN'``), case-insensitive.
+        Returns:
+            bool: ``True`` if the conversion has no parameter restriction or lists *param_table_name*.
+        """
+        allowed = self.allowed_parameters.get((source_unit_id, target_unit_id))  # consult the valid-parameter map
+        return allowed is None or param_table_name.upper() in allowed  # check if passed param is contained
 
     def get_molar_mass(self, param_table_name: str) -> float:
         """Return the molar mass for param_table_name."""
