@@ -576,69 +576,34 @@ def load_comfort(
             from .units import UnitsConverter
             _converter = UnitsConverter.from_connection(conn)
 
-        # Track per-parameter unit IDs for xarray attrs and warnings
+        # Track per-parameter unit IDs for xarray attrs
         _param_unit_ids: dict[str, set] = {}
 
         # Load each parameter with SQL-level filtering
         dfs = {}
         for param in parameters:
-            logger.info("load_comfort: Loading %s...", param)
-            # Check if temperature and/or salinity are required for unit conversions
-            with_temperature, with_salinity = (
-                _converter.required_inputs(f"P_{param.upper()}", use_density) if _converter else (False, False))
-
-            # Load param with space, time and optionally T and S columns
-            df = _read_with_geo(conn, param, quality_flags, limit=limit,
-                                with_temperature=with_temperature,
-                                with_salinity=with_salinity, **geo_kwargs)
-
-            # Refine to exact polygon refine (SQL only filters for region bbox)
-            df = _refine_to_region(df, region, region_name_col)
-
-            if not df.empty:
-                # Track distinct units
-                if "UNITS_ID" in df.columns:
-                    uid_set = set(df["UNITS_ID"].dropna().unique())
-                    _param_unit_ids[param] = uid_set
-                    if len(uid_set) > 1 and _converter is None:
-                        names = _join_names(uid_set, lookups.units, sep=", ")
-                        logger.warning(
-                            "%s contains %d different units (%s) - "
-                            "values may not be comparable; consider convert_units=True",
-                            param, len(uid_set), names,
-                        )
-
-                # Convert to default unit before renaming VAL
-                if _converter is not None and "VAL" in df.columns:
-                    df = _converter.convert_dataframe(df, f"P_{param}",
-                                                      use_density=use_density,
-                                                      on_missing=on_missing,
-                                                      density_fallback=density_fallback)
-                    # Empty df warning
-                    if df.empty:
-                        logger.warning("load_comfort: no %s rows left after unit conversion", param)
-                        continue
-
-                    # Update unit IDs
-                    if "UNITS_ID" in df.columns:
-                        _param_unit_ids[param] = set(df["UNITS_ID"].dropna().unique())
-
-                # Rename generic VAL column to parameter name
-                if "VAL" in df.columns:
-                    df = df.rename(columns={"VAL": param})
-                dfs[param] = df
+            loaded = _load_parameter(
+                conn, param, converter=_converter, lookups=lookups, quality_flags=quality_flags,
+                limit=limit, use_density=use_density, on_missing=on_missing,
+                density_fallback=density_fallback, region=region, region_name_col=region_name_col,
+                geo_kwargs=geo_kwargs,
+            )
+            if loaded is not None:
+                dfs[param], _param_unit_ids[param] = loaded
     finally:
+        # Close connection
         if own_conn:
             conn.close()
 
     if not dfs:
-        logger.warning("load_comfort: no data found for the given filters")
+        # No data was found
+        logger.warning("load_comfort: No data found for the given filters")
         if as_xarray:
             import xarray as xr
             return xr.Dataset()
         return {}
 
-    # target_depths=None: Return each profile at its native measured depths
+    # Return each profile at its native measured depths (if no target_depths given)
     if target_depths is None:
         if not as_xarray:
             return dfs
@@ -647,14 +612,68 @@ def load_comfort(
     # target_depths given: Project every parameter onto it
     depths = np.asarray(target_depths, dtype=float)
     interp_dfs = {
-        param: interpolate_depth_levels(df, depths, param_col=param, depth_col="LEV_M",
-                                        max_gap=max_gap, method=interp_method)
+        param: interpolate_depth_levels(df, depths, param_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
         for param, df in dfs.items()
     }
     if not as_xarray:
+        # Return dfs
         return interp_dfs
 
+    # Build and return xarray dataset
     return _build_profile_dataset(dfs, interp_dfs=interp_dfs, depths=depths, lookups=lookups, param_unit_ids=_param_unit_ids)
+
+
+def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, use_density,
+                    on_missing, density_fallback, region, region_name_col, geo_kwargs):
+    """Load one parameter for :func:`load_comfort`: Read, refine to the region, convert units, rename.
+    Returns ``(df, unit_ids)``.
+    """
+    logger.info("load_comfort: Loading %s...", param)
+
+    # Check if temperature and/or salinity are required for unit conversions
+    with_temperature, with_salinity = (
+        converter.required_inputs(f"P_{param.upper()}", use_density) if converter else (False, False))
+
+    # Load param with space, time and optionally T and S columns
+    df = _read_with_geo(conn, param, quality_flags, limit=limit,
+                        with_temperature=with_temperature,
+                        with_salinity=with_salinity, **geo_kwargs)
+
+    # Refine to exact polygon refine (SQL only filters for region bbox)
+    df = _refine_to_region(df, region, region_name_col)
+    if df.empty:
+        return None
+
+    # Track distinct units
+    unit_ids: set = set()
+    if "UNITS_ID" in df.columns:
+        unit_ids = set(df["UNITS_ID"].dropna().unique())
+        if len(unit_ids) > 1 and converter is None:
+            logger.warning(
+                "%s contains %d different units (%s) - "
+                "values may not be comparable; consider convert_units=True",
+                param, len(unit_ids), _join_names(unit_ids, lookups.units, sep=", "),
+            )
+
+    # Convert to default unit before renaming VAL
+    if converter is not None and "VAL" in df.columns:
+        df = converter.convert_dataframe(df, f"P_{param}",
+                                         use_density=use_density,
+                                         on_missing=on_missing,
+                                         density_fallback=density_fallback)
+        # Empty df warning
+        if df.empty:
+            logger.warning("load_comfort: no %s rows left after unit conversion", param)
+            return None
+
+        # Update unit IDs
+        if "UNITS_ID" in df.columns:
+            unit_ids = set(df["UNITS_ID"].dropna().unique())
+
+    # Rename generic VAL column to parameter name
+    if "VAL" in df.columns:
+        df = df.rename(columns={"VAL": param})
+    return df, unit_ids
 
 
 def _build_profile_dataset(dfs, interp_dfs, depths, lookups, param_unit_ids):
