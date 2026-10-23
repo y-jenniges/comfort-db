@@ -16,21 +16,18 @@ from matplotlib.collections import QuadMesh
 from matplotlib.contour import QuadContourSet
 
 import comfort
+from comfort.database import (
+    count_samples_over_time,
+    find_spatiotemporal_duplicates,
+)
 from comfort.plot import (
     boxplot,
     compare_stats,
-    count_and_plot_negative_samples,
-    count_and_plot_samples_over_time,
-    count_and_plot_samples_per_parameter,
-    count_negative_samples,
-    count_samples_over_time,
-    count_samples_over_time_from_db,
-    count_samples_per_parameter,
-    detect_and_plot_spatiotemporal_duplicates,
     plot_annual_coverage,
     plot_correlation,
     plot_counts_bar,
     plot_depth_coverage,
+    plot_duplicates,
     plot_histogram,
     plot_joint,
     plot_lat_lon_range,
@@ -281,18 +278,9 @@ class TestDistributions:
 #--- Counting --------------------------------------------------------#
 
 class TestCounting:
-    # Yearly binning of an already-loaded DataFrame
-    def test_count_samples_over_time_year(self, demo_conn):
-        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
-        counts = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
-        assert "YEAR" in counts.columns
-        assert "COUNT" in counts.columns
-        assert counts["COUNT"].sum() == len(df)
-
     # The counts DataFrame renders as a bar chart, one bar per row
     def test_plot_counts_bar(self, demo_conn):
-        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
-        counts = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
+        counts = count_samples_over_time(demo_conn, "TEMPERATURE", time_mode="year")
         ax = plot_counts_bar(counts)
         assert len(ax.patches) == len(counts)
         plt.close()
@@ -367,77 +355,20 @@ class TestDualModeErrors:
             plot_histogram(conn=demo_conn)
 
 
-class TestComputeOnlyCountFunctions:
-    # Default yearly binning straight from the database
-    def test_count_samples_over_time_from_db(self, demo_conn):
-        result = count_samples_over_time_from_db(demo_conn, "TEMPERATURE")
-        assert "YEAR" in result.columns
-        assert "COUNT" in result.columns
-        assert result["COUNT"].sum() > 0
-
-    # time_mode="month" switches the binning granularity
-    def test_count_samples_over_time_from_db_month(self, demo_conn):
-        result = count_samples_over_time_from_db(demo_conn, "TEMPERATURE", time_mode="month")
-        assert "MONTH" in result.columns
-
-    # Counts are reported per requested parameter
-    def test_count_samples_per_parameter(self, demo_conn):
-        result = count_samples_per_parameter(demo_conn, ["TEMPERATURE", "SALINITY"])
-        assert len(result) == 2
-        assert set(result["parameter"]) == {"TEMPERATURE", "SALINITY"}
-        assert (result["count"] > 0).all()
-
-    # parameters=None discovers and counts every parameter table
-    def test_count_samples_per_parameter_default_all(self, demo_conn):
-        result = count_samples_per_parameter(demo_conn)
-        assert len(result) == 3  # TEMPERATURE, SALINITY, OXYGEN
-
-    # Proportion of negative samples per parameter
-    def test_count_negative_samples(self, demo_conn):
-        result = count_negative_samples(demo_conn, ["TEMPERATURE", "OXYGEN"])
-        assert "parameter" in result.columns
-        assert "proportion of negative samples" in result.columns
-        assert len(result) == 2
-
-
-class TestCountAndPlotWrappers:
-    # The plot+compute wrapper returns the same data as the compute-only function
-    def test_count_and_plot_samples_over_time(self, demo_conn):
-        result = count_and_plot_samples_over_time(demo_conn, "TEMPERATURE")
-        expected = count_samples_over_time_from_db(demo_conn, "TEMPERATURE")
-        pd.testing.assert_frame_equal(result, expected)
-        plt.close()
-
-    # Same data claim as above, for the per-parameter counter
-    def test_count_and_plot_samples_per_parameter(self, demo_conn):
-        result = count_and_plot_samples_per_parameter(demo_conn, ["TEMPERATURE", "SALINITY"])
-        expected = count_samples_per_parameter(demo_conn, ["TEMPERATURE", "SALINITY"])
-        pd.testing.assert_frame_equal(result, expected)
-        plt.close()
-
-    # Same data claim as above, for the negative-sample counter
-    def test_count_and_plot_negative_samples(self, demo_conn):
-        result = count_and_plot_negative_samples(demo_conn, ["TEMPERATURE", "OXYGEN"])
-        expected = count_negative_samples(demo_conn, ["TEMPERATURE", "OXYGEN"])
-        pd.testing.assert_frame_equal(result, expected)
-        plt.close()
-
-    # No duplicated (ID, LEV_M, DATEANDTIME) triples in the clean fixture
-    def test_detect_and_plot_spatiotemporal_duplicates_none_found(self, demo_conn):
-        result = detect_and_plot_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
-        assert result.empty
-
-    # A duplicated (ID, LEV_M, DATEANDTIME) triple is reported as one summary row
-    def test_detect_and_plot_spatiotemporal_duplicates_found(self, demo_conn):
-        # Duplicate the (ID=0, LEV_M=0.0) sample so a time/location duplicate exists
-        demo_conn.execute(
-            "INSERT INTO P_TEMPERATURE VALUES (0,0.0,0.0,19.0,1,3,0,7,0,1,1,1)"
-        )
+class TestPlotDuplicates:
+    # The plot draws the summary chart from the finder output
+    def test_plot_duplicates(self, demo_conn):
+        demo_conn.execute("INSERT INTO P_TEMPERATURE VALUES (0,0.0,0.0,19.0,1,3,0,7,0,1,1,1)")
         demo_conn.commit()
-        result = detect_and_plot_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
-        assert len(result) == 1
-        assert result.iloc[0]["number of time loc duplicates"] == 1
-        plt.close()
+        summary, details = find_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
+        ax = plot_duplicates(summary, details)
+        assert ax is not None
+        plt.close("all")
+
+    # Without duplicates there is nothing to plot
+    def test_plot_duplicates_empty(self, demo_conn):
+        summary, details = find_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
+        assert plot_duplicates(summary, details) is None
 
 
 #--- Missing-value bar chart -----------------------------------------#
@@ -524,34 +455,3 @@ class TestPlotMissingValueInfoMapJoint:
         result = plot_missing_value_info_map_joint(_missing_value_wide_df(), ["P_NITRATE"], ax=ax)
         assert result is ax
         plt.close()
-
-
-class TestEmptyCoverageResults:
-    """Coverage helpers on empty input return their documented columns."""
-
-    # An empty df has no year range -> Nothing to count
-    def test_count_samples_over_time_year_empty(self):
-        df = pd.DataFrame({"DATEANDTIME": pd.Series(dtype="datetime64[ns]")})
-        result = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
-        assert result.empty
-        assert list(result.columns) == ["YEAR", "COUNT"]
-
-    # No parameters requested: Empty df with the documented columns
-    def test_count_negative_samples_no_parameters(self, demo_conn):
-        result = count_negative_samples(demo_conn, [])
-        assert result.empty
-        assert list(result.columns) == [
-            "parameter", "number of samples", "number of negative samples", "proportion of negative samples",
-        ]
-
-    # No duplicates found: Empty summary with defined columns
-    def test_duplicates_summary_empty(self):
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE P_X (ID INTEGER, LEV_M REAL, VAL REAL)")
-        result = detect_and_plot_spatiotemporal_duplicates(conn, ["X"])
-        conn.close()
-        assert result.empty
-        assert list(result.columns) == [
-            "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
-            "proportion of row duplicates", "proportion of time loc duplicates",
-        ]

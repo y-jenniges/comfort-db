@@ -5,7 +5,11 @@ Adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
 from __future__ import annotations
 
 __all__ = [
+    "count_negative_samples",
+    "count_samples_over_time",
+    "count_samples_per_parameter",
     "does_table_exist",
+    "find_spatiotemporal_duplicates",
     "get_min_max_dates",
     "get_minmax",
     "get_names_of_all_parameter_tables",
@@ -204,3 +208,185 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
             column_maximum = res[1]
 
     return column_minimum, column_maximum
+
+
+def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mode: str = "year",
+                            quality_flags: list | None = None) -> pd.DataFrame:
+    """Count the number of samples of a parameter per year or per month.
+    Counting is done in SQL and rows without a valid date are ignored.
+
+    Plot the result with :func:`comfort.plot.plot_counts_bar` (``tick_style`` set to *time_mode*).
+
+    Args:
+        conn (sqlite3.Connection): Connection to the database.
+        parameter (str): Parameter name (without ``P_`` prefix).
+        time_mode (str): ``'year'`` (every year between first and last, empty years
+            counted as 0) or ``'month'`` (1 to 12).
+        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+    Returns:
+        pandas.DataFrame: Columns ``[YEAR|MONTH, COUNT]``.
+    """
+    # Select the SQL date format
+    formats = {"year": "%Y", "month": "%m"}
+    if time_mode not in formats:
+        raise ValueError(f"time_mode must be 'year' or 'month', got {time_mode!r}")
+    column = time_mode.upper()
+
+    # Validate identifier and build quality filter
+    table = f"P_{parameter}"
+    validate_identifier(table)
+    quality_statement = build_where_clause(quality_flags)
+
+    # Count in SQL, joining the station table for the date
+    rows = conn.execute(
+        f"SELECT CAST(strftime('{formats[time_mode]}', s.DATEANDTIME) AS INTEGER) AS T, COUNT(*) "
+        f"FROM {table} p JOIN station s ON p.ID = s.ID {quality_statement} GROUP BY T;"
+    ).fetchall()
+    counts = pd.Series({t: n for t, n in rows if t is not None}, dtype="int64")
+
+    # Fill unobserved years / months with 0
+    if time_mode == "month":
+        counts = counts.reindex(np.arange(1, 13), fill_value=0)
+    elif not counts.empty:
+        counts = counts.reindex(np.arange(counts.index.min(), counts.index.max() + 1), fill_value=0)
+
+    out = counts.sort_index().reset_index()
+    out.columns = [column, "COUNT"]
+    return out
+
+
+def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] | None = None,
+                                *, quality_flags: list | None = None) -> pd.DataFrame:
+    """Count the total number of samples per parameter.
+
+    Plot the result with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``).
+
+    Args:
+        conn (sqlite3.Connection): Connection to the database.
+        parameters (list[str]): Parameter names (without ``P_`` prefix). ``None`` means all.
+        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+    Returns:
+        pandas.DataFrame: Columns ``[parameter, count]``.
+    """
+    # Default to all parameter tables in the database
+    if not parameters:
+        parameters = [x[2:] for x in get_names_of_all_parameter_tables(conn)]
+
+    # Count samples per parameter via SQL COUNT(*)
+    df_count = pd.DataFrame({"parameter": parameters, "count": 0})
+    for i, name in enumerate(parameters):
+        df_count.loc[i, "count"] = get_num_samples(
+            conn, f"P_{name}", table_type="table", quality_flags=quality_flags,
+        )
+    return df_count
+
+
+def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
+                           quality_flags: list | None = None) -> pd.DataFrame:
+    """Count the proportion of negative values per parameter.
+
+    Plot the proportions with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``)
+    on ``df[["parameter", "proportion of negative samples"]]``.
+
+    Args:
+        conn (sqlite3.Connection): Connection to the database.
+        parameters (list[str]): Parameter names (without ``P_`` prefix).
+        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters
+            (applied to the negative count only).
+    Returns:
+        pandas.DataFrame: Columns ``[parameter, number of samples, number of negative samples,
+        proportion of negative samples]``, sorted by the proportion.
+    """
+    cursor = conn.cursor()
+    quality_statement = build_where_clause(quality_flags, keyword="AND")
+
+    # Query negative and total counts for each parameter
+    rows = []
+    for parameter in parameters:
+        table = f"P_{parameter}"
+        validate_identifier(table)
+        logger.info("count_negative_samples: %s", parameter)
+        negative_count = cursor.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE VAL<0 {quality_statement};"
+        ).fetchone()[0]
+        count = cursor.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0]
+        rows.append({
+            "parameter": parameter,
+            "number of samples": count,
+            "number of negative samples": negative_count,
+        })
+
+    # Compute proportions and sort for display
+    df = pd.DataFrame(rows, columns=["parameter", "number of samples", "number of negative samples"])
+    df["proportion of negative samples"] = df["number of negative samples"] / df["number of samples"] * 100
+    return df.sort_values("proportion of negative samples")
+
+
+def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[str], *,
+                                   quality_flags: list | None = None
+                                   ) -> tuple[pd.DataFrame, dict[str, dict[str, pd.DataFrame]]]:
+    """Find spatio-temporal duplicates (same station and depth) per parameter.
+
+    Plot the result with :func:`comfort.plot.plot_duplicates`.
+
+    Args:
+        conn (sqlite3.Connection): Connection to the database.
+        parameters (list[str]): Parameter names (without ``P_`` prefix).
+        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+    Returns:
+        tuple: ``(summary, details)``. *summary* is a DataFrame with columns ``[parameter,
+        number of samples, number of row duplicates, number of time loc duplicates,
+        proportion of row duplicates, proportion of time loc duplicates]``. *details* maps
+        each parameter in *summary* to ``{"time_loc": ..., "rows": ...}``, the duplicated
+        (ID, LEV_M) groups with ``size``, ``mean`` and ``std`` and the exactly duplicated
+        rows with ``size``.
+    """
+    cursor = conn.cursor()
+    quality_statement = build_where_clause(quality_flags)
+
+    rows = []
+    details = {}
+    # Iterate over parameters
+    for parameter in parameters:
+        table = f"P_{parameter}"
+        validate_identifier(table)
+
+        # Fetch all rows for this parameter
+        logger.info("find_spatiotemporal_duplicates: %s", parameter)
+        ex = cursor.execute(f"SELECT * FROM {table} {quality_statement};")
+        df_param = pd.DataFrame(ex.fetchall(), columns=np.array([x[0] for x in cursor.description]))
+
+        # Spatiotemporal duplicates (same station and depth)
+        dups_time_loc = (
+            df_param.groupby(["ID", "LEV_M"], as_index=False, dropna=False)
+            .agg(size=("VAL", "size"), mean=("VAL", "mean"), std=("VAL", "std"))
+        )
+        dups_time_loc = dups_time_loc[dups_time_loc["size"] > 1]
+
+        if len(dups_time_loc) < 1:
+            logger.info("  %s: no duplicates", parameter)
+            continue
+
+        # Exact row duplicates (identical across all columns)
+        dups_row = (
+            df_param.groupby(df_param.columns.tolist(), as_index=False, dropna=False)
+            .size()
+        )
+        dups_row = dups_row[dups_row["size"] > 1]
+
+        rows.append({
+            "parameter": parameter,
+            "number of samples": len(df_param),
+            "number of row duplicates": len(dups_row),
+            "number of time loc duplicates": len(dups_time_loc),
+        })
+        details[parameter] = {"time_loc": dups_time_loc, "rows": dups_row}
+
+    # Compute duplicate proportions (an empty summary keeps the documented columns)
+    columns = ["parameter", "number of samples", "number of row duplicates", "number of time loc duplicates"]
+    summary = pd.DataFrame(rows, columns=columns)
+    summary["proportion of row duplicates"] = summary["number of row duplicates"] / summary["number of samples"] * 100
+    summary["proportion of time loc duplicates"] = (
+        summary["number of time loc duplicates"] / summary["number of samples"] * 100
+    )
+    return summary, details

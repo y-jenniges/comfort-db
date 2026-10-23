@@ -1,8 +1,13 @@
 """Tests for comfort.database.information."""
 import sqlite3
+import pandas as pd
 import pytest
 
 from comfort.database.information import (
+    count_negative_samples,
+    count_samples_over_time,
+    count_samples_per_parameter,
+    find_spatiotemporal_duplicates,
     get_min_max_dates,
     get_minmax,
     get_names_of_all_parameter_tables,
@@ -150,3 +155,130 @@ class TestGetMinMax:
                                 param_tables=["P_NITRATE"])
         assert result == (None, None)
         assert "bogus" in caplog.text
+
+
+class TestCountSamplesOverTime:
+    # Every year between first and last is reported, years without samples count 0
+    def test_year_fills_empty_years(self, comfort_conn):
+        result = count_samples_over_time(comfort_conn, "NITRATE", time_mode="year")
+        assert list(result.columns) == ["YEAR", "COUNT"]
+        assert list(result["YEAR"]) == [2000, 2001, 2002, 2003, 2004, 2005]
+        assert list(result["COUNT"]) == [2, 0, 0, 0, 0, 1]
+
+    # Months always run from 1 to 12
+    def test_month(self, comfort_conn):
+        result = count_samples_over_time(comfort_conn, "NITRATE", time_mode="month")
+        assert list(result["MONTH"]) == list(range(1, 13))
+        assert result.set_index("MONTH").loc[1, "COUNT"] == 2
+        assert result.set_index("MONTH").loc[6, "COUNT"] == 1
+        assert result["COUNT"].sum() == 3
+
+    # The SQL counts equal the pandas counts of the same dates
+    def test_matches_pandas(self, comfort_conn):
+        df = pd.read_sql("SELECT s.DATEANDTIME FROM P_NITRATE p JOIN station s ON p.ID = s.ID", comfort_conn)
+        expected = pd.to_datetime(df["DATEANDTIME"]).dt.year.value_counts().sort_index()
+        got = count_samples_over_time(comfort_conn, "NITRATE").set_index("YEAR")["COUNT"]
+        assert (got[got > 0] == expected).all()
+
+    # Quality flags filter the samples before counting
+    def test_quality_flags(self, comfort_conn):
+        result = count_samples_over_time(comfort_conn, "NITRATE", quality_flags=QC_GOOD)
+        assert list(result["YEAR"]) == [2000]
+        assert list(result["COUNT"]) == [2]
+
+    # Dates with fractional seconds are counted, rows without a valid date are ignored
+    def test_date_formats(self, comfort_conn):
+        comfort_conn.execute("UPDATE station SET DATEANDTIME='2001-02-03 04:05:06.789' WHERE ID=1")
+        comfort_conn.execute("UPDATE station SET DATEANDTIME=NULL WHERE ID=2")
+        comfort_conn.commit()
+        result = count_samples_over_time(comfort_conn, "NITRATE")
+        assert list(result["YEAR"]) == [2001]
+        assert list(result["COUNT"]) == [2]
+
+    # No samples -> No year range to count over
+    def test_year_empty(self, comfort_conn):
+        comfort_conn.execute("CREATE TABLE P_EMPTY (ID INTEGER, VAL REAL)")
+        result = count_samples_over_time(comfort_conn, "EMPTY", time_mode="year")
+        assert result.empty
+        assert list(result.columns) == ["YEAR", "COUNT"]
+
+    # An unknown time_mode is rejected
+    def test_bad_time_mode(self, comfort_conn):
+        with pytest.raises(ValueError, match="time_mode"):
+            count_samples_over_time(comfort_conn, "NITRATE", time_mode="week")
+
+
+class TestCountSamplesPerParameter:
+    # Counts are reported per requested parameter
+    def test_requested_parameters(self, comfort_conn):
+        result = count_samples_per_parameter(comfort_conn, ["NITRATE", "OXYGEN"])
+        assert dict(zip(result["parameter"], result["count"])) == {"NITRATE": 3, "OXYGEN": 2}
+
+    # parameters=None discovers and counts every parameter table
+    def test_default_all(self, comfort_conn):
+        result = count_samples_per_parameter(comfort_conn)
+        assert set(result["parameter"]) == {"NITRATE", "OXYGEN"}
+
+    # Quality flags filter the counted samples
+    def test_quality_flags(self, comfort_conn):
+        result = count_samples_per_parameter(comfort_conn, ["NITRATE"], quality_flags=QC_GOOD)
+        assert list(result["count"]) == [2]
+
+
+class TestCountNegativeSamples:
+    # Proportion of negative samples per parameter, sorted ascending
+    def test_proportions(self, comfort_conn):
+        comfort_conn.execute("INSERT INTO P_NITRATE VALUES (3,0.0,0.0,-1.0,1,3,0,1,3,1,3,1)")
+        comfort_conn.commit()
+        result = count_negative_samples(comfort_conn, ["NITRATE", "OXYGEN"])
+        assert list(result["parameter"]) == ["OXYGEN", "NITRATE"]
+        assert list(result["number of negative samples"]) == [0, 1]
+        assert list(result["proportion of negative samples"]) == [0.0, 25.0]
+
+    # No parameters requested: Empty df with the documented columns
+    def test_no_parameters(self, comfort_conn):
+        result = count_negative_samples(comfort_conn, [])
+        assert result.empty
+        assert list(result.columns) == [
+            "parameter", "number of samples", "number of negative samples", "proportion of negative samples",
+        ]
+
+
+class TestFindSpatiotemporalDuplicates:
+    # No duplicated (ID, LEV_M) pairs in the clean fixture
+    def test_none_found(self, comfort_conn):
+        summary, details = find_spatiotemporal_duplicates(comfort_conn, ["NITRATE"])
+        assert summary.empty
+        assert details == {}
+
+    # A repeated (ID, LEV_M) pair is one time/location duplicate, but not a row duplicate
+    def test_time_loc_duplicate(self, comfort_conn):
+        comfort_conn.execute("INSERT INTO P_NITRATE VALUES (1,0.0,0.0,6.0,1,3,0,9,1,1,3,1)")
+        comfort_conn.commit()
+        summary, details = find_spatiotemporal_duplicates(comfort_conn, ["NITRATE"])
+        assert len(summary) == 1
+        row = summary.iloc[0]
+        assert row["number of samples"] == 4
+        assert row["number of time loc duplicates"] == 1
+        assert row["number of row duplicates"] == 0
+        assert row["proportion of time loc duplicates"] == 25.0
+        assert set(details["NITRATE"]) == {"time_loc", "rows"}
+        assert len(details["NITRATE"]["time_loc"]) == 1
+
+    # An exactly repeated row counts as a row duplicate
+    def test_row_duplicate(self, comfort_conn):
+        comfort_conn.execute("INSERT INTO P_NITRATE VALUES (1,0.0,0.0,5.0,1,3,0,1,1,1,3,1)")
+        comfort_conn.commit()
+        summary, _ = find_spatiotemporal_duplicates(comfort_conn, ["NITRATE"])
+        assert summary.iloc[0]["number of row duplicates"] == 1
+
+    # No duplicates found: Empty summary with defined columns
+    def test_summary_empty(self, comfort_conn):
+        comfort_conn.execute("CREATE TABLE P_X (ID INTEGER, LEV_M REAL, VAL REAL)")
+        summary, details = find_spatiotemporal_duplicates(comfort_conn, ["X"])
+        assert summary.empty
+        assert details == {}
+        assert list(summary.columns) == [
+            "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
+            "proportion of row duplicates", "proportion of time loc duplicates",
+        ]

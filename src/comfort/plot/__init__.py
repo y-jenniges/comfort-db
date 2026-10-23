@@ -37,17 +37,10 @@ from .spatial import (
 
 # --- coverage: how much data is there, and how complete is it? ---
 from .coverage import (
-    count_and_plot_negative_samples,
-    count_and_plot_samples_over_time,
-    count_and_plot_samples_per_parameter,
-    count_negative_samples,
-    count_samples_over_time,
-    count_samples_over_time_from_db,
-    count_samples_per_parameter,
-    detect_and_plot_spatiotemporal_duplicates,
     plot_annual_coverage,
     plot_counts_bar,
     plot_depth_coverage,
+    plot_duplicates,
     plot_missing_value_info,
 )
 
@@ -71,16 +64,9 @@ __all__ = [
     "plot_missing_value_info_map_joint",
     "plot_missing_value_info_map_over_depth",
     # coverage
-    "count_samples_over_time",
-    "count_samples_over_time_from_db",
-    "count_samples_per_parameter",
-    "count_negative_samples",
     "plot_annual_coverage",
     "plot_counts_bar",
     "plot_depth_coverage",
+    "plot_duplicates",
     "plot_missing_value_info",
-    "count_and_plot_samples_over_time",
-    "count_and_plot_samples_per_parameter",
-    "count_and_plot_negative_samples",
-    "detect_and_plot_spatiotemporal_duplicates",
 ]
