@@ -954,6 +954,14 @@ class TestLoadComfortUnitConversion:
         assert len(df) == 2
         assert (df["UNITS_ID"] == 3).all()
 
+    # Unit conversion works for any spelling of the parameter (the molar-mass lookup was case-sensitive)
+    @pytest.mark.parametrize("name", ["OXYGEN", "oxygen", "P_OXYGEN", "p_oxygen"])
+    def test_convert_units_accepts_all_spellings(self, oxygen_db, name):
+        db_path = oxygen_db(with_ts_tables=True)
+        result = load_comfort(db_path, parameters=[name], convert_units=True, as_xarray=False)
+        assert list(result) == ["OXYGEN"]
+        assert (result["OXYGEN"]["UNITS_ID"] == 3).all()
+
     # Default on_missing="drop": A row needing T/S but missing it is dropped, logged
     def test_unconvertible_rows_dropped_with_warning(self, oxygen_db, caplog):
         db_path = oxygen_db(with_ts_tables=False)
@@ -1156,3 +1164,41 @@ class TestEmptySummaries:
         normal = info(comfort_db)
         assert empty.empty
         assert list(empty.columns) == list(normal.columns)
+
+
+class TestParameterSpellings:
+    """SALINITY, salinity, P_SALINITY and p_salinity are the same parameter everywhere."""
+    names = ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"]
+
+    # load_comfort returns the canonical key whatever was passed
+    @pytest.mark.parametrize("name", names)
+    def test_load_comfort_key_and_values(self, comfort_db, name):
+        expected = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False)["NITRATE"]
+        result = load_comfort(comfort_db, parameters=[name], as_xarray=False)
+        assert list(result) == ["NITRATE"]
+        pd.testing.assert_frame_equal(result["NITRATE"], expected)
+
+    # Several spellings of one parameter are loaded once
+    def test_load_comfort_deduplicates(self, comfort_db):
+        result = load_comfort(comfort_db, parameters=["NITRATE", "nitrate", "P_NITRATE"], as_xarray=False)
+        assert list(result) == ["NITRATE"]
+
+    # An unknown parameter is reported in canonical spelling
+    def test_load_comfort_unknown(self, comfort_db):
+        with pytest.raises(ValueError, match="BOGUS"):
+            load_comfort(comfort_db, parameters=["p_bogus"], as_xarray=False)
+
+    @pytest.mark.parametrize("name", names)
+    def test_read_parameter(self, comfort_db, name):
+        conn = sqlite3.connect(comfort_db)
+        expected = read_parameter(conn, "NITRATE")
+        result = read_parameter(conn, name)
+        conn.close()
+        pd.testing.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize("name", names)
+    def test_describe_variables(self, comfort_db, name):
+        conn = sqlite3.connect(comfort_db)
+        result = describe_variables(conn, parameters=[name])
+        conn.close()
+        assert list(result["parameter"]) == ["NITRATE"]

@@ -50,7 +50,7 @@ def boxplot(
         kind: Plot type (``'box'`` or ``'violin'``).
         title: Plot title (defaults to *value_col*).
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         ax: Axes to draw into.
         save_as: File path to save the figure.
@@ -96,7 +96,7 @@ def plot_histogram(
         title: Plot title.
         kind: Plot kind accepted by ``DataFrame.plot()``.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         ax: Axes to draw into.
         save_as: File path to save the figure.
@@ -136,7 +136,7 @@ def plot_monthly_histogram(
         value_col: Column with measured values.
         date_col: Column with datetime values.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         save_as: File path to save the figure.
         dpi: Resolution (dots per inch) used when saving.

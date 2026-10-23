@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from ..database.information import param_table_name
 from ..qc import build_where_clause
+from ..util.columns import resolve_param_columns
 from ..util.sqlite_utils import validate_identifier
 from ._helpers import _finish, _get_or_create_ax, _require_cartopy
 
@@ -52,7 +54,7 @@ def plot_spatial_distribution(
         cmap: Matplotlib colormap name.
         colorbar_label: Colour-bar label.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name (without ``P_`` prefix).
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         ax: Axes to draw into. Must already use a cartopy projection when
             passed explicitly. Creates a new PlateCarree figure when ``None``.
@@ -70,7 +72,7 @@ def plot_spatial_distribution(
             raise ValueError(
                 "Provide either a DataFrame (df) or conn + parameter"
             )
-        table = f"P_{parameter}"
+        table = param_table_name(parameter)
         validate_identifier(table)
         quality_statement = build_where_clause(quality_flags)
         cursor = conn.cursor()
@@ -182,6 +184,7 @@ def plot_parameter_map(
     cmap = plt.colormaps["viridis"].with_extremes(bad=mcolors.to_rgba("black", alpha=0.2))
 
     # One map per parameter x time x depth combination
+    param_tables = resolve_param_columns(df_wide, param_tables)
     for param in param_tables:
         # Shared color norm for all times/depths of a parameter
         norm = plt.Normalize(df_wide[param].min(), df_wide[param].max())
@@ -240,6 +243,7 @@ def plot_missing_value_info_map_over_depth(
     cmap = plt.colormaps["viridis"]
     norm = plt.Normalize(0, 100)
 
+    param_tables = resolve_param_columns(df_wide, param_tables)
     for param in param_tables:
         for t in times:
             dft = df_wide[df_wide["DATEANDTIME"] == t]
@@ -298,6 +302,7 @@ def plot_missing_value_info_map_joint(
     ax, standalone = _get_or_create_ax(ax, projection=ccrs.PlateCarree())
 
     # Compute missingness
+    param_cols = resolve_param_columns(df_wide, param_cols)
     spatial = df_wide.groupby(["LATITUDE", "LONGITUDE"])[param_cols].apply(
         lambda g: g.isna().all(axis=1).mean() * 100,
     ).reset_index(name="pct_missing")

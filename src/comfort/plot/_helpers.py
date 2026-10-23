@@ -84,7 +84,7 @@ def _resolve_data(
     Args:
         df: User-supplied data. Returned as-is if not ``None``.
         conn: Database connection (required when *df* is ``None``).
-        parameter: Parameter name without the ``P_`` prefix (required when *df* is ``None``).
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix (required when *df* is ``None``).
         quality_flags: QC filter tuples forwarded to the reader.
         profiles: Profile numbers to load. Pushed to SQL when loading from DB.
     """

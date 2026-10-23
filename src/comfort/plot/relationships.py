@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from ..database.information import param_label, param_table_name
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
 from ._helpers import _finish, _get_or_create_ax, _pretty_label, _save_fig
@@ -71,7 +72,7 @@ def plot_correlation(
         xlabel: x-axis label (defaults to *x_col*).
         ylabel: y-axis label (defaults to *y_col*).
         conn: Database connection (alternative to *df*).
-        parameters: ``(param_x, param_y)`` names (without ``P_`` prefix).
+        parameters: ``(param_x, param_y)`` names. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters forwarded to the SQL query.
         ax: Axes to draw into.
         save_as: File path to save the figure.
@@ -173,7 +174,7 @@ def plot_joint(
         y_col: Column for y-axis.
         kind: Joint-plot kind (``'scatter'``, ``'hist'``, ``'kde'``, ``'hex'``, ``'reg'``).
         conn: Database connection (alternative to *df*).
-        parameters: ``(param_x, param_y)`` names (without ``P_`` prefix).
+        parameters: ``(param_x, param_y)`` names. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         save_as: File path to save the figure.
         dpi: Resolution (dots per inch) used when saving.
@@ -207,11 +208,12 @@ def _load_pair(conn, parameters, quality_flags):
         raise ValueError(
             "Provide either a DataFrame (df) or conn + parameters=(param_x, param_y)"
         )
-    x_name, y_name = parameters
+    x_name, y_name = (param_label(p) for p in parameters)
 
     # Validate table identifiers
-    validate_identifier(f"P_{x_name}")
-    validate_identifier(f"P_{y_name}")
+    x_table, y_table = param_table_name(x_name), param_table_name(y_name)
+    validate_identifier(x_table)
+    validate_identifier(y_table)
 
     # Build quality-flag clauses for both tables
     where = build_where_clause(quality_flags, table_alias="p")
@@ -221,8 +223,8 @@ def _load_pair(conn, parameters, quality_flags):
 
     # Join the two parameter tables on station ID and depth
     sql = (
-        f"SELECT p.VAL, q.VAL FROM P_{x_name} AS p "
-        f"LEFT JOIN P_{y_name} AS q USING(ID, LEV_M) "
+        f"SELECT p.VAL, q.VAL FROM {x_table} AS p "
+        f"LEFT JOIN {y_table} AS q USING(ID, LEV_M) "
         f"{where}{and_clause};"
     )
     cur = conn.cursor()

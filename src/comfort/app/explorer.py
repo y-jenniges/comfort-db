@@ -615,7 +615,7 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
             if "UNITS_ID" in df.columns and df["UNITS_ID"].nunique() > 1:
                 try:
                     uc = UnitsConverter.from_connection(conn)
-                    df = uc.convert_dataframe(df, f"P_{param}")
+                    df = uc.convert_dataframe(df, param)
                     converted = True
                 except (ValueError, Exception) as e:
                     logger.warning("Unit conversion skipped: %s", e)

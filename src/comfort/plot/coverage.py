@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from ..database.information import param_label
+from ..util.columns import resolve_param_columns
 from ._helpers import _finish, _get_or_create_ax, _save_fig
 
 if TYPE_CHECKING:
@@ -98,10 +100,9 @@ def plot_depth_coverage(
     depths = sorted(df_wide[depth_col].dropna().unique())
 
     # Plot count-vs-depth per parameter
-    for col in param_cols:
+    for col in resolve_param_columns(df_wide, param_cols):
         counts = [df_wide.loc[df_wide[depth_col] == d, col].notna().sum() for d in depths]
-        label = col[2:] if col.startswith("P_") else col
-        label = label.capitalize() if label.isupper() else label
+        label = param_label(col).capitalize()
         ax.plot(counts, depths, marker="o", label=label, markersize=4)
 
     # Labels and format

@@ -30,19 +30,9 @@ from dateutil.relativedelta import relativedelta
 
 from .util import sqlite_utils
 from .util.sqlite_utils import validate_identifier
-from .database.information import does_table_exist, get_table_as_df, get_names_of_all_parameter_tables
+from .database.information import does_table_exist, get_names_of_all_parameter_tables, get_table_as_df, param_table_name
 
 logger = logging.getLogger(__name__)
-
-
-def _param_table_name(name: str) -> str:
-    """Normalise a parameter name to its P_* table name.
-
-    Matches the ``f"P_{param_name.upper()}"`` convention used by
-    ``io.read_parameter``/``load_comfort``, so callers can pass either
-    ``"NITRATE"`` or ``"P_NITRATE"``.
-    """
-    return name if name.upper().startswith("P_") else f"P_{name.upper()}"
 
 
 _last_id = 0  # init grid id
@@ -461,7 +451,7 @@ class Grid:
         # Successively merge each binned parameter onto the grid
         for name, df in dfs.items():
             # Rename the value column to P_<name>
-            col = name if name.startswith("P_") else f"P_{name}"
+            col = param_table_name(name)
             if name in df.columns:
                 df = df.rename(columns={name: col})
             # Binning
@@ -645,7 +635,7 @@ class Grid:
         mapped_tables = []
         for table in param_tables:
             # Normalise to the P_* table name and validate it
-            table = _param_table_name(table)
+            table = param_table_name(table)
             validate_identifier(table)
 
             # Check if table already exists
@@ -1094,7 +1084,7 @@ def create_wide_table_online(connection: sqlite3.Connection, grid_id: int,
     # If no parameter tables are specified, use all
     if not param_tables:
         param_tables = get_names_of_all_parameter_tables(connection)
-    param_tables = [_param_table_name(p) for p in param_tables]
+    param_tables = [param_table_name(p) for p in param_tables]
     for p in param_tables:
         validate_identifier(p)
 
@@ -1143,7 +1133,7 @@ def get_missing_value_info_per_param(connection: sqlite3.Connection, wide_table_
         pandas.DataFrame with columns 'parameter', 'total', 'relative'.
     """
     # Define SQL query parts
-    param_tables = [_param_table_name(p) for p in param_tables]
+    param_tables = [param_table_name(p) for p in param_tables]
     for p in param_tables:
         validate_identifier(p)
     water_or_any = " or ".join(f"{p} is not null" for p in param_tables)

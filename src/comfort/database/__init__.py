@@ -12,6 +12,8 @@ from .information import (
     get_names_of_all_parameter_tables,
     get_num_samples,
     get_table_as_df,
+    param_label,
+    param_table_name,
 )
 from .structure import (
     create_combined_parameter_table,
@@ -30,5 +32,7 @@ __all__ = [
     "get_names_of_all_parameter_tables",
     "get_num_samples",
     "get_table_as_df",
+    "param_label",
+    "param_table_name",
     "remove_tables_like",
 ]

@@ -22,6 +22,8 @@ import gsw
 import numpy as np
 import pandas as pd
 
+from .util.columns import resolve_param_columns
+
 if TYPE_CHECKING:
     import geopandas as gpd
 
@@ -438,14 +440,13 @@ def water_mass_statistics(df: pd.DataFrame, param_cols: list[str] | str,
     Args:
         df (pandas.DataFrame): DataFrame with region assignments
             (from :func:`water_mass_masks`) and parameter columns.
-        param_cols (list[str]): Parameter columns to aggregate.
+        param_cols (list[str] or str): Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
         region_col (str): Region column. Default ``"region"``.
     Returns:
         pandas.DataFrame: MultiIndex columns ``(parameter, statistic)``
             with count, mean, std, min, max. Rows are regions.
     """
-    if isinstance(param_cols, str):
-        param_cols = [param_cols]
+    param_cols = resolve_param_columns(df, param_cols)
     return df.groupby(region_col)[param_cols].agg(["count", "mean", "std", "min", "max"])
 
 

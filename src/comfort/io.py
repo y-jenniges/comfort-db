@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
 
 from .profile_analysis import interpolate_depth_levels
-from .database.information import get_names_of_all_parameter_tables
+from .database.information import get_names_of_all_parameter_tables, param_label, param_table_name
 from .geo import region_bbox, water_mass_masks
 from .qc import QCFilter, build_where_clause, qc_conditions
 from .util.sqlite_utils import validate_identifier
@@ -99,7 +99,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
         rows = []
         for param in params:
             validate_identifier(param)
-            table = f"P_{param}"
+            table = param_table_name(param)
             cur = conn.cursor()
 
             # Get depth range
@@ -140,7 +140,7 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
     Returns:
         list[str]: Parameter names, e.g. ``['NITRATE', 'OXYGEN', ...]``.
     """
-    return [name[2:] for name in get_names_of_all_parameter_tables(conn)]
+    return [param_label(name) for name in get_names_of_all_parameter_tables(conn)]
 
 
 def read_parameter(conn: sqlite3.Connection, param_name: str, *,
@@ -161,7 +161,7 @@ def read_parameter(conn: sqlite3.Connection, param_name: str, *,
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        param_name (str): Parameter name (without ``'P_'`` prefix).
+        param_name (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags (list[QCFilter] or list[tuple[str, str]]): QC filters,
             e.g. ``QC_GOOD``.
         profiles (list[int]): Profile numbers to load. ``None`` loads all.
@@ -225,7 +225,7 @@ def describe_variables(conn: sqlite3.Connection,
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names (without ``P_`` prefix).
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
             ``None`` describes all available parameters.
         quality_flags (list[list[str, str]]): Optional QC filters applied
             when counting samples and computing ranges.
@@ -240,11 +240,13 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Iterate over given parameters
     if parameters is not None:
-        # Warn if parameters are unknown
-        unknown = set(parameters) - set(all_params)
+        # Canonical names (case and P_ prefix do not matter), each only once
+        params = list(dict.fromkeys(param_label(p) for p in parameters))
+
+        # Fail if parameters are unknown
+        unknown = set(params) - set(all_params)
         if unknown:
             raise ValueError(f"Unknown parameters: {sorted(unknown)}")
-        params = parameters
     else:
         params = all_params
 
@@ -264,7 +266,7 @@ def describe_variables(conn: sqlite3.Connection,
         validate_identifier(param)
 
         # Define table name
-        table = f"P_{param}"
+        table = param_table_name(param)
 
         # Connect to db and fetch parameter statistics
         cur = conn.cursor()
@@ -499,7 +501,8 @@ def load_comfort(
             SQLite database or an existing open connection. When a path is
             given, the connection is opened and closed automatically. When a
             connection is passed, it is left open.
-        parameters (list[str]): Parameter names (without prefix).
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+            The result uses the upper case name without prefix.
             ``None`` loads all available parameters.
         quality_flags: QC filter preset, e.g. :data:`comfort.qc.QC_GOOD`.
             ``None`` means no filtering.
@@ -574,8 +577,11 @@ def load_comfort(
         if parameters is None:
             parameters = available
         else:
+            # Canonical names (case and P_ prefix do not matter), each only once
+            parameters = list(dict.fromkeys(param_label(p) for p in parameters))
+
             # Fail (before loading anything) if a requested parameter table is missing
-            unknown = {p for p in parameters if p.upper() not in {a.upper() for a in available}}
+            unknown = {p for p in parameters if p not in available}
             if unknown:
                 raise ValueError(f"Unknown parameters: {sorted(unknown)}")
 
@@ -644,7 +650,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
 
     # Check if temperature and/or salinity are required for unit conversions
     with_temperature, with_salinity = (
-        converter.required_inputs(f"P_{param.upper()}", use_density) if converter else (False, False))
+        converter.required_inputs(param_table_name(param), use_density) if converter else (False, False))
 
     # Load param with space, time and optionally T and S columns
     df = _read_with_geo(conn, param, quality_flags, limit=limit,
@@ -669,7 +675,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
 
     # Convert to default unit before renaming VAL
     if converter is not None and "VAL" in df.columns:
-        df = converter.convert_dataframe(df, f"P_{param}",
+        df = converter.convert_dataframe(df, param_table_name(param),
                                          use_density=use_density,
                                          on_missing=on_missing,
                                          density_fallback=density_fallback)
@@ -887,7 +893,8 @@ def _read_with_geo(conn, param_name, quality_flags,
     from .database.information import does_table_exist
 
     # Validate identifiers
-    validate_identifier(param_name)
+    table = param_table_name(param_name)
+    validate_identifier(table)
     for col in extra_station_cols or []:
         validate_identifier(col)
 
@@ -948,7 +955,7 @@ def _read_with_geo(conn, param_name, quality_flags,
     query = (
         f"SELECT p.*, s.LATITUDE, s.LONGITUDE{extra_select}, "
         f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME{ts_select} "
-        f"FROM P_{param_name.upper()} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
+        f"FROM {table} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
     )
     # T/S sub-query values come first in the SQL text, so they come first in the parameters
     params = ts_params + params

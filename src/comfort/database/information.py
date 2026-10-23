@@ -15,6 +15,8 @@ __all__ = [
     "get_names_of_all_parameter_tables",
     "get_num_samples",
     "get_table_as_df",
+    "param_label",
+    "param_table_name",
 ]
 
 import logging
@@ -26,6 +28,35 @@ from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
 
 logger = logging.getLogger(__name__)
+
+
+def param_label(name: str) -> str:
+    """Return the canonical parameter name: Upper case, without ``P_`` prefix.
+
+    ``'nitrate'``, ``'NITRATE'``, ``'p_nitrate'`` and ``'P_NITRATE'`` all give ``'NITRATE'``.
+    Use it for dictionary keys, column names and plot labels.
+
+    Args:
+        name (str): Parameter name or ``P_*`` table name, any casing.
+    Returns:
+        str: Canonical parameter name.
+    """
+    name = name.strip().upper()
+    return name[2:] if name.startswith("P_") else name
+
+
+def param_table_name(name: str) -> str:
+    """Return the ``P_*`` table name of a parameter.
+
+    ``'nitrate'``, ``'NITRATE'``, ``'p_nitrate'`` and ``'P_NITRATE'``  all give ``'P_NITRATE'``.
+    See :func:`param_label` for the inverse.
+
+    Args:
+        name (str): Parameter name or ``P_*`` table name, any casing.
+    Returns:
+        str: Table name.
+    """
+    return f"P_{param_label(name)}"
 
 
 def does_table_exist(conn: sqlite3.Connection, table_name: str, table_type: str = "table") -> bool:
@@ -219,7 +250,7 @@ def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mo
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        parameter (str): Parameter name (without ``P_`` prefix).
+        parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         time_mode (str): ``'year'`` (every year between first and last, empty years
             counted as 0) or ``'month'`` (1 to 12).
         quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
@@ -233,7 +264,7 @@ def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mo
     column = time_mode.upper()
 
     # Validate identifier and build quality filter
-    table = f"P_{parameter}"
+    table = param_table_name(parameter)
     validate_identifier(table)
     quality_statement = build_where_clause(quality_flags)
 
@@ -263,20 +294,21 @@ def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] 
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names (without ``P_`` prefix). ``None`` means all.
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix. ``None`` means all.
         quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[parameter, count]``.
     """
     # Default to all parameter tables in the database
     if not parameters:
-        parameters = [x[2:] for x in get_names_of_all_parameter_tables(conn)]
+        parameters = get_names_of_all_parameter_tables(conn)
+    parameters = [param_label(p) for p in parameters]
 
     # Count samples per parameter via SQL COUNT(*)
     df_count = pd.DataFrame({"parameter": parameters, "count": 0})
     for i, name in enumerate(parameters):
         df_count.loc[i, "count"] = get_num_samples(
-            conn, f"P_{name}", table_type="table", quality_flags=quality_flags,
+            conn, param_table_name(name), table_type="table", quality_flags=quality_flags,
         )
     return df_count
 
@@ -290,7 +322,7 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names (without ``P_`` prefix).
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
         quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters
             (applied to the negative count only).
     Returns:
@@ -302,8 +334,8 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
 
     # Query negative and total counts for each parameter
     rows = []
-    for parameter in parameters:
-        table = f"P_{parameter}"
+    for parameter in map(param_label, parameters):
+        table = param_table_name(parameter)
         validate_identifier(table)
         logger.info("count_negative_samples: %s", parameter)
         negative_count = cursor.execute(
@@ -331,7 +363,7 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names (without ``P_`` prefix).
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
         quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
     Returns:
         tuple: ``(summary, details)``. *summary* is a DataFrame with columns ``[parameter,
@@ -347,8 +379,8 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
     rows = []
     details = {}
     # Iterate over parameters
-    for parameter in parameters:
-        table = f"P_{parameter}"
+    for parameter in map(param_label, parameters):
+        table = param_table_name(parameter)
         validate_identifier(table)
 
         # Fetch all rows for this parameter

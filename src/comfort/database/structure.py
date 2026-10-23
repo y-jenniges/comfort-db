@@ -12,7 +12,7 @@ __all__ = [
 import logging
 import sqlite3
 
-from .information import get_names_of_all_parameter_tables, does_table_exist
+from .information import does_table_exist, get_names_of_all_parameter_tables, param_label, param_table_name
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
 
@@ -66,7 +66,8 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
         columns = ["ID", "LEV_DBAR", "LEV_M", "VAL", "PQF1", "PQF2", "SQF", "BOTTLE_NUMBER",
                    "PROFILE_NUMBER", "PROFILE_BEST", "UNITS_ID", "INSTRUMENT_ID"]
 
-    # Validate identifiers
+    # Validate identifiers (parameters in canonical spelling)
+    parameters = [param_label(p) for p in parameters]
     for p in parameters:
         validate_identifier(p)
     for col in columns:
@@ -79,17 +80,17 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
     select_params = []
     for p in parameters:
         # Check if view/table exist
-        view_exists = does_table_exist(conn, f"P_{p.upper()}", "view")
-        table_exists = does_table_exist(conn, f"P_{p.upper()}", "table")
+        view_exists = does_table_exist(conn, param_table_name(p), "view")
+        table_exists = does_table_exist(conn, param_table_name(p), "table")
 
         # Build data-fetching query
         if view_exists or table_exists:
             select_params.append(
-                f"SELECT '{p.upper()}' AS PARAM_NAME, {', '.join(columns)} "
-                f"FROM P_{p.upper()} {quality_statement}"
+                f"SELECT '{p}' AS PARAM_NAME, {', '.join(columns)} "
+                f"FROM {param_table_name(p)} {quality_statement}"
             )
         else:
-            logger.warning(f"create_combined_parameter_table: P_{p.upper()} does not exist - skipping")
+            logger.warning(f"create_combined_parameter_table: {param_table_name(p)} does not exist - skipping")
 
     # Build combined query and execute
     query = (f"CREATE {table_type} IF NOT EXISTS P_COMBINED AS "

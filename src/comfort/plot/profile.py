@@ -63,7 +63,7 @@ def plot_profile(
         show_points: Mark each actual measurement on the profile line.
             Default ``True``.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters forwarded to the reader.
         ax: Axes to draw into. Creates a new figure when ``None``.
         save_as: File path to save the figure.
@@ -185,7 +185,7 @@ def plot_section(
         depth_bins: Number of depth bins, or explicit bin edges, when
             *binned* is ``True``.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters when reading parameters.
         ax: Axes to draw into.
         save_as: File path to save the figure.

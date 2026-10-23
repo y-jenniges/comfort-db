@@ -225,6 +225,20 @@ class TestPlotCorrelation:
         assert ax is not None
         plt.close()
 
+    # Parameters in any spelling find their tables
+    @pytest.mark.parametrize("pair", [("temperature", "P_OXYGEN"), ("p_temperature", "oxygen")])
+    def test_from_database_spellings(self, demo_conn, pair):
+        ax = plot_correlation(conn=demo_conn, parameters=pair)
+        assert ax is not None
+        plt.close()
+
+    # plot_joint takes parameters in any spelling too
+    @pytest.mark.parametrize("pair", [("temperature", "P_SALINITY"), ("p_temperature", "salinity")])
+    def test_joint_from_database_spellings(self, demo_conn, pair):
+        g = plot_joint(conn=demo_conn, parameters=pair, kind="scatter")
+        assert g is not None
+        plt.close()
+
     # plot_joint wraps seaborn's JointGrid for the same database-mode input
     def test_joint_from_database(self, demo_conn):
         g = plot_joint(conn=demo_conn, parameters=("TEMPERATURE", "SALINITY"), kind="scatter")
@@ -319,6 +333,19 @@ class TestPlotAnnualCoverage:
 #--- Depth coverage --------------------------------------------------#
 
 class TestPlotDepthCoverage:
+    # Parameter names in any spelling find the P_* columns of a wide table
+    def test_parameter_spellings(self):
+        df_wide = pd.DataFrame({"LEV_M": [0, 50], "P_TEMPERATURE": [1.0, 2.0], "P_SALINITY": [35.0, np.nan]})
+        ax = plot_depth_coverage(df_wide, ["temperature", "p_salinity"])
+        assert len(ax.lines) == 2
+        plt.close()
+
+    # A parameter without a column is an error
+    def test_unknown_parameter_raises(self):
+        df_wide = pd.DataFrame({"LEV_M": [0, 50], "P_TEMPERATURE": [1.0, 2.0]})
+        with pytest.raises(KeyError, match="OXYGEN"):
+            plot_depth_coverage(df_wide, ["OXYGEN"])
+
     # One line per parameter column, y-axis inverted (deeper = lower)
     def test_basic(self):
         df_wide = pd.DataFrame({

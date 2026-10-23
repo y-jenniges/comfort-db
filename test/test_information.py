@@ -12,6 +12,8 @@ from comfort.database.information import (
     get_minmax,
     get_names_of_all_parameter_tables,
     get_num_samples,
+    param_label,
+    param_table_name,
 )
 from comfort.qc import QC_GOOD
 
@@ -282,3 +284,22 @@ class TestFindSpatiotemporalDuplicates:
             "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
             "proportion of row duplicates", "proportion of time loc duplicates",
         ]
+
+
+class TestParamNames:
+    # Case and a P_ prefix do not matter
+    @pytest.mark.parametrize("name", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate", " Nitrate "])
+    def test_spellings(self, name):
+        assert param_label(name) == "NITRATE"
+        assert param_table_name(name) == "P_NITRATE"
+
+    # Only a leading prefix is stripped
+    def test_inner_p_is_kept(self):
+        assert param_label("PHTS25P0") == "PHTS25P0"
+        assert param_label("p_ph") == "PH"
+
+    # All spellings count the same samples
+    @pytest.mark.parametrize("name", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
+    def test_count_functions_accept_all_spellings(self, comfort_conn, name):
+        assert list(count_samples_per_parameter(comfort_conn, [name])["parameter"]) == ["NITRATE"]
+        assert count_samples_over_time(comfort_conn, name)["COUNT"].sum() == 3
