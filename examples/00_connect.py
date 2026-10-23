@@ -77,8 +77,8 @@ if BATHYMETRY_PATH:
 
     # Create grid with 5-year time steps
     grid = Grid(
-        lat_min=30, lat_max=70, dlat=5,
         lon_min=-80, lon_max=0, dlon=5,
+        lat_min=30, lat_max=70, dlat=5,
         bathymetry_grid_path=BATHYMETRY_PATH,
         z_array=[0, 100, 500, 1000],
         time_min="2000-01-01", time_max="2020-12-31",

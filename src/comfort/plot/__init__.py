@@ -28,7 +28,7 @@ from .distribution import (
 
 # --- spatial: where is the data, and where is it missing? ---
 from .spatial import (
-    plot_lat_lon_range,
+    plot_lon_lat_range,
     plot_parameter_map,
     plot_missing_value_info_map_joint,
     plot_missing_value_info_map_over_depth,
@@ -59,7 +59,7 @@ __all__ = [
     "plot_monthly_histogram",
     # spatial
     "plot_spatial_distribution",
-    "plot_lat_lon_range",
+    "plot_lon_lat_range",
     "plot_parameter_map",
     "plot_missing_value_info_map_joint",
     "plot_missing_value_info_map_over_depth",

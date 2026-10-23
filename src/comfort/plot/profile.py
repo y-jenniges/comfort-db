@@ -141,8 +141,8 @@ def plot_section(
         value_col: str = "VAL",
         depth_col: str = "LEV_M",
         along_col: str | None = None,
-        lat_col: str = "LATITUDE",
         lon_col: str = "LONGITUDE",
+        lat_col: str = "LATITUDE",
         xlabel: str | None = None,
         ylabel: str = "Depth [m]",
         colourbar_label: str | None = None,
@@ -173,11 +173,11 @@ def plot_section(
         value_col: Column with measured values.
         depth_col: Column with depth in metres.
         along_col: Column to use as horizontal axis. Auto-selected from
-            *lat_col*/*lon_col* when ``None``. Pass the output column of
+            *lon_col*/*lat_col* when ``None``. Pass the output column of
             :func:`~comfort.geo.along_track_distance` to plot along an
             arbitrary transect instead.
-        lat_col: Latitude column name.
         lon_col: Longitude column name.
+        lat_col: Latitude column name.
         xlabel: Horizontal axis label.
         ylabel: Vertical axis label.
         colourbar_label: Colour-bar label. Defaults to *value_col*.
@@ -209,8 +209,8 @@ def plot_section(
     # Resolve column names (insensitive to casing)
     value_col = find_col(df, value_col)
     depth_col = find_col(df, depth_col)
-    lat_col = find_col(df, lat_col, required=False) or lat_col
     lon_col = find_col(df, lon_col, required=False) or lon_col
+    lat_col = find_col(df, lat_col, required=False) or lat_col
 
     # Auto-select the coordinate axis with the larger spatial range
     if along_col is None:

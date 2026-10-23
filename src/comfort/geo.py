@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 _EARTH_RADIUS_KM = 6371.0
 
 
-def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
-                      lon_col: str = "LONGITUDE", resolution: str = "110m",
+def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
+                      lat_col: str = "LATITUDE", resolution: str = "110m",
                       coastline_geom: object = None) -> pd.Series:
     """Approximates the distance of each observation to the nearest coastline.
 
@@ -47,9 +47,9 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     out-of-range coordinates get NaN.
 
     Args:
-        df (pandas.DataFrame): DataFrame with latitude and longitude columns.
-        lat_col (str): Latitude column [°N].
+        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
         lon_col (str): Longitude column [°E].
+        lat_col (str): Latitude column [°N].
         resolution (str): Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
             Ignored when ``coastline_geom`` is provided.
         coastline_geom: Pre-loaded coastline as a shapely geometry, list
@@ -58,8 +58,8 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
         pandas.Series: Distance to nearest coastline [km], same index as df.
     """
     # Resolve column names (insensitive to casing)
-    lat_col = find_col(df, lat_col)
     lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
 
     from scipy.spatial import cKDTree
 
@@ -69,12 +69,12 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
         logger.error("distance_to_coast: no coastline points could be loaded")
         return pd.Series(np.nan, index=df.index)
 
-    # Get observes lat/lon
-    obs_lat = df[lat_col].values.astype(float)
+    # Get observed lon/lat
     obs_lon = df[lon_col].values.astype(float)
+    obs_lat = df[lat_col].values.astype(float)
 
     # Rows with unusable coordinates stay NaN
-    valid = (np.isfinite(obs_lat) & np.isfinite(obs_lon) & (np.abs(obs_lat) <= 90) & (np.abs(obs_lon) <= 180))
+    valid = (np.isfinite(obs_lon) & np.isfinite(obs_lat) & (np.abs(obs_lon) <= 180) & (np.abs(obs_lat) <= 90))
     if not valid.all():
         # Log count of invalid coordinates
         logger.warning("distance_to_coast: %d of %d rows have missing or invalid "
@@ -83,8 +83,8 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     result = np.full(len(df), np.nan)
     if valid.any():
         # Build the k-d tree on unit sphere coordinates
-        tree = cKDTree(_to_unit_sphere(coast_pts[:, 1], coast_pts[:, 0]))
-        euclidean_dist, _ = tree.query(_to_unit_sphere(obs_lat[valid], obs_lon[valid]), k=1)
+        tree = cKDTree(_to_unit_sphere(coast_pts[:, 0], coast_pts[:, 1]))
+        euclidean_dist, _ = tree.query(_to_unit_sphere(obs_lon[valid], obs_lat[valid]), k=1)
 
         # Euclidean length on the unit sphere back to arc length (clip to prevent float overshoot)
         result[valid] = 2 * _EARTH_RADIUS_KM * np.arcsin(np.clip(euclidean_dist / 2, 0.0, 1.0))
@@ -92,17 +92,17 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     return pd.Series(result, index=df.index)
 
 
-def _to_unit_sphere(lat_deg, lon_deg) -> np.ndarray:
+def _to_unit_sphere(lon_deg, lat_deg) -> np.ndarray:
     """Return an (N, 3) array of unit-sphere xyz coordinates."""
-    lat_r = np.radians(lat_deg)
     lon_r = np.radians(lon_deg)
+    lat_r = np.radians(lat_deg)
     return np.column_stack([np.cos(lat_r) * np.cos(lon_r),
                             np.cos(lat_r) * np.sin(lon_r),
                             np.sin(lat_r)])
 
 
-def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
-                         lon_col: str = "LONGITUDE", order_col: str | None = None,
+def along_track_distance(df: pd.DataFrame, lon_col: str = "LONGITUDE",
+                         lat_col: str = "LATITUDE", order_col: str | None = None,
                          station_col: str | list[str] | None = None) -> pd.Series:
     """Cumulative great-circle distance along a track [km].
 
@@ -110,36 +110,36 @@ def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
     ``gsw.distance`` between consecutive stations.
 
     Args:
-        df (pandas.DataFrame): DataFrame with latitude/longitude columns.
-        lat_col (str): Latitude column [°N].
+        df (pandas.DataFrame): DataFrame with longitude/latitude columns.
         lon_col (str): Longitude column [°E].
+        lat_col (str): Latitude column [°N].
         order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``).
             Defaults to first-appearance order.
         station_col (str or list[str]): Column(s) identifying a station
             (e.g. ``"ID"``). Defaults to ``None``, i.e. stations at identical
-            ``(lat_col, lon_col)`` are treated as one.
+            ``(lon_col, lat_col)`` are treated as one.
     Returns:
         pandas.Series: Cumulative distance [km] from the first station,
         same index as df.
     """
     # Resolve column names (insensitive to casing)
-    lat_col = find_col(df, lat_col)
     lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
     order_col = find_col(df, order_col)
     station_col = find_col(df, station_col)
 
     # Label each row with its station
     if station_col is None:
-        # Use lat/lon as station key
-        key = [lat_col, lon_col]
+        # Use lon/lat as station key
+        key = [lon_col, lat_col]
     else:
         # Use passed station column(s) as station key
         key = [station_col] if isinstance(station_col, str) else list(station_col)
     station_id = df.groupby(key, sort=False, dropna=False).ngroup().values  # give each station a unique int key
 
     # Reduce to one row per station, ordered along the track
-    per_row = pd.DataFrame({"lat": df[lat_col].values, "lon": df[lon_col].values, "station": station_id})
-    agg = {"lat": "first", "lon": "first"}
+    per_row = pd.DataFrame({"lon": df[lon_col].values, "lat": df[lat_col].values, "station": station_id})
+    agg = {"lon": "first", "lat": "first"}
     if order_col is not None:
         # Add column to order by to per_row and define aggregation
         per_row["order"] = df[order_col].values
@@ -323,7 +323,7 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
         biome_var (str): Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
             ``"TimeVaryingBiomes"``).
     Returns:
-        pandas.DataFrame: Columns ``LATITUDE``, ``LONGITUDE``, ``label``
+        pandas.DataFrame: Columns ``LONGITUDE``, ``LATITUDE``, ``label``
         (and ``YEAR`` if *biome_var* is ``"TimeVaryingBiomes"``).
     """
     # Check if xarray is installed
@@ -354,16 +354,16 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     df = da.to_dataframe(name="label").reset_index()  # to df
     df = df.rename(columns={"lat": "LATITUDE", "lon": "LONGITUDE"})  # rename to library convention
     df = df.dropna(subset=["label"])  # drop land/no-biome cells
-    out_cols = ["LATITUDE", "LONGITUDE", "label"]
+    out_cols = ["LONGITUDE", "LATITUDE", "label"]
     if time_dim is not None:
         # Add time dimension if present
         df = df.rename(columns={time_dim: time_dim.upper()})
-        out_cols = ["LATITUDE", "LONGITUDE", time_dim.upper(), "label"]
+        out_cols = ["LONGITUDE", "LATITUDE", time_dim.upper(), "label"]
     return df[out_cols].reset_index(drop=True)
 
 
 def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataFrame,
-                     lat_col: str = "LATITUDE", lon_col: str = "LONGITUDE",
+                     lon_col: str = "LONGITUDE", lat_col: str = "LATITUDE",
                      region_name_col: str = "name",
                      output_col: str = "region") -> pd.DataFrame:
     """Assign each observation to a 2d geographic region.
@@ -383,10 +383,10 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``.
 
     Args:
-        df (pandas.DataFrame): DataFrame with latitude and longitude columns.
+        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
         regions: Region definitions in any format listed above.
-        lat_col (str): Latitude column [°N].
         lon_col (str): Longitude column [°E].
+        lat_col (str): Latitude column [°N].
         region_name_col (str): Region name column in GeoDataFrame / CSV.
             Ignored for dict input. Default ``"name"``.
         output_col (str): Name of the new column. Default ``"region"``.
@@ -394,8 +394,8 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
         pandas.DataFrame: Copy of df with an added ``output_col`` column.
     """
     # Resolve column names (insensitive to casing)
-    lat_col = find_col(df, lat_col)
     lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
 
     # Get regions and their polygons
     named_regions = _parse_regions(regions, region_name_col)
@@ -471,7 +471,7 @@ def water_mass_statistics(df: pd.DataFrame, parameters: list[str] | str,
 
 def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
                 region_name_col: str = "name") -> tuple[float, float, float, float]:
-    """Return the lat/lon bounding box of one or more regions.
+    """Return the lon/lat bounding box of one or more regions.
 
     Intended to derive a bounding box for a cheap SQL query before an exact polygon refined region search,
     see ``region=`` on :func:`comfort.io.load_comfort`/:func:`~comfort.io.read_parameter`/:func:`~comfort.io.subset_region`.
@@ -483,7 +483,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
         regions: Region definition(s), same formats as water_mass_masks.
         region_name_col (str): Region name column. See water_mass_masks.
     Returns:
-        tuple[float, float, float, float]: ``(lat_min, lat_max, lon_min, lon_max)``.
+        tuple[float, float, float, float]: ``(lon_min, lon_max, lat_min, lat_max)``.
     """
     # Get a dict of (region_name, polygon)
     named_regions = _parse_regions(regions, region_name_col)
@@ -510,7 +510,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
         lon_min = s_min if s_min <= 180 else s_min - 360  # project back to [-180, 180]
         lon_max = s_max if s_max <= 180 else s_max - 360
 
-    return min(all_lats), max(all_lats), lon_min, lon_max
+    return lon_min, lon_max, min(all_lats), max(all_lats)
 
 
 def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
@@ -635,7 +635,7 @@ def _parse_regions(regions, region_name_col):
 def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.DataFrame:
     """Load Jenniges biogeochemical provinces from a cluster CSV file.
 
-    The CSV must have columns ``LATITUDE``, ``LONGITUDE``,
+    The CSV must have columns ``LONGITUDE``, ``LATITUDE``,
     ``LEV_M`` and ``label``. The standard file is ``cluster_set.csv``
     from `Zenodo record 15201767 <https://zenodo.org/records/15201767>`_.
 
@@ -670,9 +670,9 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
 
 
 def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
-                       lat_col: str = "LATITUDE", lon_col: str = "LONGITUDE",
-                       grid_lat_col: str = "LATITUDE",
+                       lon_col: str = "LONGITUDE", lat_col: str = "LATITUDE",
                        grid_lon_col: str = "LONGITUDE",
+                       grid_lat_col: str = "LATITUDE",
                        label_col: str = "label",
                        output_col: str = "label",
                        time_col: str | None = None,
@@ -687,13 +687,13 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
     only in that time step.
 
     Args:
-        df (pandas.DataFrame): Observation DataFrame with lat/lon columns.
+        df (pandas.DataFrame): Observation DataFrame with lon/lat columns.
         grid_df (pandas.DataFrame): Labelled grid (e.g. from
             :func:`load_jenniges_provinces` or :func:`load_biomes`).
-        lat_col (str): Latitude column in *df*.
         lon_col (str): Longitude column in *df*.
-        grid_lat_col (str): Latitude column in *grid_df*.
+        lat_col (str): Latitude column in *df*.
         grid_lon_col (str): Longitude column in *grid_df*.
+        grid_lat_col (str): Latitude column in *grid_df*.
         label_col (str): Label column in *grid_df*.
         output_col (str): Name of the new column added to the result.
         time_col (str): Time column in *df* (e.g. year) to match against
@@ -704,11 +704,11 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
         pandas.DataFrame: Copy of *df* with an added *output_col* column.
     """
     # Resolve column names (insensitive to casing)
-    lat_col = find_col(df, lat_col)
     lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
     time_col = find_col(df, time_col)
-    grid_lat_col = find_col(grid_df, grid_lat_col)
     grid_lon_col = find_col(grid_df, grid_lon_col)
+    grid_lat_col = find_col(grid_df, grid_lat_col)
     label_col = find_col(grid_df, label_col)
 
     result = df.copy()

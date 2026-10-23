@@ -755,13 +755,14 @@ class TestReadParameter:
         conditions, params = [], []
         _append_geo_conditions(
             conditions, params, "s.", "s.", "p.", "s.",
-            None, None, -180.0, 0.0, None, None, None, None,
-            region_box=(-10.0, 10.0, 170.0, -170.0),
+            lon_min=-180.0, lon_max=0.0, lat_min=None, lat_max=None,
+            depth_min=None, depth_max=None, date_min=None, date_max=None,
+            region_box=(170.0, -170.0, -10.0, 10.0),
         )
         assert "s.LONGITUDE >= ?" in conditions
         assert "s.LONGITUDE <= ?" in conditions
         assert "(s.LONGITUDE >= ? OR s.LONGITUDE <= ?)" in conditions
-        assert params == [-180.0, 0.0, -10.0, 10.0, 170.0, -170.0]
+        assert params == [-180.0, 0.0, 170.0, -170.0, -10.0, 10.0]
 
     # extra_station_cols pulls additional station columns (e.g. CRUISE_ID)
     def test_extra_station_cols(self, comfort_db):

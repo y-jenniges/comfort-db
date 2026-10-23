@@ -42,7 +42,7 @@ if __name__ == "__main__":
         dfs = comfort.load_comfort(
             conn, parameters=["TEMPERATURE", "SALINITY"],
             quality_flags=comfort.QC_GOOD,
-            lat_min=45, lat_max=55, lon_min=-30, lon_max=-20,
+            lon_min=-30, lon_max=-20, lat_min=45, lat_max=55,
             as_xarray=False,
         )
 

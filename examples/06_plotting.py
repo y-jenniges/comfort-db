@@ -53,7 +53,7 @@ if __name__ == "__main__":
         dfs = comfort.load_comfort(
             conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"],
             quality_flags=comfort.QC_GOOD,
-            lat_min=45, lat_max=65, lon_min=-30, lon_max=0,
+            lon_min=-30, lon_max=0, lat_min=45, lat_max=65,
             as_xarray=False, convert_units=True
         )
         # Check oxygen default unit (for plotting)

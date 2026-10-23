@@ -94,8 +94,8 @@ def main():
         log.info("Step 1: Loading parameters (QC_GOOD, depth <= %d m)...", DEPTH_MAX)
         raw = load_comfort(
             conn, parameters=PARAMETERS, quality_flags=QC_GOOD,
-            lat_min=LAT_MIN, lat_max=LAT_MAX,
             lon_min=LON_MIN, lon_max=LON_MAX,
+            lat_min=LAT_MIN, lat_max=LAT_MAX,
             depth_max=DEPTH_MAX,
             convert_units=True, use_density=True, as_xarray=False,
         )
@@ -159,8 +159,8 @@ def main():
 
         # Define grid
         grid = Grid(
-            lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             lon_min=LON_MIN, lon_max=LON_MAX, dlon=GRID_DEG,
+            lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             z_array=DEPTH_INTERVALS,
             bathymetry_grid_path=bathy_path,
             time_min=f"{START_YEAR}-01-01",

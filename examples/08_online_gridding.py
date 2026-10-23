@@ -64,8 +64,8 @@ def main():
             GRID_DEG, GRID_DEG, len(DEPTH_INTERVALS) - 1, DTIME,
         )
         grid = gm.create_grid(
-            lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             lon_min=LON_MIN, lon_max=LON_MAX, dlon=GRID_DEG,
+            lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             z_array=DEPTH_INTERVALS,
             time_min=f"{START_YEAR}-01-01", time_max=f"{END_YEAR}-12-31",
             mode="Y", dtime=DTIME,

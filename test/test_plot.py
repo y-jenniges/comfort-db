@@ -30,7 +30,7 @@ from comfort.plot import (
     plot_duplicates,
     plot_histogram,
     plot_joint,
-    plot_lat_lon_range,
+    plot_lon_lat_range,
     plot_missing_value_info,
     plot_missing_value_info_map_joint,
     plot_missing_value_info_map_over_depth,
@@ -460,7 +460,7 @@ class TestPlotSpatialDistribution:
 class TestPlotLatLonRange:
     # Draws the bounding-box outline (4 edges) on a world map
     def test_draws_bounding_box(self):
-        ax = plot_lat_lon_range(30, 60, -40, 0)
+        ax = plot_lon_lat_range(-40, 0, 30, 60)
         assert len(ax.lines) == 4
         plt.close()
 

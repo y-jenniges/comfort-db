@@ -227,16 +227,6 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
                 dbc.CardHeader("Spatial extent"),
                 dbc.CardBody([
                     dbc.Row([
-                        dbc.Col([dbc.Label("Lat min"), dbc.Input(
-                            id="sc-lat-min", type="number",
-                            min=-90, max=90, value=0,
-                        )], width=6),
-                        dbc.Col([dbc.Label("Lat max"), dbc.Input(
-                            id="sc-lat-max", type="number",
-                            min=-90, max=90, value=70,
-                        )], width=6),
-                    ], className="mb-2"),
-                    dbc.Row([
                         dbc.Col([dbc.Label("Lon min"), dbc.Input(
                             id="sc-lon-min", type="number",
                             min=-180, max=180, value=-77,
@@ -244,6 +234,16 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
                         dbc.Col([dbc.Label("Lon max"), dbc.Input(
                             id="sc-lon-max", type="number",
                             min=-180, max=180, value=30,
+                        )], width=6),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([dbc.Label("Lat min"), dbc.Input(
+                            id="sc-lat-min", type="number",
+                            min=-90, max=90, value=0,
+                        )], width=6),
+                        dbc.Col([dbc.Label("Lat max"), dbc.Input(
+                            id="sc-lat-max", type="number",
+                            min=-90, max=90, value=70,
                         )], width=6),
                     ]),
                 ]),
@@ -576,15 +576,15 @@ def _on_tab_switch(active_tab):
     Input("sc-global-map", "value"),
     Input("sc-colour-by", "value"),
     State("scatter-param", "value"),
-    State("sc-lat-min", "value"), State("sc-lat-max", "value"),
     State("sc-lon-min", "value"), State("sc-lon-max", "value"),
+    State("sc-lat-min", "value"), State("sc-lat-max", "value"),
     State("sc-qc", "value"),
     State("sc-depth-slider", "min"), State("sc-depth-slider", "max"),
     State("sc-year-slider", "min"), State("sc-year-slider", "max"),
     prevent_initial_call=True,
 )
 def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global, colour_by,
-                      param, lat_min, lat_max, lon_min, lon_max, use_qc,
+                      param, lon_min, lon_max, lat_min, lat_max, use_qc,
                       cur_z_min, cur_z_max, cur_y_min, cur_y_max):
     """Load data on button click, or re-render from cache on slider change."""
     trigger = ctx.triggered_id
@@ -605,8 +605,8 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
             # Load all rows matching the spatial and QC filters
             df = read_parameter(
                 conn, param, quality_flags=qc,
-                lat_min=lat_min, lat_max=lat_max,
                 lon_min=lon_min, lon_max=lon_max,
+                lat_min=lat_min, lat_max=lat_max,
                 extra_station_cols=["CRUISE_ID", "ST_NUMBER_ORIGIN"],
             )
 
@@ -651,8 +651,8 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
         # Populate server-side cache
         _scatter_cache["df"] = df
         _scatter_cache["bounds"] = {
-            "lat_min": lat_min, "lat_max": lat_max,
             "lon_min": lon_min, "lon_max": lon_max,
+            "lat_min": lat_min, "lat_max": lat_max,
             "param": param,
         }
         _scatter_cache["unit_note"] = " (units converted)" if converted else ""

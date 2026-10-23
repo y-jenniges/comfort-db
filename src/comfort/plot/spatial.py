@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 def plot_spatial_distribution(
     df: pd.DataFrame | None = None,
     *,
-    lat_col: str = "LATITUDE",
     lon_col: str = "LONGITUDE",
+    lat_col: str = "LATITUDE",
     resolution: float = 0.5,
     clim: tuple[float, float] | None = None,
     cmap: str = "Spectral_r",
@@ -40,15 +40,15 @@ def plot_spatial_distribution(
     save_as: str | None = None,
     dpi: int = 300,
 ) -> matplotlib.axes.Axes:
-    """Count observations per lat/lon bin and display on a world map.
+    """Count observations per lon/lat bin and display on a world map.
 
-    Accepts either a *df* (must contain *lat_col* and *lon_col*) or a
+    Accepts either a *df* (must contain *lon_col* and *lat_col*) or a
     database *conn* along with a *parameter* name.
 
     Args:
         df: DataFrame with latitude and longitude columns.
-        lat_col: Latitude column name.
         lon_col: Longitude column name.
+        lat_col: Latitude column name.
         resolution: Bin size in degrees.
         clim: Colour scale limits.
         cmap: Matplotlib colormap name.
@@ -77,13 +77,13 @@ def plot_spatial_distribution(
         quality_statement = build_where_clause(quality_flags)
         cursor = conn.cursor()
         ex = cursor.execute(
-            f"SELECT LATITUDE, LONGITUDE FROM {table} {quality_statement};"
+            f"SELECT LONGITUDE, LATITUDE FROM {table} {quality_statement};"
         )
         df = pd.DataFrame(ex.fetchall(), columns=np.array([x[0] for x in cursor.description]))
 
     # Resolve column names (insensitive to casing)
-    lat_col = find_col(df, lat_col)
     lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
 
     # Bin observations into a 2D lat/lon grid
     lonbins = np.arange(-180, 180, resolution)
@@ -115,11 +115,11 @@ def plot_spatial_distribution(
     return _finish(ax, standalone, save_as, dpi)
 
 
-def plot_lat_lon_range(
-    lat_min: float,
-    lat_max: float,
+def plot_lon_lat_range(
     lon_min: float,
     lon_max: float,
+    lat_min: float,
+    lat_max: float,
     *,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
@@ -128,10 +128,10 @@ def plot_lat_lon_range(
     """Draw a bounding box on a world map.
 
     Args:
-        lat_min: Southern latitude boundary.
-        lat_max: Northern latitude boundary.
         lon_min: Western longitude boundary.
         lon_max: Eastern longitude boundary.
+        lat_min: Southern latitude boundary.
+        lat_max: Northern latitude boundary.
         ax: Axes to draw into.
         save_as: Save path.
         dpi: Resolution (dots per inch) used when saving.
