@@ -82,7 +82,7 @@ class Grid:
     # Time modes
     _VALID_MODES = ["Y", "M", "D", "YM", "YD", "MD"]
 
-    def __init__(self, lat_min=-90, lat_max=90, dlat=1, lon_min=-180, lon_max=180, dlon=1,
+    def __init__(self, *, lat_min=-90, lat_max=90, dlat=1, lon_min=-180, lon_max=180, dlon=1,
                  bathymetry_grid_path=None,
                  z_min=None, z_max=None, dz=None, z_array=None,
                  time_min=None, time_max=None, mode=None, dtime=None, selection=None,
@@ -896,7 +896,7 @@ class GridManager:
             depth_variable=depth_variable, grid_id=grid_id,
         )
 
-    def create_grid(self, lat_min, lat_max, dlat, lon_min, lon_max, dlon,
+    def create_grid(self, *, lat_min, lat_max, dlat, lon_min, lon_max, dlon,
                     z_min=None, z_max=None, dz=None, z_array=None,
                     time_min=None, time_max=None, mode=None, dtime=None, selection=None,
                     bathymetry_grid_path=None,
@@ -911,8 +911,10 @@ class GridManager:
         """
         # Try to find existing grid with same params
         grid_id = self.get_grid_id_from_params(
-            lat_min, lat_max, dlat, lon_min, lon_max, dlon,
-            z_min, z_max, dz, z_array, time_min, time_max, mode, dtime, selection,
+            lat_min=lat_min, lat_max=lat_max, dlat=dlat,
+            lon_min=lon_min, lon_max=lon_max, dlon=dlon,
+            z_min=z_min, z_max=z_max, dz=dz, z_array=z_array,
+            time_min=time_min, time_max=time_max, mode=mode, dtime=dtime, selection=selection,
         )
 
         # If the grid already exists, only load it
@@ -934,7 +936,7 @@ class GridManager:
                                   depth_variable=depth_variable)
         return grid
 
-    def get_grid_id_from_params(self, lat_min, lat_max, dlat, lon_min, lon_max, dlon,
+    def get_grid_id_from_params(self, *, lat_min, lat_max, dlat, lon_min, lon_max, dlon,
                                 z_min=None, z_max=None, dz=None, z_array=None,
                                 time_min=None, time_max=None, mode=None, dtime=None,
                                 selection=None) -> int | None:

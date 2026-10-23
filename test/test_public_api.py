@@ -24,3 +24,20 @@ def test_all_names_exist(module_name):
 # Star import works
 def test_star_import_of_root_works():
     exec("from comfort import *", {})
+
+
+# Bounds, filters and options are keyword-only (to avoid order-induced errors)
+@pytest.mark.parametrize("call", [
+    "comfort.io.load_comfort(None, ['NITRATE'], None)",
+    "comfort.io.read_parameter(None, 'NITRATE', None)",
+    "comfort.io.subset_region(None, 10.0)",
+    "comfort.gridding.Grid(-90)",
+    "comfort.gridding.GridManager.create_grid(None, 0, 10, 1, 0, 10, 1)",
+    "comfort.gridding.GridManager.get_grid_id_from_params(None, 0, 10, 1, 0, 10, 1)",
+])
+def test_bounds_are_keyword_only(call):
+    import comfort
+    import comfort.gridding
+    import comfort.io
+    with pytest.raises(TypeError, match="positional"):
+        eval(call, {"comfort": comfort})

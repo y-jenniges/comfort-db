@@ -949,7 +949,7 @@ class TestAddGrid:
                          time_min=None, time_max=None, dtime=None).items():
             setattr(grid, k, v)
         gm.add_grid(grid)
-        found = gm.get_grid_id_from_params(0, 10, 5, 0, 10, 5, z_min=0, z_max=100, dz=50)
+        found = gm.get_grid_id_from_params(lat_min=0, lat_max=10, dlat=5, lon_min=0, lon_max=10, dlon=5, z_min=0, z_max=100, dz=50)
         assert found == 21
 
     # A table with the grid name that already exists is not overwritten

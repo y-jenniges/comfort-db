@@ -98,4 +98,4 @@ def _resolve_data(
         )
     from ..io import read_parameter
 
-    return read_parameter(conn, parameter, quality_flags, profiles=profiles)
+    return read_parameter(conn, parameter, quality_flags=quality_flags, profiles=profiles)

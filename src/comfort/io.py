@@ -143,7 +143,7 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
     return [name[2:] for name in get_names_of_all_parameter_tables(conn)]
 
 
-def read_parameter(conn: sqlite3.Connection, param_name: str,
+def read_parameter(conn: sqlite3.Connection, param_name: str, *,
                    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
                    profiles: list[int] | None = None,
                    lat_min: float | None = None, lat_max: float | None = None,
@@ -394,7 +394,7 @@ def _load_lookups(conn) -> _Lookups:
     )
 
 
-def subset_region(df: pd.DataFrame,
+def subset_region(df: pd.DataFrame, *,
                   lat_min: float | None = None, lat_max: float | None = None,
                   lon_min: float | None = None, lon_max: float | None = None,
                   depth_min: float | None = None, depth_max: float | None = None,
@@ -467,6 +467,7 @@ def subset_region(df: pd.DataFrame,
 def load_comfort(
         db_path_or_conn: str | Path | sqlite3.Connection,
         parameters: list[str] | None = None,
+        *,
         quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
         lat_min: float | None = None, lat_max: float | None = None,
         lon_min: float | None = None, lon_max: float | None = None,
