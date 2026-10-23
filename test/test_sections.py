@@ -79,3 +79,12 @@ class TestSectionDifference:
         section_b = self._binned([1.0, 1.0, 1.0, 1.0]).iloc[:2]
         result = section_difference(section_a, section_b, "VAL", "LEV_M", "ALONG")
         assert len(result) == 2
+
+
+class TestColumnCasing:
+    # Column arguments in another casing give the same result
+    def test_bin_section_lower_case_arguments(self):
+        df = TestBinSection._df()
+        expected = bin_section(df, "VAL", "LEV_M", "ALONG", along_bins=2, depth_bins=2)
+        result = bin_section(df, "val", "lev_m", "along", along_bins=2, depth_bins=2)
+        pd.testing.assert_frame_equal(result, expected)

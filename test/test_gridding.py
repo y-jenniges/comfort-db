@@ -1237,3 +1237,12 @@ class TestEmptyMissingValueInfo:
         result = get_missing_value_info_offline_per_param([df])
         assert list(result.columns) == ["parameter", "absolute", "relative"]
         assert result["relative"].iloc[0] == 0.0
+
+
+class TestBinColumnCasing:
+    # value_col in another casing bins the column under its original spelling
+    def test_bin_space_other_casing(self):
+        grid = _make_grid_stub()
+        df = pd.DataFrame({"LATITUDE": [1.0, 2.0], "LONGITUDE": [1.0, 2.0], "LEV_M": [10.0, 20.0], "VAL": [1.0, 3.0]})
+        result = grid.bin_space(df, value_col="val", agg="mean")
+        assert result["VAL"].iloc[0] == 2.0

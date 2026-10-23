@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from ..util.columns import find_col
 from ._helpers import _finish, _get_or_create_ax, _resolve_data, _save_fig
 
 if TYPE_CHECKING:
@@ -60,6 +61,9 @@ def boxplot(
         The matplotlib Axes.
     """
     df = _resolve_data(df, conn, parameter, quality_flags)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
     ax, standalone = _get_or_create_ax(ax)
 
     # Draw the chosen distribution plot
@@ -106,6 +110,9 @@ def plot_histogram(
         The matplotlib Axes.
     """
     df = _resolve_data(df, conn, parameter, quality_flags)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
     ax, standalone = _get_or_create_ax(ax)
 
     df[[value_col]].plot(
@@ -145,6 +152,10 @@ def plot_monthly_histogram(
         The matplotlib Figure.
     """
     df = _resolve_data(df, conn, parameter, quality_flags)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    date_col = find_col(df, date_col)
     temp = df.copy()
     temp[date_col] = pd.to_datetime(temp[date_col])
 
@@ -206,6 +217,10 @@ def compare_stats(
     Returns:
         The matplotlib Axes.
     """
+    # Resolve column names (insensitive to casing)
+    group_col = find_col(df, group_col)
+    value_cols = find_col(df, value_cols)
+
     # Auto-detect numeric columns when none are specified
     if value_cols is None:
         value_cols = sorted(

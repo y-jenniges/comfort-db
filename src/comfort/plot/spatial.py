@@ -12,7 +12,7 @@ from scipy import stats
 
 from ..database.information import param_table_name
 from ..qc import build_where_clause
-from ..util.columns import resolve_param_columns
+from ..util.columns import find_col, resolve_param_columns
 from ..util.sqlite_utils import validate_identifier
 from ._helpers import _finish, _get_or_create_ax, _require_cartopy
 
@@ -80,6 +80,10 @@ def plot_spatial_distribution(
             f"SELECT LATITUDE, LONGITUDE FROM {table} {quality_statement};"
         )
         df = pd.DataFrame(ex.fetchall(), columns=np.array([x[0] for x in cursor.description]))
+
+    # Resolve column names (insensitive to casing)
+    lat_col = find_col(df, lat_col)
+    lon_col = find_col(df, lon_col)
 
     # Bin observations into a 2D lat/lon grid
     lonbins = np.arange(-180, 180, resolution)

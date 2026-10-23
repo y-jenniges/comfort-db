@@ -538,3 +538,21 @@ class TestEmptyResults:
     def test_custom_profile_col(self):
         result = mixed_layer_depth(self._empty(), density_col="SIGMA0", profile_col="PROFILE_NUMBER")
         assert list(result.columns) == ["PROFILE_NUMBER", "MLD_m"]
+
+
+class TestColumnCasing:
+    @staticmethod
+    def _df():
+        # Dummy df
+        return pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1], "LEV_DBAR": [0, 100, 200], "VAL": [10.0, 8.0, 6.0]})
+
+    # Column arguments in another casing give the same result
+    def test_vertical_gradient_lower_case_arguments(self):
+        expected = vertical_gradient(self._df())
+        result = vertical_gradient(self._df(), value_col="val", depth_col="lev_dbar", profile_col="profile_number")
+        pd.testing.assert_frame_equal(result, expected)
+
+    # The depth fallback still works when the column is spelled differently
+    def test_detect_depth_col_other_casing(self):
+        assert detect_depth_col(self._df(), "lev_m") == "LEV_DBAR"
+        assert detect_depth_col(self._df(), "lev_dbar") == "LEV_DBAR"

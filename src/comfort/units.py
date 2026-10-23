@@ -16,19 +16,12 @@ import pandas as pd
 
 from .database.information import param_label, param_table_name
 from .physics import convert_salinity, convert_temperature, resolve_pressure
+from .util.columns import find_col
 from .util.sqlite_utils import validate_identifier
 
 logger = logging.getLogger(__name__)
 
 DENSITY_FALLBACKS = ("constant", "drop", "raise")
-
-
-def _get_column(df: pd.DataFrame, name: str) -> str | None:
-    """Return the column name matching name case-insensitively (or None)."""
-    for col in df.columns:
-        if col.lower() == name.lower():
-            return col
-    return None
 
 
 class UnitsConverter:
@@ -471,8 +464,8 @@ class ConversionFormulas:
         """
         logger.debug("percent -> micromolPerKilogram (gsw.O2sol_SP_pt)")
         temp = df.copy()
-        sal_col = _get_column(df, "SALINITY")
-        temp_col = _get_column(df, "TEMPERATURE")
+        sal_col = find_col(df, "SALINITY", required=False)
+        temp_col = find_col(df, "TEMPERATURE", required=False)
 
         # Check if salinity and temperature columns are given
         if sal_col is None or temp_col is None:
@@ -492,8 +485,8 @@ class ConversionFormulas:
         If pressure is not given, it computes pressure from depth and latitude if both are available.
         Falls back to in-situ temperature when pressure/latitude/longitude are unavailable.
         """
-        lat_col = _get_column(df, "LATITUDE")
-        lon_col = _get_column(df, "LONGITUDE")
+        lat_col = find_col(df, "LATITUDE", required=False)
+        lon_col = find_col(df, "LONGITUDE", required=False)
 
         # Resolve pressure (without latitude, the in-situ temperature fallback applies)
         pressure = resolve_pressure(df) if lat_col is not None else None
@@ -554,13 +547,13 @@ class ConversionFormulas:
             return 1.025
 
         # Get column names
-        sal_col = _get_column(df, "SALINITY")
-        lat_col = _get_column(df, "LATITUDE")
-        lon_col = _get_column(df, "LONGITUDE")
+        sal_col = find_col(df, "SALINITY", required=False)
+        lat_col = find_col(df, "LATITUDE", required=False)
+        lon_col = find_col(df, "LONGITUDE", required=False)
         needed = [("salinity", sal_col), ("latitude", lat_col), ("longitude", lon_col)]
         temp_col = None
         if lab_temperature is None:
-            temp_col = _get_column(df, "TEMPERATURE")
+            temp_col = find_col(df, "TEMPERATURE", required=False)
             needed.append(("temperature", temp_col))
 
         # Check if any column required for density computations is missing

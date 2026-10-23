@@ -9,6 +9,8 @@ __all__ = [
 import pandas as pd
 from numpy.typing import ArrayLike
 
+from .util.columns import find_col
+
 
 def bin_section(df: pd.DataFrame,
                 value_col: str,
@@ -35,6 +37,11 @@ def bin_section(df: pd.DataFrame,
             [*along_col*, *depth_col*, *value_col*], holding the bin centres
             and aggregated value. Cells with no observations get NaN.
     """
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    depth_col = find_col(df, depth_col)
+    along_col = find_col(df, along_col)
+
     # Drop nans
     plot_df = df[[value_col, depth_col, along_col]].dropna()
     if plot_df.empty:
@@ -78,6 +85,11 @@ def section_difference(section_a: pd.DataFrame,
         pandas.DataFrame: One row per (along, depth) cell present in both
             inputs, with *value_col* holding ``section_a - section_b``.
     """
+    # Resolve column names (insensitive to casing)
+    along_col = find_col(section_a, along_col)
+    depth_col = find_col(section_a, depth_col)
+    value_col = find_col(section_a, value_col)
+
     # Merge section a and b
     merged = section_a.merge(section_b, on=[along_col, depth_col], suffixes=("_a", "_b"))
 

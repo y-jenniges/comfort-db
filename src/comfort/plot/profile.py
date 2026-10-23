@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 import pandas as pd
 
+from ..util.columns import find_col
 from ._helpers import _finish, _get_or_create_ax, _pretty_label, _resolve_data
 from ..sections import bin_section
 
@@ -76,6 +77,12 @@ def plot_profile(
     # Filter in-memory for DataFrame input
     user_df = df
     df = _resolve_data(df, conn, parameter, quality_flags, profiles=profiles)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    depth_col = find_col(df, depth_col)
+    station_col = find_col(df, station_col, required=False) or station_col
+    profile_col = find_col(df, profile_col, required=False) or profile_col
     if profiles is not None and user_df is not None:
         df = df[df[profile_col].isin(profiles)]
     if df.empty:
@@ -98,7 +105,7 @@ def plot_profile(
                 "plot_profile: depth_markers missing columns %s; skipping markers", missing
             )
         else:
-            marker_lookup = depth_markers.set_index(group_cols)[depth_marker_col]
+            marker_lookup = depth_markers.set_index(group_cols)[find_col(depth_markers, depth_marker_col)]
 
     # Draw each profile as a separate line, with an optional depth marker
     for key, group in df.groupby(group_cols):
@@ -199,6 +206,12 @@ def plot_section(
     """
     df = _resolve_data(df, conn, parameter, quality_flags)
 
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    depth_col = find_col(df, depth_col)
+    lat_col = find_col(df, lat_col, required=False) or lat_col
+    lon_col = find_col(df, lon_col, required=False) or lon_col
+
     # Auto-select the coordinate axis with the larger spatial range
     if along_col is None:
         if lat_col in df.columns and lon_col in df.columns:
@@ -211,6 +224,8 @@ def plot_section(
             along_col = lon_col
         else:
             raise ValueError("No position column found; pass along_col explicitly")
+
+    along_col = find_col(df, along_col)
 
     # Drop NaNs
     plot_df = df[[value_col, depth_col, along_col]].dropna()

@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from .profile_analysis import _empty_profile_frame, _resolve_profile_col, _profile_key_dict
+from .util.columns import find_col
 
 logger = logging.getLogger(__name__)
 
@@ -33,32 +34,6 @@ logger = logging.getLogger(__name__)
 def _to1d(x):
     """Convert x to a 1D float64 numpy array."""
     return np.atleast_1d(np.asarray(x, dtype=float))
-
-
-def _find_col(df, col, required=True):
-    """Return the actual column name in *df* matching *col* (case-insensitive).
-
-    Raises KeyError if no match is found or returns None if *required* is False.
-    """
-    # Return the col
-    if col in df.columns:
-        return col
-
-    # Check if lower-case version is in df.columns
-    lower = col.lower()
-    for c in df.columns:
-        if c.lower() == lower:
-            return c
-
-    # Column not found
-    if not required:
-        return None
-
-    # Required column not found raises
-    raise KeyError(
-        f"Column {col!r} not found in DataFrame. "
-        f"Available columns: {list(df.columns)}"
-    )
 
 
 def resolve_pressure(df: pd.DataFrame, pressure_col: str = "LEV_DBAR",
@@ -81,9 +56,9 @@ def resolve_pressure(df: pd.DataFrame, pressure_col: str = "LEV_DBAR",
         pandas.Series: Sea pressure [dbar].
     """
     # Get column names for pressure, depth and latitude
-    p_col = _find_col(df, pressure_col, required=False)
-    d_col = _find_col(df, depth_col, required=False)
-    lat = _find_col(df, lat_col, required=False)
+    p_col = find_col(df, pressure_col, required=False)
+    d_col = find_col(df, depth_col, required=False)
+    lat = find_col(df, lat_col, required=False)
 
     # Use pressure column if available
     pressure = df[p_col].astype(float) if p_col else pd.Series(np.nan, index=df.index)
@@ -230,7 +205,13 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
             with the profile key columns (``ID`` and ``PROFILE_NUMBER``
             by default), ``'pressure_mid'`` and ``'N2'`` (N2 in 1/s2).
     """
-    lat_available = lat_col in df.columns
+    # Resolve column names (insensitive to casing)
+    sa_col = find_col(df, sa_col)
+    ct_col = find_col(df, ct_col)
+    pressure_col = find_col(df, pressure_col)
+
+    lat_col = find_col(df, lat_col, required=False)
+    lat_available = lat_col is not None
     rows = []
 
     # Get group columns
@@ -362,11 +343,11 @@ def add_teos10_variables(df: pd.DataFrame, sp_col: str, t_col: str,
     out = df.copy()
 
     # Resolve column names (case-insensitive matching)
-    sp = _find_col(out, sp_col)
-    t = _find_col(out, t_col)
-    p = _find_col(out, pressure_col)
-    lon = _find_col(out, lon_col)
-    lat = _find_col(out, lat_col)
+    sp = find_col(out, sp_col)
+    t = find_col(out, t_col)
+    p = find_col(out, pressure_col)
+    lon = find_col(out, lon_col)
+    lat = find_col(out, lat_col)
 
     # Convert step by step: SP -> SA -> CT -> sigma0
     out["SA"] = convert_salinity(out[sp], out[p], out[lon], out[lat]).values

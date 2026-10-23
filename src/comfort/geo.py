@@ -22,7 +22,7 @@ import gsw
 import numpy as np
 import pandas as pd
 
-from .util.columns import resolve_param_columns
+from .util.columns import find_col, resolve_param_columns
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -57,6 +57,10 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     Returns:
         pandas.Series: Distance to nearest coastline [km], same index as df.
     """
+    # Resolve column names (insensitive to casing)
+    lat_col = find_col(df, lat_col)
+    lon_col = find_col(df, lon_col)
+
     from scipy.spatial import cKDTree
 
     # Load coastline vertices
@@ -118,6 +122,12 @@ def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
         pandas.Series: Cumulative distance [km] from the first station,
         same index as df.
     """
+    # Resolve column names (insensitive to casing)
+    lat_col = find_col(df, lat_col)
+    lon_col = find_col(df, lon_col)
+    order_col = find_col(df, order_col)
+    station_col = find_col(df, station_col)
+
     # Label each row with its station
     if station_col is None:
         # Use lat/lon as station key
@@ -254,6 +264,10 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
             "Pass code_col and region_name_col explicitly."
         )
 
+    # Resolve column names (insensitive to casing)
+    code_col = find_col(gdf, code_col)
+    region_name_col = find_col(gdf, region_name_col)
+
     return gdf[[code_col, region_name_col, "geometry"]].rename(
         columns={code_col: "province_code", region_name_col: "province_name"}
     )
@@ -290,6 +304,7 @@ def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.Geo
         region_name_col = cols_lower.get("name")
     if region_name_col is None:
         raise ValueError(f"Could not detect name column in {list(gdf.columns)}. Pass region_name_col explicitly.")
+    region_name_col = find_col(gdf, region_name_col)
 
     return gdf[[region_name_col, "geometry"]].rename(columns={region_name_col: "basin_name"})
 
@@ -378,6 +393,10 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     Returns:
         pandas.DataFrame: Copy of df with an added ``output_col`` column.
     """
+    # Resolve column names (insensitive to casing)
+    lat_col = find_col(df, lat_col)
+    lon_col = find_col(df, lon_col)
+
     # Get regions and their polygons
     named_regions = _parse_regions(regions, region_name_col)
 
@@ -525,13 +544,6 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
     return selected
 
 
-def _resolve_name_col(columns, region_name_col):
-    """Return region_name_col, raising an error if it is not in columns."""
-    if region_name_col not in columns:
-        raise ValueError(f"Could not find region name column {region_name_col!r} in {list(columns)}.")
-    return region_name_col
-
-
 def _check_lonlat(named_regions):
     """Raise ValueError if any region coordinate is outside lon/lat range."""
     for name, poly in named_regions:
@@ -583,7 +595,7 @@ def _parse_regions(regions, region_name_col):
     if path is not None and path.suffix.lower() == ".csv":
         from shapely import wkt
         csv_df = pd.read_csv(path)
-        name_col = _resolve_name_col(csv_df.columns, region_name_col)
+        name_col = find_col(csv_df, region_name_col)
         return _check_lonlat([
             (row[name_col], wkt.loads(row["geometry"]))
             for _, row in csv_df.iterrows()
@@ -599,7 +611,7 @@ def _parse_regions(regions, region_name_col):
                 "install it with: pip install \"comfort-db[geo]\""
             )
         gdf = _to_lonlat(gpd.read_file(path))
-        name_col = _resolve_name_col(gdf.columns, region_name_col)
+        name_col = find_col(gdf, region_name_col)
         return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]
 
     # Regions as gpd
@@ -609,7 +621,7 @@ def _parse_regions(regions, region_name_col):
             return list(_to_lonlat(regions).items())
         if isinstance(regions, gpd.GeoDataFrame):
             gdf = _to_lonlat(regions)
-            name_col = _resolve_name_col(gdf.columns, region_name_col)
+            name_col = find_col(gdf, region_name_col)
             return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]
     except ImportError:
         pass
@@ -691,6 +703,14 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
     Returns:
         pandas.DataFrame: Copy of *df* with an added *output_col* column.
     """
+    # Resolve column names (insensitive to casing)
+    lat_col = find_col(df, lat_col)
+    lon_col = find_col(df, lon_col)
+    time_col = find_col(df, time_col)
+    grid_lat_col = find_col(grid_df, grid_lat_col)
+    grid_lon_col = find_col(grid_df, grid_lon_col)
+    label_col = find_col(grid_df, label_col)
+
     result = df.copy()
 
     # Spatial nearest neighbours (if no time_col is given)
@@ -705,7 +725,7 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
         return result
 
     # Temporal nearest neighbours
-    grid_time_col = grid_time_col or time_col
+    grid_time_col = find_col(grid_df, grid_time_col or time_col)
     grid_times = np.sort(grid_df[grid_time_col].unique().astype(float))  # all sorted grid times
     obs_times = df[time_col].values.astype(float)  # all observation times
     nearest_times = grid_times[np.abs(obs_times[:, None] - grid_times[None, :]).argmin(axis=1)]
@@ -744,6 +764,6 @@ def _nearest_labels(obs_lon, obs_lat, grid_lon, grid_lat, grid_labels):
     # Construct neighbourhood graph
     tree = cKDTree(grid_coords)
 
-    # Retrun the one nearest neighbour for each observation
+    # Return the one nearest neighbour for each observation
     _, idxs = tree.query(obs_coords, k=1)
     return grid_labels[idxs]

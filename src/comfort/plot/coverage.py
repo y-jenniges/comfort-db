@@ -10,7 +10,7 @@ import pandas as pd
 import seaborn as sns
 
 from ..database.information import param_label
-from ..util.columns import resolve_param_columns
+from ..util.columns import find_col, resolve_param_columns
 from ._helpers import _finish, _get_or_create_ax, _save_fig
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def plot_annual_coverage(
     # Iterate over parameter dfs
     for name, df in dfs.items():
         # Per-year counts
-        counts = pd.to_datetime(df[date_col]).dt.year.value_counts().sort_index()
+        counts = pd.to_datetime(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
 
         # Normalise
         if normalise:
@@ -94,6 +94,9 @@ def plot_depth_coverage(
     Returns:
         The matplotlib Axes.
     """
+    # Resolve column names (insensitive to casing)
+    depth_col = find_col(df_wide, depth_col)
+
     ax, standalone = _get_or_create_ax(ax)
 
     # Get sorted depth levels

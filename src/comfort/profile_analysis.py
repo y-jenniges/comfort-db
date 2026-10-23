@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
 
+from .util.columns import find_col
+
 logger = logging.getLogger(__name__)
 
 # Columns that are never the measured-value column
@@ -30,7 +32,7 @@ def _resolve_profile_col(df: pd.DataFrame, profile_col: str | list[str] | None) 
     """Return profile grouping column(s). Defaults to [ID, PROFILE_NUMBER] when available."""
     # Use given profile_col
     if profile_col is not None:
-        return profile_col
+        return find_col(df, profile_col)
 
     # Use [ID, PROFILE_NUMBER] if available
     if "ID" in df.columns and "PROFILE_NUMBER" in df.columns:
@@ -68,11 +70,13 @@ def _profile_levels(group: pd.DataFrame, depth_col: str, value_col: str) -> tupl
 def _detect_value_col(df, value_col):
     """Return value_col if it exists, otherwise auto-detect the value column."""
     # Use value_col
-    if value_col in df.columns:
-        return value_col
+    column = find_col(df, value_col, required=False)
+    if column is not None:
+        return column
 
     # Infer potential candidates
-    candidates = [c for c in df.columns if c not in _KNOWN_NON_VALUE_COLS]
+    known = {c.upper() for c in _KNOWN_NON_VALUE_COLS}
+    candidates = [c for c in df.columns if str(c).upper() not in known]
     if len(candidates) == 1:
         logger.debug("_detect_value_col: auto-detected %r", candidates[0])
         return candidates[0]
@@ -91,12 +95,13 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
         str: The depth column name that exists in *df*.
     """
     # Check if depth_col exists
-    if depth_col in df.columns:
-        return depth_col
+    column = find_col(df, depth_col, required=False)
+    if column is not None:
+        return column
 
     # Use fallback (if depth_col does not exist)
-    fallback = "LEV_DBAR" if depth_col == "LEV_M" else "LEV_M"
-    if fallback in df.columns:
+    fallback = find_col(df, "LEV_DBAR" if depth_col.upper() == "LEV_M" else "LEV_M", required=False)
+    if fallback is not None:
         logger.debug("detect_depth_col: %r not found, using %r", depth_col, fallback)
         return fallback
 
@@ -138,6 +143,7 @@ def average_duplicate_records_per_profile(
     # Resolve grouping columns from the first parameter's DataFrame
     first_df = next(iter(raw.values()))
     profile_col = _resolve_profile_col(first_df, profile_col)
+    depth_col = detect_depth_col(first_df, depth_col)
     group_cols = (profile_col if isinstance(profile_col, list) else [profile_col]) + [depth_col]
 
     # Station metadata is constant within a group, keep it via "first"
@@ -312,7 +318,7 @@ def mixed_layer_depth(df: pd.DataFrame,
     depth_col = detect_depth_col(df, depth_col)
 
     # Select variable and threshold (density preferred over temperature)
-    col = density_col if density_col is not None else temperature_col
+    col = find_col(df, density_col if density_col is not None else temperature_col)
     delta = delta_density if density_col is not None else delta_temp
 
     # Density only counts an increase with depth, temperature either direction
@@ -387,6 +393,7 @@ def pycnocline_depth(df: pd.DataFrame,
     """
     profile_col = _resolve_profile_col(df, profile_col)
     depth_col = detect_depth_col(df, depth_col)
+    density_col = find_col(df, density_col)
 
     # Iterate over profiles
     rows = []

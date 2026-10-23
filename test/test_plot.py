@@ -498,3 +498,36 @@ class TestPlotMissingValueInfoMapJoint:
         result = plot_missing_value_info_map_joint(_missing_value_wide_df(), ["P_NITRATE"], ax=ax)
         assert result is ax
         plt.close()
+
+
+class TestColumnCasing:
+    """Column arguments in another casing are found by the plot functions."""
+
+    def test_plot_correlation_other_casing(self):
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0], "Y": [2.0, 4.0, 7.0], "C": [1.0, 2.0, 3.0]})
+        ax = plot_correlation(df, "x", "y", colour_col="c")
+        assert ax is not None
+        plt.close()
+
+    def test_plot_joint_other_casing(self):
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0], "Y": [2.0, 4.0, 7.0]})
+        assert plot_joint(df, "x", "y", kind="scatter") is not None
+        plt.close()
+
+    def test_plot_profile_other_casing(self, demo_conn):
+        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
+        ax = plot_profile(df, value_col="val", depth_col="lev_m", profiles=[0])
+        assert ax is not None
+        plt.close()
+
+    def test_plot_ts_diagram_other_casing(self):
+        df = pd.DataFrame({"CT": [5.0, 6.0, 7.0], "SA": [35.0, 35.1, 35.2]})
+        ax = plot_ts_diagram(df, "ct", "sa", density_contours=False)
+        assert ax is not None
+        plt.close()
+
+    # A missing column raises KeyError
+    def test_plot_correlation_missing_column_raises(self):
+        df = pd.DataFrame({"X": [1.0], "Y": [2.0]})
+        with pytest.raises(KeyError, match="Available columns"):
+            plot_correlation(df, "x", "z")

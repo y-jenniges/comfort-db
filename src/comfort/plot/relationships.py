@@ -20,6 +20,7 @@ import seaborn as sns
 from ..database.information import param_label, param_table_name
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
+from ..util.columns import find_col
 from ._helpers import _finish, _get_or_create_ax, _pretty_label, _save_fig
 
 if TYPE_CHECKING:
@@ -87,6 +88,11 @@ def plot_correlation(
 
     if x_col is None or y_col is None:
         raise ValueError("x_col and y_col are required")
+
+    # Resolve column names (insensitive to casing)
+    x_col = find_col(df, x_col)
+    y_col = find_col(df, y_col)
+    colour_col = find_col(df, colour_col, required=False) or colour_col
 
     # Drop rows with missing values
     valid = df[[x_col, y_col]].dropna()
@@ -188,6 +194,10 @@ def plot_joint(
 
     if x_col is None or y_col is None:
         raise ValueError("x_col and y_col are required")
+
+    # Resolve column names (insensitive to casing)
+    x_col = find_col(df, x_col)
+    y_col = find_col(df, y_col)
 
     # Drop rows with missing values
     valid = df[[x_col, y_col]].dropna()
@@ -315,6 +325,12 @@ def plot_ts_diagram(
     Returns:
         The matplotlib Axes, or ``None`` when the data is empty.
     """
+    # Resolve column names (insensitive to casing)
+    temperature_col = find_col(df, temperature_col)
+    salinity_col = find_col(df, salinity_col)
+    colour_col = find_col(df, colour_col, required=False) or colour_col
+    depth_col = find_col(df, depth_col, required=False) or depth_col
+
     # Determine colour column
     if colour_col is not None:
         # Use passed colour_col

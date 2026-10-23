@@ -29,9 +29,11 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from .util import sqlite_utils
-from .util.columns import resolve_param_columns
+from .util.columns import find_col, resolve_param_columns
 from .util.sqlite_utils import validate_identifier
-from .database.information import does_table_exist, get_names_of_all_parameter_tables, get_table_as_df, param_table_name
+from .database.information import (
+    does_table_exist, get_names_of_all_parameter_tables, get_table_as_df, param_table_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -395,6 +397,9 @@ class Grid:
             pandas.DataFrame: One row per occupied cell if *agg* is given,
                 otherwise one row per input row.
         """
+        # Resolve column names (insensitive to casing)
+        value_col = find_col(df, value_col)
+
         # Snap LATITUDE/LONGITUDE/LEV_M onto this grid's cell centres
         df = self._map_lat_lon_depth(df.copy())
 
@@ -548,6 +553,9 @@ class Grid:
         Returns:
             pandas.DataFrame: One row per occupied cell and time step.
         """
+        # Resolve column names (insensitive to casing)
+        value_col = find_col(df, value_col)
+
         if not self.has_time:
             raise ValueError("bin_time requires a grid with time axis (time_min, time_max, mode, dtime)")
 
@@ -577,6 +585,9 @@ class Grid:
         Returns:
             pandas.DataFrame: One row per occupied cell (and time step).
         """
+        # Resolve column names (insensitive to casing)
+        value_col = find_col(df, value_col)
+
         if not self.has_time:
             # No-time grid
             if agg == "seasonal_mean":
@@ -1018,6 +1029,10 @@ def seasonal_mean(
         pd.DataFrame with columns ``group_cols + ["YEAR", value_col]``,
         one row per group per year.
     """
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    date_col = find_col(df, date_col)
+
     if group_cols is None:
         group_cols = ["LATITUDE", "LONGITUDE", "LEV_M"]
 

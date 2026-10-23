@@ -543,7 +543,7 @@ class TestSelectRegions:
             "ProvDescr": ["box"],
             "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
         })
-        with pytest.raises(ValueError, match="Could not find region name column"):
+        with pytest.raises(KeyError, match="not found"):
             select_regions(gdf, "box")
 
 
@@ -852,3 +852,18 @@ class TestClassifyFromGrid:
         df = pd.DataFrame({"LATITUDE": [50.0, 55.0], "LONGITUDE": [-30.0, -25.0], "YEAR": [2000, 2010]})
         result = classify_from_grid(df, self._time_grid(), time_col="YEAR")
         assert list(result["label"]) == [1, 20]
+
+
+class TestColumnCasing:
+    # Column arguments in another casing give the same result
+    def test_along_track_distance_lower_case_arguments(self):
+        df = pd.DataFrame({"LATITUDE": [0.0, 0.0, 0.0], "LONGITUDE": [0.0, 1.0, 2.0]})
+        expected = along_track_distance(df)
+        result = along_track_distance(df, lat_col="latitude", lon_col="longitude")
+        pd.testing.assert_series_equal(result, expected)
+
+    # A missing region name column is a KeyError that lists the available columns
+    def test_unknown_column_raises_key_error(self):
+        df = pd.DataFrame({"LATITUDE": [0.0], "LONGITUDE": [0.0]})
+        with pytest.raises(KeyError, match="Available columns"):
+            along_track_distance(df, lat_col="lat")
