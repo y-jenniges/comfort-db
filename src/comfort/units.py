@@ -394,7 +394,7 @@ class ConversionFormulas:
             raise ValueError(f"Molar mass not defined for {parameter}")
         return float(self.molar_masses.loc[mask, "MOLAR_MASS"].iloc[0])
 
-    def milliEquivalentPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def milliEquivalentPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                     use_density: bool = False,
                                                     density_fallback: str = "constant") -> pd.DataFrame:
         """Convert meq/L to umol/kg (App. C: lab_dens). Valid for alkalinity."""
@@ -402,16 +402,16 @@ class ConversionFormulas:
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)
 
-    def microgramPerLiter_microgramPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramPerLiter_microgramPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                use_density: bool = False,
                                                density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ug/L to ug/kg (App. C: real_dens for chlorophyll, lab_dens otherwise)."""
         logger.debug("microgramPerLiter -> microgramPerKilogram")
-        density_fn = (self.real_density if param_label(param_name) == "CHLOROPHYLL" else self.lab_density)
+        density_fn = (self.real_density if param_label(parameter) == "CHLOROPHYLL" else self.lab_density)
         temp, dens = self._with_density(df, density_fn, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] / dens, UNITS_ID=14)
 
-    def millimolPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def millimolPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                              use_density: bool = False,
                                              density_fallback: str = "constant") -> pd.DataFrame:
         """Convert mmol/L to umol/kg (App. C: lab_dens)."""
@@ -419,14 +419,14 @@ class ConversionFormulas:
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)
 
-    def nanomolPerKilogram_femtomolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def nanomolPerKilogram_femtomolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                use_density: bool = False,
                                                density_fallback: str = "constant") -> pd.DataFrame:
         """Convert nmol/kg to fmol/kg."""
         logger.debug("nanomolPerKilogram -> femtomolPerKilogram")
         return df.copy().assign(VAL=df["VAL"] * 1_000_000, UNITS_ID=19)
 
-    def milliliterPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def milliliterPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                use_density: bool = False,
                                                density_fallback: str = "constant") -> pd.DataFrame:
         """Convert mL/L to umol/kg (oxygen-specific, factor 44.661; App. C: real_dens)."""
@@ -434,32 +434,32 @@ class ConversionFormulas:
         temp, real_dens = self._with_density(df, self.real_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 44.661 / real_dens, UNITS_ID=3)
 
-    def microgramPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                  use_density: bool = False,
                                                  density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ug/kg to umol/kg using molar mass."""
         logger.debug("microgramPerKilogram -> micromolPerKilogram")
         temp = df.copy()
-        molar_mass = self.get_molar_mass(param_name)
+        molar_mass = self.get_molar_mass(parameter)
         return temp.assign(VAL=temp["VAL"] / molar_mass, UNITS_ID=3)
 
-    def microgramPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                               use_density: bool = False,
                                               density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ug/L to umol/kg using molar mass (App. C: lab_dens)."""
         logger.debug("microgramPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
-        molar_mass = self.get_molar_mass(param_name)
+        molar_mass = self.get_molar_mass(parameter)
         return temp.assign(VAL=temp["VAL"] / (molar_mass * lab_dens), UNITS_ID=3)
 
-    def microgramAtomPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramAtomPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                      use_density: bool = False,
                                                      density_fallback: str = "constant") -> pd.DataFrame:
         """Convert ugAtom/kg to umol/kg (1:1 equivalence)."""
         logger.debug("microgramAtomPerKilogram -> micromolPerKilogram")
         return df.copy().assign(UNITS_ID=3)
 
-    def percent_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def percent_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                     use_density: bool = False,
                                     density_fallback: str = "constant") -> pd.DataFrame:
         """Convert % saturation to umol/kg using TEOS-10 oxygen solubility.
@@ -486,7 +486,7 @@ class ConversionFormulas:
         return temp.assign(VAL=temp["VAL"] * np.asarray(o2_eq) / 100, UNITS_ID=3)
 
     def _potential_temperature_for_o2sol(self, df: pd.DataFrame, sal_col: str,
-                                         temp_col: str) -> np.ndarray:
+                                         temperature_col: str) -> np.ndarray:
         """Helper function to compute potential temperature (pt0) for oxygen solubility.
 
         If pressure is not given, it computes pressure from depth and latitude if both are available.
@@ -503,11 +503,11 @@ class ConversionFormulas:
             logger.warning("percent -> micromolPerKilogram: pressure/latitude/longitude "
                             "missing, using in-situ temperature as an approximation to "
                             "potential temperature")
-            return df[temp_col].to_numpy(dtype=float)
+            return df[temperature_col].to_numpy(dtype=float)
 
         # Compute absolute salinity and potential temperature
         sa = convert_salinity(df[sal_col], pressure, df[lon_col], df[lat_col])
-        pt = convert_temperature(df[temp_col], sa.to_numpy(), pressure, to="pt0")
+        pt = convert_temperature(df[temperature_col], sa.to_numpy(), pressure, to="pt0")
         return pt.to_numpy()
 
     def _with_density(self, df: pd.DataFrame, density_fn, use_density: bool,

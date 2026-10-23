@@ -29,6 +29,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from .util import sqlite_utils
+from .util.columns import resolve_param_columns
 from .util.sqlite_utils import validate_identifier
 from .database.information import does_table_exist, get_names_of_all_parameter_tables, get_table_as_df, param_table_name
 
@@ -423,7 +424,7 @@ class Grid:
             dfs (dict[str, pandas.DataFrame]): Parameter name -> DataFrame,
                 Each DataFrame must contain LATITUDE, LONGITUDE, LEV_M
                 (+ DATEANDTIME for a grid with time axis) and a value column named
-                after its parameter key.
+                after its parameter key. Insensitive to casing and ``P_`` prefix.
             agg: Aggregation passed to ``self.bin(df, value_col, agg=agg)`` for
                 every parameter. A string ("mean"), a list, a callable, or
                 (on a grid with time axis) ``"seasonal_mean"`` for monthly-first annual
@@ -450,10 +451,9 @@ class Grid:
 
         # Successively merge each binned parameter onto the grid
         for name, df in dfs.items():
-            # Rename the value column to P_<name>
+            # Rename the value column to P_<name> (casing and P_ prefix of the column do not matter)
             col = param_table_name(name)
-            if name in df.columns:
-                df = df.rename(columns={name: col})
+            df = df.rename(columns={resolve_param_columns(df, name)[0]: col})
             # Binning
             binned = bin_fn(df, col)
             # Left-merge on grid
@@ -605,7 +605,7 @@ class Grid:
         annual = annual.drop(columns=["YEAR"])
         return self.bin_time(annual, value_col, agg="mean")
 
-    def map_tables(self, connection: sqlite3.Connection, param_tables: list[str] | None = None,
+    def map_tables(self, connection: sqlite3.Connection, parameters: list[str] | None = None,
                    replace_existing: bool = False, include_z_max: bool = True) -> list[str]:
         """Bin each parameter table into this grid and write the result to the database.
 
@@ -615,8 +615,8 @@ class Grid:
 
         Args:
             connection (sqlite3.Connection): Connection to the database.
-            param_tables (list[str]): Parameter names to map, e.g. "NITRATE" or
-                "P_NITRATE" (both accepted). None maps all parameter tables.
+            parameters (list[str]): Parameter names to map. Insensitive to casing and ``P_`` prefix.
+                None maps all parameter tables.
                 LATITUDE/LONGITUDE (and DATEANDTIME, for a grid with time axis)
                 are joined from station.
             replace_existing (bool): Replace already-mapped tables without prompting. Default is False.
@@ -629,11 +629,11 @@ class Grid:
         connection.create_aggregate("std", 1, sqlite_utils.Std)
 
         # Determine parameter table names
-        if not param_tables:
-            param_tables = get_names_of_all_parameter_tables(connection)
+        if not parameters:
+            parameters = get_names_of_all_parameter_tables(connection)
 
         mapped_tables = []
-        for table in param_tables:
+        for table in parameters:
             # Normalise to the P_* table name and validate it
             table = param_table_name(table)
             validate_identifier(table)
@@ -1070,27 +1070,27 @@ def drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_wide_table_online(connection: sqlite3.Connection, grid_id: int,
-                             param_tables: list[str] | None = None) -> str:
+                             parameters: list[str] | None = None) -> str:
     """Create a wide table in the database by joining all mapped parameter tables.
 
     Args:
         connection (sqlite3.Connection): Connection to the database.
         grid_id: Grid ID whose mapped parameter tables should be joined.
-        param_tables (list[str]): Parameter names, e.g. "NITRATE" or "P_NITRATE"
-            (both accepted). None uses all parameter tables.
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+            None uses all parameter tables.
     Returns:
         str: Name of the created wide table.
     """
     # If no parameter tables are specified, use all
-    if not param_tables:
-        param_tables = get_names_of_all_parameter_tables(connection)
-    param_tables = [param_table_name(p) for p in param_tables]
-    for p in param_tables:
+    if not parameters:
+        parameters = get_names_of_all_parameter_tables(connection)
+    parameters = [param_table_name(p) for p in parameters]
+    for p in parameters:
         validate_identifier(p)
 
     # Define SQL query parts
-    vals = ", ".join([f"{p}_{grid_id}.{p}" for p in param_tables])
-    joins = " ".join([f"LEFT JOIN {p}_{grid_id} USING(idx)" for p in param_tables])
+    vals = ", ".join([f"{p}_{grid_id}.{p}" for p in parameters])
+    joins = " ".join([f"LEFT JOIN {p}_{grid_id} USING(idx)" for p in parameters])
     wide_table_name = f"wide_{grid_id}_{generate_grid_id()}"
 
     # Create table in db
@@ -1121,23 +1121,23 @@ def load_wide_table(connection: sqlite3.Connection, wide_table_name: str,
 
 
 def get_missing_value_info_per_param(connection: sqlite3.Connection, wide_table_name: str,
-                                     param_tables: list[str]) -> pd.DataFrame:
+                                     parameters: list[str]) -> pd.DataFrame:
     """Compute the fraction of missing values per parameter in a wide table.
 
     Args:
         connection (sqlite3.Connection): Connection to the database.
         wide_table_name (str): Name of the wide table.
-        param_tables (list[str]): Parameter names, e.g. "NITRATE" or "P_NITRATE"
-            (both accepted) - must match the wide table's column names.
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+            The wide table must have a ``P_<name>`` column for each.
     Returns:
         pandas.DataFrame with columns 'parameter', 'total', 'relative'.
     """
     # Define SQL query parts
-    param_tables = [param_table_name(p) for p in param_tables]
-    for p in param_tables:
+    parameters = [param_table_name(p) for p in parameters]
+    for p in parameters:
         validate_identifier(p)
-    water_or_any = " or ".join(f"{p} is not null" for p in param_tables)
-    all_not_null = " and ".join(f"{p} is not null" for p in param_tables)
+    water_or_any = " or ".join(f"{p} is not null" for p in parameters)
+    all_not_null = " and ".join(f"{p} is not null" for p in parameters)
 
     # Number of relevant grid cells
     num_grid_cells = connection.execute(
@@ -1150,7 +1150,7 @@ def get_missing_value_info_per_param(connection: sqlite3.Connection, wide_table_
     ).fetchone()[0]
 
     # Count not-null values per parameter column
-    null_expr = ", ".join(f"COUNT(*) - COUNT({p}) AS {p}" for p in param_tables)
+    null_expr = ", ".join(f"COUNT(*) - COUNT({p}) AS {p}" for p in parameters)
     cur = connection.execute(
         f"SELECT {null_expr} FROM {wide_table_name} WHERE {water_or_any} OR water=1;"
     )

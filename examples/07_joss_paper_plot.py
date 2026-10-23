@@ -86,12 +86,12 @@ def main():
     # Global T-S diagram with isopycnal contours, coloured by oxygen concentration
     ax = plot_ts_diagram(
         df,
-        temp_col="CT",
-        sal_col="SA",
-        temp_type="CT",
-        sal_type="SA",
-        color_col="OXYGEN",
-        colorbar_label=oxygen_label,
+        temperature_col="CT",
+        salinity_col="SA",
+        temperature_type="CT",
+        salinity_type="SA",
+        colour_col="OXYGEN",
+        colourbar_label=oxygen_label,
         kind="hexbin",
         gridsize=60,
     )

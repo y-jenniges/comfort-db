@@ -79,7 +79,7 @@ if __name__ == "__main__":
         # Lower-level read: single parameter table
         print("\n=== read_parameter ===")
         df_oxy = comfort.read_parameter(conn,
-                                        param_name="OXYGEN",
+                                        parameter="OXYGEN",
                                         quality_flags=comfort.QC_GOOD,
                                         limit=1000
                                         )

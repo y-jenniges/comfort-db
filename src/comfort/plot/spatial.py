@@ -32,7 +32,7 @@ def plot_spatial_distribution(
     resolution: float = 0.5,
     clim: tuple[float, float] | None = None,
     cmap: str = "Spectral_r",
-    colorbar_label: str | None = None,
+    colourbar_label: str | None = None,
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
     quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
@@ -52,7 +52,7 @@ def plot_spatial_distribution(
         resolution: Bin size in degrees.
         clim: Colour scale limits.
         cmap: Matplotlib colormap name.
-        colorbar_label: Colour-bar label.
+        colourbar_label: Colour-bar label.
         conn: Database connection (alternative to *df*).
         parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
@@ -103,7 +103,7 @@ def plot_spatial_distribution(
     )
     ax.figure.colorbar(
         image, ax=ax, orientation="horizontal", fraction=0.1, aspect=40,
-        pad=0.08, label=colorbar_label or f"Number of {parameter or ''} samples",
+        pad=0.08, label=colourbar_label or f"Number of {parameter or ''} samples",
     )
     if clim:
         image.set_clim(*clim)
@@ -153,7 +153,7 @@ def plot_lat_lon_range(
 
 def plot_parameter_map(
     df_wide: pd.DataFrame,
-    param_tables: list[str],
+    parameters: list[str],
     *,
     depths: list | None = None,
     times: list | None = None,
@@ -166,7 +166,7 @@ def plot_parameter_map(
     Args:
         df_wide: Wide table with ``LATITUDE``, ``LONGITUDE``, ``LEV_M``,
             ``DATEANDTIME`` and one column per parameter.
-        param_tables: Parameter column names to plot.
+        parameters: Parameter column names to plot.
         depths: Depth levels to show (``None`` = all).
         times: Time values to show (``None`` = all).
         savefig_folder: Folder to save figures.
@@ -184,8 +184,8 @@ def plot_parameter_map(
     cmap = plt.colormaps["viridis"].with_extremes(bad=mcolors.to_rgba("black", alpha=0.2))
 
     # One map per parameter x time x depth combination
-    param_tables = resolve_param_columns(df_wide, param_tables)
-    for param in param_tables:
+    parameters = resolve_param_columns(df_wide, parameters)
+    for param in parameters:
         # Shared color norm for all times/depths of a parameter
         norm = plt.Normalize(df_wide[param].min(), df_wide[param].max())
         for t in times:
@@ -216,7 +216,7 @@ def plot_parameter_map(
 
 def plot_missing_value_info_map_over_depth(
     df_wide: pd.DataFrame,
-    param_tables: list[str],
+    parameters: list[str],
     *,
     times: list | None = None,
     savefig_folder: str | None = None,
@@ -228,7 +228,7 @@ def plot_missing_value_info_map_over_depth(
     Args:
         df_wide: Wide table with ``LATITUDE``, ``LONGITUDE``, ``LEV_M``,
             ``DATEANDTIME`` and one column per parameter.
-        param_tables: Parameter column names to plot.
+        parameters: Parameter column names to plot.
         times: Time values to show (``None`` = all).
         savefig_folder: Folder to save figures.
         relative: Plot relative (%) missing fraction.
@@ -243,8 +243,8 @@ def plot_missing_value_info_map_over_depth(
     cmap = plt.colormaps["viridis"]
     norm = plt.Normalize(0, 100)
 
-    param_tables = resolve_param_columns(df_wide, param_tables)
-    for param in param_tables:
+    parameters = resolve_param_columns(df_wide, parameters)
+    for param in parameters:
         for t in times:
             dft = df_wide[df_wide["DATEANDTIME"] == t]
 
@@ -278,7 +278,7 @@ def plot_missing_value_info_map_over_depth(
 
 def plot_missing_value_info_map_joint(
     df_wide: pd.DataFrame,
-    param_cols: list[str],
+    parameters: list[str],
     *,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
@@ -289,7 +289,7 @@ def plot_missing_value_info_map_joint(
     Args:
         df_wide: Wide table with ``LATITUDE``, ``LONGITUDE`` and one column
             per parameter.
-        param_cols: Parameter column names to check jointly.
+        parameters: Parameter column names to check jointly.
         ax: Axes to draw into. Must already use a cartopy projection when
             passed explicitly. Creates a new PlateCarree figure when ``None``.
         save_as: Save path.
@@ -302,8 +302,8 @@ def plot_missing_value_info_map_joint(
     ax, standalone = _get_or_create_ax(ax, projection=ccrs.PlateCarree())
 
     # Compute missingness
-    param_cols = resolve_param_columns(df_wide, param_cols)
-    spatial = df_wide.groupby(["LATITUDE", "LONGITUDE"])[param_cols].apply(
+    parameters = resolve_param_columns(df_wide, parameters)
+    spatial = df_wide.groupby(["LATITUDE", "LONGITUDE"])[parameters].apply(
         lambda g: g.isna().all(axis=1).mean() * 100,
     ).reset_index(name="pct_missing")
 

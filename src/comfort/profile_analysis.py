@@ -65,20 +65,20 @@ def _profile_levels(group: pd.DataFrame, depth_col: str, value_col: str) -> tupl
     return levels.index.values, levels.values
 
 
-def _detect_param_col(df, param_col):
-    """Return param_col if it exists, otherwise auto-detect the value column."""
-    # Use param_col
-    if param_col in df.columns:
-        return param_col
+def _detect_value_col(df, value_col):
+    """Return value_col if it exists, otherwise auto-detect the value column."""
+    # Use value_col
+    if value_col in df.columns:
+        return value_col
 
     # Infer potential candidates
     candidates = [c for c in df.columns if c not in _KNOWN_NON_VALUE_COLS]
     if len(candidates) == 1:
-        logger.debug("_detect_param_col: auto-detected %r", candidates[0])
+        logger.debug("_detect_value_col: auto-detected %r", candidates[0])
         return candidates[0]
 
     # Fallback
-    return param_col
+    return value_col
 
 
 def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
@@ -160,7 +160,7 @@ def average_duplicate_records_per_profile(
 
 
 def vertical_gradient(df: pd.DataFrame,
-                      param_col: str = "VAL",
+                      value_col: str = "VAL",
                       depth_col: str = "LEV_M",
                       profile_col: str | list[str] | None = None
                       ) -> pd.DataFrame:
@@ -168,34 +168,34 @@ def vertical_gradient(df: pd.DataFrame,
 
     Args:
         df (pandas.DataFrame): Input DataFrame.
-        param_col (str): Column with measured values.
+        value_col (str): Column with measured values.
         depth_col (str): Column with depth [m].
         profile_col (str or list<str>): Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
             ``"PROFILE_NUMBER"``.
     Returns:
         pandas.DataFrame: Copy of *df* with added column
-            ``<param_col>_gradient``. Repeated depths within a profile are
+            ``<value_col>_gradient``. Repeated depths within a profile are
             averaged before computing the gradient.
     """
     profile_col = _resolve_profile_col(df, profile_col)
-    param_col = _detect_param_col(df, param_col)
+    value_col = _detect_value_col(df, value_col)
     depth_col = detect_depth_col(df, depth_col)
     sort_cols = (profile_col if isinstance(profile_col, list) else [profile_col]) + [depth_col]
     df_out = df.copy().sort_values(sort_cols)
-    grad_col = f"{param_col}_gradient"
+    grad_col = f"{value_col}_gradient"
     df_out[grad_col] = np.nan
 
     # Compute gradient per profile using central differences
     for _, group in df_out.groupby(profile_col, sort=False):
         # Average duplicate depths, drop NaNs
-        depths, vals = _profile_levels(group, depth_col, param_col)
+        depths, vals = _profile_levels(group, depth_col, value_col)
         if len(depths) < 2:
             continue
 
         # Compute gradient and map it back to every row at that depth
         dv = pd.Series(np.gradient(vals, depths), index=depths)
-        valid = group[[depth_col, param_col]].dropna()
+        valid = group[[depth_col, value_col]].dropna()
         df_out.loc[valid.index, grad_col] = valid[depth_col].map(dv).values
 
     return df_out
@@ -263,7 +263,7 @@ def profile_completeness(df: pd.DataFrame,
 
 def mixed_layer_depth(df: pd.DataFrame,
                       density_col: str | None = None,
-                      temp_col: str | None = None,
+                      temperature_col: str | None = None,
                       depth_col: str = "LEV_M",
                       profile_col: str | list[str] | None = None,
                       delta_density: float = 0.03,
@@ -285,7 +285,7 @@ def mixed_layer_depth(df: pd.DataFrame,
         df (pandas.DataFrame): Input DataFrame with density or
             temperature and depth columns.
         density_col (str): Column with potential density anomaly [kg/m3].
-        temp_col (str): Column with temperature [°C]. Used only
+        temperature_col (str): Column with temperature [°C]. Used only
             when ``density_col`` is ``None``.
         depth_col (str): Column with depth [m].
         profile_col (str or list<str>): Column(s) identifying individual profiles.
@@ -305,14 +305,14 @@ def mixed_layer_depth(df: pd.DataFrame,
             exceeded or the reference level is too far from ``reference_depth``).
     """
     # Get column names
-    if density_col is None and temp_col is None:
-        raise ValueError("Provide at least one of density_col or temp_col")
+    if density_col is None and temperature_col is None:
+        raise ValueError("Provide at least one of density_col or temperature_col")
 
     profile_col = _resolve_profile_col(df, profile_col)
     depth_col = detect_depth_col(df, depth_col)
 
     # Select variable and threshold (density preferred over temperature)
-    col = density_col if density_col is not None else temp_col
+    col = density_col if density_col is not None else temperature_col
     delta = delta_density if density_col is not None else delta_temp
 
     # Density only counts an increase with depth, temperature either direction
@@ -434,7 +434,7 @@ def _bracket_gap(z: np.ndarray, targets: np.ndarray) -> np.ndarray:
 
 def interpolate_depth_levels(df: pd.DataFrame,
                              target_depths: ArrayLike,
-                             param_col: str = "VAL",
+                             value_col: str = "VAL",
                              depth_col: str = "LEV_M",
                              profile_col: str | list[str] | None = None,
                              max_gap: float | None = None,
@@ -447,7 +447,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
     Args:
         df (pandas.DataFrame): Input DataFrame.
         target_depths (array-like): Target depth levels [m].
-        param_col (str): Column with measured values.
+        value_col (str): Column with measured values.
         depth_col (str): Column with depth [m].
         profile_col (str or list<str>): Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
@@ -469,7 +469,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
         raise ValueError(f"Unknown method {method!r}; choose 'pchip' or 'linear'")
 
     profile_col = _resolve_profile_col(df, profile_col)
-    param_col = _detect_param_col(df, param_col)
+    value_col = _detect_value_col(df, value_col)
     depth_col = detect_depth_col(df, depth_col)
     target_depths = np.asarray(target_depths, dtype=float)
 
@@ -482,7 +482,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
     chunks = []
     for pid, group in df.groupby(profile_col):
         # Average duplicate depths, drop nans (both interpolants need strictly increasing x)
-        depths, vals = _profile_levels(group, depth_col, param_col)
+        depths, vals = _profile_levels(group, depth_col, value_col)
         if len(depths) < 2:
             logger.debug("interpolate_depth_levels: profile %s has < 2 valid levels, skipped", pid)
             continue
@@ -509,12 +509,12 @@ def interpolate_depth_levels(df: pd.DataFrame,
                 continue
 
         # Build a DataFrame chunk for this profile
-        chunk = pd.DataFrame({depth_col: depths_sel, param_col: vals_interp})
+        chunk = pd.DataFrame({depth_col: depths_sel, value_col: vals_interp})
         for c in profile_keys + meta_cols:
             chunk[c] = group[c].iloc[0]
         chunks.append(chunk)
 
     if not chunks:
         # Return empty df
-        return pd.DataFrame(columns=[depth_col, param_col, *profile_keys, *meta_cols])
+        return pd.DataFrame(columns=[depth_col, value_col, *profile_keys, *meta_cols])
     return pd.concat(chunks, ignore_index=True)

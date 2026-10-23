@@ -143,7 +143,7 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
     return [param_label(name) for name in get_names_of_all_parameter_tables(conn)]
 
 
-def read_parameter(conn: sqlite3.Connection, param_name: str, *,
+def read_parameter(conn: sqlite3.Connection, parameter: str, *,
                    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
                    profiles: list[int] | None = None,
                    lat_min: float | None = None, lat_max: float | None = None,
@@ -161,7 +161,7 @@ def read_parameter(conn: sqlite3.Connection, param_name: str, *,
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        param_name (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+        parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags (list[QCFilter] or list[tuple[str, str]]): QC filters,
             e.g. ``QC_GOOD``.
         profiles (list[int]): Profile numbers to load. ``None`` loads all.
@@ -189,7 +189,7 @@ def read_parameter(conn: sqlite3.Connection, param_name: str, *,
     region_box = region_bbox(region, region_name_col) if region is not None else None
 
     # Get the data from the database
-    df = _read_with_geo(conn, param_name, quality_flags,
+    df = _read_with_geo(conn, parameter, quality_flags,
                         lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max,
                         depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
                         limit=limit, region_box=region_box,
@@ -531,7 +531,7 @@ def load_comfort(
             ``"pchip"`` (default) or ``"linear"``. Ignored when
             *target_depths* is ``None``.
         as_xarray (bool): ``True`` returns ``xr.Dataset``, ``False`` returns
-            ``dict[param_name, pandas.DataFrame]``.
+            ``dict[parameter, pandas.DataFrame]``.
         convert_units (bool): When ``True``, convert each parameter's values
             to its default unit using :class:`comfort.units.UnitsConverter`.
         use_density (bool): When ``True`` and ``convert_units=True``, use
@@ -630,7 +630,7 @@ def load_comfort(
     # target_depths given: Project every parameter onto it
     depths = np.asarray(target_depths, dtype=float)
     interp_dfs = {
-        param: interpolate_depth_levels(df, depths, param_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
+        param: interpolate_depth_levels(df, depths, value_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
         for param, df in dfs.items()
     }
     if not as_xarray:
@@ -877,7 +877,7 @@ def _build_scattered_dataset(dfs, lookups, param_unit_ids):
     return ds
 
 
-def _read_with_geo(conn, param_name, quality_flags,
+def _read_with_geo(conn, parameter, quality_flags,
                    lat_min=None, lat_max=None, lon_min=None, lon_max=None,
                    depth_min=None, depth_max=None, date_min=None, date_max=None,
                    limit=None, with_temperature=False, with_salinity=False, region_box=None,
@@ -893,7 +893,7 @@ def _read_with_geo(conn, param_name, quality_flags,
     from .database.information import does_table_exist
 
     # Validate identifiers
-    table = param_table_name(param_name)
+    table = param_table_name(parameter)
     validate_identifier(table)
     for col in extra_station_cols or []:
         validate_identifier(col)

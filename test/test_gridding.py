@@ -587,7 +587,7 @@ class TestNoTimeMapTables:
         grid = _make_no_time_grid_stub()
         grid.grid_id = 998
         conn = self._conn()
-        mapped = grid.map_tables(conn, param_tables=["NITRATE"])
+        mapped = grid.map_tables(conn, parameters=["NITRATE"])
 
         assert mapped == ["P_NITRATE_998"]
         out = get_table_as_df(conn, "P_NITRATE_998")
@@ -607,7 +607,7 @@ class TestMapTablesSpellings:
         grid = _make_no_time_grid_stub()
         grid.grid_id = 997
         conn = TestNoTimeMapTables._conn()
-        assert grid.map_tables(conn, param_tables=[name]) == ["P_NITRATE_997"]
+        assert grid.map_tables(conn, parameters=[name]) == ["P_NITRATE_997"]
 
 
 class TestMapDataframes:
@@ -635,6 +635,22 @@ class TestMapDataframes:
 
         cell = result[(result["LATITUDE"] == 7.5) & (result["LONGITUDE"] == 7.5) & (result["LEV_M"] == 50.0)]
         assert cell["P_OXYGEN"].iloc[0] == 5.0
+
+    # Keys and value columns in any casing / with P_ prefix are matched
+    @pytest.mark.parametrize("key, column", [("nitrate", "NITRATE"), ("NITRATE", "p_nitrate"), ("P_NITRATE", "nitrate")])
+    def test_key_and_column_spellings(self, key, column):
+        grid = _make_no_time_grid_stub()
+        df = pd.DataFrame({"LATITUDE": [1.0, 2.0], "LONGITUDE": [1.0, 2.0], "LEV_M": [10.0, 10.0], column: [1.0, 3.0]})
+        result = grid.map_dataframes({key: df})
+        cell = result[(result["LATITUDE"] == 2.5) & (result["LONGITUDE"] == 2.5) & (result["LEV_M"] == 0.0)]
+        assert cell["P_NITRATE"].iloc[0] == 2.0
+
+    # A key without a matching value column is an error
+    def test_missing_value_column_raises(self):
+        grid = _make_no_time_grid_stub()
+        df = pd.DataFrame({"LATITUDE": [1.0], "LONGITUDE": [1.0], "LEV_M": [10.0], "OXYGEN": [1.0]})
+        with pytest.raises(KeyError, match="NITRATE"):
+            grid.map_dataframes({"NITRATE": df})
 
     # bin_fn overrides the default mean aggregation with a custom per-parameter function
     def test_custom_bin_fn_overrides_default_agg(self):
@@ -724,7 +740,7 @@ class TestOnlineWideTableFunctions:
         grid.grid_id = 999
         grid.grid_name = "grid_999"
         grid.time_min = "2000-01-01 00:00:00"
-        grid.map_tables(conn, param_tables=["P_NITRATE"])
+        grid.map_tables(conn, parameters=["P_NITRATE"])
         return conn
 
     # map_tables writes both the grid template and a per-parameter mapped table
@@ -750,12 +766,12 @@ class TestOnlineWideTableFunctions:
         grid.grid_id = 997
         grid.grid_name = "grid_997"
         grid.time_min = "2000-01-01 00:00:00"
-        mapped = grid.map_tables(conn, param_tables=["NITRATE"])  # bare parameter name
+        mapped = grid.map_tables(conn, parameters=["NITRATE"])  # bare parameter name
         assert mapped == ["P_NITRATE_997"]
         assert does_table_exist(conn, "P_NITRATE_997", "table")
 
         # create_wide_tale_online
-        wide_name = create_wide_table_online(conn, 997, param_tables=["NITRATE"]) # bare parameter name
+        wide_name = create_wide_table_online(conn, 997, parameters=["NITRATE"]) # bare parameter name
         df_wide = get_table_as_df(conn, wide_name)
         assert "P_NITRATE" in df_wide.columns
 
@@ -784,14 +800,14 @@ class TestOnlineWideTableFunctions:
         assert isinstance(grid.z_min, np.int64) and isinstance(grid.z_max, np.int64)  # check if type in grid is correct
 
         # Map parameter table onto grid (should work with correct types)
-        grid.map_tables(conn, param_tables=["P_NITRATE"])
+        grid.map_tables(conn, parameters=["P_NITRATE"])
         df = get_table_as_df(conn, "P_NITRATE_996")
         assert df["P_NITRATE"].notna().sum() == 1
 
     # The wide table joins the grid template with each mapped parameter table on idx
     def test_create_wide_table_online(self):
         conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, param_tables=["P_NITRATE"])
+        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
         assert wide_name.startswith("wide_999_")
 
         df_wide = get_table_as_df(conn, wide_name)
@@ -809,7 +825,7 @@ class TestOnlineWideTableFunctions:
     # dropping_land_cells removes an empty land cell that was loaded back from SQL
     def test_load_wide_table_drops_empty_land_cells(self):
         conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, param_tables=["P_NITRATE"])
+        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
         # Mark a cell with no data as land
         conn.execute(
             f"UPDATE {wide_name} SET water=0 WHERE LATITUDE=2.5 AND LONGITUDE=7.5 AND LEV_M=0.0"
@@ -825,7 +841,7 @@ class TestOnlineWideTableFunctions:
     # The online per-param missingness matches the manually computed fraction
     def test_get_missing_value_info_per_param(self):
         conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, param_tables=["P_NITRATE"])
+        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
         result = get_missing_value_info_per_param(conn, wide_name, ["P_NITRATE"])
         row = result[result["parameter"] == "P_NITRATE"].iloc[0]
         assert row["total"] == 6
@@ -834,7 +850,7 @@ class TestOnlineWideTableFunctions:
     # The offline (list-of-DataFrames) missingness-info variant agrees with the online (SQL) variant
     def test_get_missing_value_info_offline_per_param_matches_online(self):
         conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, param_tables=["P_NITRATE"])
+        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
         df_wide = get_table_as_df(conn, wide_name)
 
         online = get_missing_value_info_per_param(conn, wide_name, ["P_NITRATE"])

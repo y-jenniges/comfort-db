@@ -197,14 +197,14 @@ def get_names_of_all_parameter_tables(conn: sqlite3.Connection, like_pattern: st
 
 
 def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: str = "float",
-               param_tables: list[str] | None = None) -> tuple:
+               parameters: list[str] | None = None) -> tuple:
     """Get the global min and max of a column across all parameter tables.
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
         column (str): Column name to aggregate.
         column_type (str): ``'float'``, ``'int'`` or ``'datetime64'``.
-        param_tables (list[str]): Tables to query. ``None`` means all.
+        parameters (list[str]): Tables to query. ``None`` means all.
     Returns:
         tuple: (minimum, maximum), or (None, None) on error.
     """
@@ -212,8 +212,8 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
     validate_identifier(column)
 
     # Get parameter table names
-    if not param_tables:
-        param_tables = get_names_of_all_parameter_tables(conn)
+    if not parameters:
+        parameters = get_names_of_all_parameter_tables(conn)
 
     column_minimum = None
     column_maximum = None
@@ -226,7 +226,7 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
     convert = converters[column_type]
 
     # Iterate over parameter tables
-    for table in param_tables:
+    for table in parameters:
         # Execute query / get min and max
         cur = conn.execute(f"SELECT MIN({column}), MAX({column}) FROM {table};")
         raw = cur.fetchone()

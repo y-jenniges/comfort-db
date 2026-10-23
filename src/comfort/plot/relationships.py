@@ -35,7 +35,7 @@ def plot_correlation(
     x_col: str | None = None,
     y_col: str | None = None,
     *,
-    color_col: str | None = None,
+    colour_col: str | None = None,
     cmap: str = "viridis",
     kind: str = "scatter",
     gridsize: int = 40,
@@ -61,8 +61,8 @@ def plot_correlation(
         df: DataFrame containing *x_col* and *y_col*.
         x_col: Column name for the x-axis.
         y_col: Column name for the y-axis.
-        color_col: Optional column for colour coding.
-        cmap: Matplotlib colormap (used when *color_col* is set).
+        colour_col: Optional column for colour coding.
+        cmap: Matplotlib colormap (used when *colour_col* is set).
         kind: ``"scatter"`` (default) or ``"hexbin"``.
         gridsize: Number of hexagons across the x-axis when ``kind="hexbin"``.
         regression: Overlay a linear regression line.
@@ -90,9 +90,9 @@ def plot_correlation(
 
     # Drop rows with missing values
     valid = df[[x_col, y_col]].dropna()
-    if color_col and color_col in df.columns:
-        # Ensure color_col is present
-        valid = df[[x_col, y_col, color_col]].dropna()
+    if colour_col and colour_col in df.columns:
+        # Ensure colour_col is present
+        valid = df[[x_col, y_col, colour_col]].dropna()
     if valid.empty:
         logger.warning("plot_correlation: No valid data after dropping NaNs")
         return None
@@ -101,22 +101,22 @@ def plot_correlation(
 
     if kind == "hexbin":
         # Hexbin plot
-        has_color = color_col and color_col in valid.columns
+        has_color = colour_col and colour_col in valid.columns
         hb = ax.hexbin(
             valid[x_col], valid[y_col],
-            C=valid[color_col] if has_color else None,
+            C=valid[colour_col] if has_color else None,
             reduce_C_function=np.mean, gridsize=gridsize, cmap=cmap, mincnt=1,
         )
 
         # Colorbar
-        ax.figure.colorbar(hb, ax=ax, label=_pretty_label(color_col) if has_color else "Count")
+        ax.figure.colorbar(hb, ax=ax, label=_pretty_label(colour_col) if has_color else "Count")
     else:
         # Scatter plot with optional colour coding
         scatter_kw = dict(s=marker_size, alpha=alpha, edgecolors="none")
-        if color_col and color_col in valid.columns:
-            sc = ax.scatter(valid[x_col], valid[y_col], c=valid[color_col],
+        if colour_col and colour_col in valid.columns:
+            sc = ax.scatter(valid[x_col], valid[y_col], c=valid[colour_col],
                             cmap=cmap, **scatter_kw)
-            ax.figure.colorbar(sc, ax=ax, label=_pretty_label(color_col))
+            ax.figure.colorbar(sc, ax=ax, label=_pretty_label(colour_col))
         else:
             ax.scatter(valid[x_col], valid[y_col], **scatter_kw)
 
@@ -249,15 +249,15 @@ _TEOS10_TEMP = {"CT"}
 
 def plot_ts_diagram(
     df: pd.DataFrame,
-    temp_col: str,
-    sal_col: str,
+    temperature_col: str,
+    salinity_col: str,
     *,
-    temp_type: str = "CT",
-    sal_type: str = "SA",
-    color_col: str | None = None,
+    temperature_type: str = "CT",
+    salinity_type: str = "SA",
+    colour_col: str | None = None,
     depth_col: str = "LEV_M",
     cmap: str = "viridis_r",
-    colorbar_label: str | None = None,
+    colourbar_label: str | None = None,
     density_contours: bool = True,
     contour_levels: int | list[float] | None = None,
     kind: str = "scatter",
@@ -273,39 +273,39 @@ def plot_ts_diagram(
     dpi: int = 300,
 ) -> matplotlib.axes.Axes | None:
     """Temperature-Salinity diagram with optional isopycnal contours.
-    Density contours are only accurate when ``sal_type="SA"`` and ``temp_type="CT"``.
+    Density contours are only accurate when ``salinity_type="SA"`` and ``temperature_type="CT"``.
 
-    Axis labels are derived from *sal_type* / *temp_type* when *xlabel* /
+    Axis labels are derived from *salinity_type* / *temperature_type* when *xlabel* /
     *ylabel* are not supplied explicitly:
 
-    * ``sal_type="SA"``  -> :math:`S_A` [g kg-1]  - Absolute Salinity (TEOS-10)
-    * ``sal_type="SP"``  -> :math:`S_P` [1]  - Practical Salinity (dimensionless)
-    * ``temp_type="CT"`` -> :math:`\\Theta` [°C] - Conservative Temperature (TEOS-10)
-    * ``temp_type="pt"`` / ``"pt0"`` -> :math:`\\theta` [°C] - Potential Temperature
-    * ``temp_type="t"``  -> :math:`T` [°C] - In-situ Temperature
+    * ``salinity_type="SA"``  -> :math:`S_A` [g kg-1]  - Absolute Salinity (TEOS-10)
+    * ``salinity_type="SP"``  -> :math:`S_P` [1]  - Practical Salinity (dimensionless)
+    * ``temperature_type="CT"`` -> :math:`\\Theta` [°C] - Conservative Temperature (TEOS-10)
+    * ``temperature_type="pt"`` / ``"pt0"`` -> :math:`\\theta` [°C] - Potential Temperature
+    * ``temperature_type="t"``  -> :math:`T` [°C] - In-situ Temperature
 
     Args:
         df: DataFrame containing temperature and salinity.
-        temp_col: Column with temperature values.
-        sal_col: Column with salinity values.
-        temp_type: Variable type for *temp_col* - ``"CT"``, ``"pt"``,
+        temperature_col: Column with temperature values.
+        salinity_col: Column with salinity values.
+        temperature_type: Variable type for *temperature_col* - ``"CT"``, ``"pt"``,
             ``"pt0"``, or ``"t"``.  Controls the y-axis label and
             density contour accuracy.
-        sal_type: Variable type for *sal_col* - ``"SA"`` or ``"SP"``.
+        salinity_type: Variable type for *salinity_col* - ``"SA"`` or ``"SP"``.
             Controls the x-axis label and density contour accuracy.
-        color_col: Column to colour the scatter by. Falls back to
+        colour_col: Column to colour the scatter by. Falls back to
             *depth_col* when ``None``.
         depth_col: Depth column used as default colour variable.
         cmap: Matplotlib colormap name.
-        colorbar_label: Colour-bar label (defaults to the colour column).
+        colourbar_label: Colour-bar label (defaults to the colour column).
         density_contours: Overlay sigma0 contour lines.
         contour_levels: Explicit contour levels or number of levels.
         kind: ``"scatter"`` (default) or ``"hexbin"``.
         gridsize: Number of hexagons across the x-axis when ``kind="hexbin"``.
         marker_size: Scatter marker size.
         alpha: Scatter marker opacity.
-        xlabel: x-axis label (defaults to label derived from *sal_type*).
-        ylabel: y-axis label (defaults to label derived from *temp_type*).
+        xlabel: x-axis label (defaults to label derived from *salinity_type*).
+        ylabel: y-axis label (defaults to label derived from *temperature_type*).
         xlim: Salinity axis limits.
         ylim: Temperature axis limits.
         ax: Axes to draw into.
@@ -316,9 +316,9 @@ def plot_ts_diagram(
         The matplotlib Axes, or ``None`` when the data is empty.
     """
     # Determine colour column
-    if color_col is not None:
-        # Use passed color_col
-        use_color = color_col
+    if colour_col is not None:
+        # Use passed colour_col
+        use_color = colour_col
     elif kind != "hexbin":
         # Default (for scatter) is depth observation count
         use_color = depth_col
@@ -327,7 +327,7 @@ def plot_ts_diagram(
         use_color = None
 
     # Define which columns need full data
-    needed = [temp_col, sal_col]
+    needed = [temperature_col, salinity_col]
     if use_color in df.columns:
         needed.append(use_color)
 
@@ -338,21 +338,21 @@ def plot_ts_diagram(
         return None
 
     # Warning if density contours need different sal/temp to be accurate
-    if density_contours and (sal_type not in _TEOS10_SAL or temp_type not in _TEOS10_TEMP):
+    if density_contours and (salinity_type not in _TEOS10_SAL or temperature_type not in _TEOS10_TEMP):
         logger.warning(
-            "Density contours use gsw.rho(SA, CT, 0) but sal_type=%r, temp_type=%r - "
+            "Density contours use gsw.rho(SA, CT, 0) but salinity_type=%r, temperature_type=%r - "
             "contours will be inaccurate. Pass SA and CT for correct isopycnals.",
-            sal_type, temp_type,
+            salinity_type, temperature_type,
         )
 
     ax, standalone = _get_or_create_ax(ax)
 
     # Isopycnal contour grid
     if density_contours:
-        s_min = xlim[0] if xlim else valid[sal_col].min()
-        s_max = xlim[1] if xlim else valid[sal_col].max()
-        t_min = ylim[0] if ylim else valid[temp_col].min()
-        t_max = ylim[1] if ylim else valid[temp_col].max()
+        s_min = xlim[0] if xlim else valid[salinity_col].min()
+        s_max = xlim[1] if xlim else valid[salinity_col].max()
+        t_min = ylim[0] if ylim else valid[temperature_col].min()
+        t_max = ylim[1] if ylim else valid[temperature_col].max()
 
         s_pad = 0.01 * abs(s_max - s_min) or 0.5
         t_pad = 0.1 * abs(t_max - t_min) or 0.5
@@ -384,19 +384,19 @@ def plot_ts_diagram(
     # Plot observations on top of the contours
     has_color_data = use_color in valid.columns
     if kind == "hexbin":
-        hb = ax.hexbin(valid[sal_col], valid[temp_col], C=valid[use_color] if has_color_data else None, reduce_C_function=np.mean, gridsize=gridsize, cmap=cmap, mincnt=1)
-        ax.figure.colorbar(hb, ax=ax, label=(colorbar_label or _pretty_label(use_color)) if has_color_data else "Count")
+        hb = ax.hexbin(valid[salinity_col], valid[temperature_col], C=valid[use_color] if has_color_data else None, reduce_C_function=np.mean, gridsize=gridsize, cmap=cmap, mincnt=1)
+        ax.figure.colorbar(hb, ax=ax, label=(colourbar_label or _pretty_label(use_color)) if has_color_data else "Count")
     else:
         scatter_kw = dict(s=marker_size, alpha=alpha, marker=".", edgecolors="none")
         if has_color_data:
-            sc = ax.scatter(valid[sal_col], valid[temp_col], c=valid[use_color], cmap=cmap, **scatter_kw)
-            ax.figure.colorbar(sc, ax=ax, label=colorbar_label or _pretty_label(use_color))
+            sc = ax.scatter(valid[salinity_col], valid[temperature_col], c=valid[use_color], cmap=cmap, **scatter_kw)
+            ax.figure.colorbar(sc, ax=ax, label=colourbar_label or _pretty_label(use_color))
         else:
-            ax.scatter(valid[sal_col], valid[temp_col], **scatter_kw)
+            ax.scatter(valid[salinity_col], valid[temperature_col], **scatter_kw)
 
     # Axes labels and limits
-    ax.set_xlabel(xlabel or _SAL_LABELS.get(sal_type, sal_col))
-    ax.set_ylabel(ylabel or _TEMP_LABELS.get(temp_type, temp_col))
+    ax.set_xlabel(xlabel or _SAL_LABELS.get(salinity_type, salinity_col))
+    ax.set_ylabel(ylabel or _TEMP_LABELS.get(temperature_type, temperature_col))
     ax.set_title("T-S diagram")
     if xlim:
         ax.set_xlim(xlim)

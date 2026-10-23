@@ -107,6 +107,13 @@ class TestPlotProfile:
         assert ax is not None
         plt.close()
 
+    # xlabel / ylabel override the value and depth axis labels
+    def test_axis_labels(self, demo_conn):
+        ax = plot_profile(conn=demo_conn, parameter="TEMPERATURE", profiles=[0], xlabel="T [C]", ylabel="Z [m]")
+        assert ax.get_xlabel() == "T [C]"
+        assert ax.get_ylabel() == "Z [m]"
+        plt.close()
+
     # A profiles filter matching nothing returns None instead of an empty plot
     def test_empty_returns_none(self, demo_conn):
         df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
@@ -125,6 +132,15 @@ class TestPlotProfile:
         df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
         ax = plot_profile(df, profiles=[0], show_points=False)
         assert ax.lines[0].get_marker() == "None"
+        plt.close()
+
+    # xlabel / ylabel label the along-track and depth axes, colourbar_label the colourbar
+    def test_section_labels(self, demo_conn):
+        ax = plot_section(conn=demo_conn, parameter="OXYGEN", xlabel="Latitude", ylabel="Z [m]",
+                          colourbar_label="O2")
+        assert ax.get_xlabel() == "Latitude"
+        assert ax.get_ylabel() == "Z [m]"
+        assert ax.figure.axes[-1].get_ylabel() == "O2"
         plt.close()
 
     # Section plot works when loading straight from the database
@@ -157,7 +173,7 @@ class TestPlotTSDiagram:
                                    as_xarray=False)
         df = dfs["TEMPERATURE"].rename(columns={"TEMPERATURE": "T"})
         df["S"] = dfs["SALINITY"]["SALINITY"].values
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S", temp_type="CT", sal_type="SA")
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="CT", salinity_type="SA")
         assert any(isinstance(c, QuadContourSet) for c in ax.collections)
         plt.close()
 
@@ -167,20 +183,20 @@ class TestPlotTSDiagram:
                                    as_xarray=False)
         df = dfs["TEMPERATURE"].rename(columns={"TEMPERATURE": "T"})
         df["S"] = dfs["SALINITY"]["SALINITY"].values
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S", density_contours=False)
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", density_contours=False)
         assert not any(isinstance(c, QuadContourSet) for c in ax.collections)
         plt.close()
 
     # An empty input DataFrame returns None instead of an empty plot
     def test_empty_returns_none(self):
         df = pd.DataFrame({"T": [], "S": [], "LEV_M": []})
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S")
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S")
         assert ax is None
 
     def test_axis_labels_teos10(self):
         """Default SA/CT types produce proper TEOS-10 axis labels."""
         df = pd.DataFrame({"CT": [10.0, 12.0], "SA": [35.0, 35.5], "LEV_M": [10, 20]})
-        ax = plot_ts_diagram(df, temp_col="CT", sal_col="SA", temp_type="CT", sal_type="SA",
+        ax = plot_ts_diagram(df, temperature_col="CT", salinity_col="SA", temperature_type="CT", salinity_type="SA",
                              density_contours=False)
         assert r"$S_A$" in ax.get_xlabel()
         assert "g kg" in ax.get_xlabel()
@@ -191,7 +207,7 @@ class TestPlotTSDiagram:
     def test_axis_labels_practical(self):
         """SP/t types produce appropriate fallback labels."""
         df = pd.DataFrame({"T": [10.0, 12.0], "S": [35.0, 35.5], "LEV_M": [10, 20]})
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S", temp_type="t", sal_type="SP",
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="t", salinity_type="SP",
                              density_contours=False)
         assert r"$S_P$" in ax.get_xlabel()
         assert r"$T$" in ax.get_ylabel()
@@ -202,7 +218,7 @@ class TestPlotTSDiagram:
         import logging
         df = pd.DataFrame({"T": [10.0, 12.0], "S": [35.0, 35.5], "LEV_M": [10, 20]})
         with caplog.at_level(logging.WARNING, logger="comfort.plot.relationships"):
-            ax = plot_ts_diagram(df, temp_col="T", sal_col="S", temp_type="t", sal_type="SP",
+            ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="t", salinity_type="SP",
                                  density_contours=True)
         assert ax is not None
         assert any("inaccurate" in r.message for r in caplog.records)

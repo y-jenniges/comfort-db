@@ -74,7 +74,7 @@ def plot_annual_coverage(
 
 def plot_depth_coverage(
     df_wide: pd.DataFrame,
-    param_cols: list[str],
+    parameters: list[str],
     *,
     depth_col: str = "LEV_M",
     ax: matplotlib.axes.Axes | None = None,
@@ -85,7 +85,7 @@ def plot_depth_coverage(
 
     Args:
         df_wide: Wide table with a depth column and one column per parameter.
-        param_cols: Parameter column names to plot.
+        parameters: Parameter column names to plot.
         depth_col: Column name containing depth values.
         ax: Axes to draw into.
         save_as: Save path.
@@ -100,7 +100,7 @@ def plot_depth_coverage(
     depths = sorted(df_wide[depth_col].dropna().unique())
 
     # Plot count-vs-depth per parameter
-    for col in resolve_param_columns(df_wide, param_cols):
+    for col in resolve_param_columns(df_wide, parameters):
         counts = [df_wide.loc[df_wide[depth_col] == d, col].notna().sum() for d in depths]
         label = param_label(col).capitalize()
         ax.plot(counts, depths, marker="o", label=label, markersize=4)
@@ -120,7 +120,7 @@ def plot_counts_bar(
     df_count: pd.DataFrame,
     tick_style: str | None = "year",
     *,
-    plot_title: str = "Number of samples per year",
+    title: str = "Number of samples per year",
     month_ticks: list[str] | None = None,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
@@ -140,7 +140,7 @@ def plot_counts_bar(
             second is the count.
         tick_style: ``'year'``, ``'month'`` or ``None`` (no special tick
             formatting, e.g. for per-parameter counts).
-        plot_title: Plot title.
+        title: Plot title.
         month_ticks: 12 month labels.
         ax: Axes to draw into.
         save_as: Save path.
@@ -170,7 +170,7 @@ def plot_counts_bar(
     ax.barh(x, y)
     for i, (xi, yi) in enumerate(zip(x, y)):
         ax.text(yi, i, str(yi), ha="left", va="center")
-    ax.set_title(plot_title)
+    ax.set_title(title)
     ax.set_ylabel("Count")
 
     # Draw ticks and labels

@@ -133,11 +133,11 @@ class TestGetMinMax:
     # Global min/max of VAL across two explicit parameter tables
     def test_global_min_max_across_tables(self, comfort_conn):
         lo, hi = get_minmax(comfort_conn, column="VAL", column_type="float",
-                            param_tables=["P_NITRATE", "P_OXYGEN"])
+                            parameters=["P_NITRATE", "P_OXYGEN"])
         assert lo == pytest.approx(4.0)
         assert hi == pytest.approx(220.0)
 
-    # param_tables=None auto-discovers all parameter tables
+    # parameters=None auto-discovers all parameter tables
     def test_default_param_tables_uses_all_parameter_tables(self, comfort_conn):
         lo, hi = get_minmax(comfort_conn, column="VAL", column_type="float")
         assert lo == pytest.approx(4.0)
@@ -146,7 +146,7 @@ class TestGetMinMax:
     # column_type="int" converts the result to Python int
     def test_int_column_type(self, comfort_conn):
         lo, hi = get_minmax(comfort_conn, column="ID", column_type="int",
-                            param_tables=["P_NITRATE"])
+                            parameters=["P_NITRATE"])
         assert (lo, hi) == (1, 2)
 
     # Unsupported column_type logs an error and returns (None, None)
@@ -154,7 +154,7 @@ class TestGetMinMax:
         import logging
         with caplog.at_level(logging.ERROR):
             result = get_minmax(comfort_conn, column="VAL", column_type="bogus",
-                                param_tables=["P_NITRATE"])
+                                parameters=["P_NITRATE"])
         assert result == (None, None)
         assert "bogus" in caplog.text
 

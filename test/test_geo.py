@@ -400,45 +400,45 @@ class TestWaterMassStatistics:
 
     # Output is a DataFrame
     def test_returns_dataframe(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert isinstance(result, pd.DataFrame)
 
     # Rows are indexed by region name
     def test_rows_are_regions(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert set(result.index) == {"north", "south"}
 
     # Unlabelled (NaN-region) observations do not get their own row
     def test_nan_region_excluded(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert np.nan not in result.index
 
     # Standard descriptive statistics are all present
     def test_statistics_columns(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert set(result.columns.get_level_values(1)) >= {"count", "mean", "std", "min", "max"}
 
     # Multiple parameter columns each get their own statistics block
     def test_multiple_params(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL", "VAL2"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL", "VAL2"])
         assert ("VAL", "mean") in result.columns
         assert ("VAL2", "mean") in result.columns
 
     # Each region's count matches its number of observations
     def test_count_correct(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert result.loc["north", ("VAL", "count")] == 1
         assert result.loc["south", ("VAL", "count")] == 1
 
     # Per-region mean is computed correctly
     def test_mean_correct(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert result.loc["north", ("VAL", "mean")] == pytest.approx(1.0)
         assert result.loc["south", ("VAL", "mean")] == pytest.approx(2.0)
 
     # Single parameter as string (not list) still works
     def test_string_param_col(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols="VAL")
+        result = water_mass_statistics(self._labelled_df(), parameters="VAL")
         assert ("VAL", "mean") in result.columns
 
 
@@ -579,7 +579,7 @@ class TestLoadLonghurst:
     # code_col/name_col override auto-detection of names
     def test_explicit_column_names(self, tmp_path):
         path = self._write_shapefile(tmp_path, code_col="code", name_col="label")
-        result = load_longhurst(path, code_col="code", name_col="label")
+        result = load_longhurst(path, code_col="code", region_name_col="label")
         assert "province_code" in result.columns
         assert "province_name" in result.columns
 
@@ -622,7 +622,7 @@ class TestLoadBasins:
     # name_col overrides auto-detection
     def test_explicit_column_name(self, tmp_path):
         path = self._write_shapefile(tmp_path, name_col="label")
-        result = load_basins(path, name_col="label")
+        result = load_basins(path, region_name_col="label")
         assert "basin_name" in result.columns
 
     # No name column, auto-detected or explicit, raises an error

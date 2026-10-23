@@ -77,7 +77,7 @@ def main():
         # Step 2: Bin each raw P_* table onto the grid                         #
         # -------------------------------------------------------------------- #
         log.info("Step 2: Mapping parameter tables onto the grid (mean/median/std/count)...")
-        mapped = grid.map_tables(gm.connection, param_tables=PARAMETERS, replace_existing=True)
+        mapped = grid.map_tables(gm.connection, parameters=PARAMETERS, replace_existing=True)
         for table in mapped:
             log.info("  %s", table)
 
@@ -94,7 +94,7 @@ def main():
             gm.connection.execute(f"DROP TABLE {old_name}")
             log.info("  Dropped stale wide table: %s", old_name)
 
-        wide_name = create_wide_table_online(gm.connection, grid.grid_id, param_tables=PARAMETERS)
+        wide_name = create_wide_table_online(gm.connection, grid.grid_id, parameters=PARAMETERS)
         gm.connection.commit()
         log.info("  Created wide table: %s", wide_name)
 

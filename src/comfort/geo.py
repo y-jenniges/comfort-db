@@ -210,7 +210,7 @@ def _extract_coords(geom, coords):
 
 
 def load_longhurst(path: str | Path, code_col: str | None = None,
-                   name_col: str | None = None) -> gpd.GeoDataFrame:
+                   region_name_col: str | None = None) -> gpd.GeoDataFrame:
     """Load Longhurst province boundaries from a shapefile.
 
     Returns a GeoDataFrame with columns ``province_code``,
@@ -222,7 +222,7 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     Args:
         path (str or Path): Path to the Longhurst ``.shp`` file.
         code_col (str): Province code column. Auto-detected when ``None``.
-        name_col (str): Province description column. Auto-detected when ``None``.
+        region_name_col (str): Province description column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Standardised province boundaries.
     """
@@ -244,22 +244,22 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     # Define province code and name columns
     if code_col is None:
         code_col = next((c for c in _CODE_CANDIDATES if c in gdf.columns), None)
-    if name_col is None:
-        name_col = next((c for c in _NAME_CANDIDATES if c in gdf.columns), None)
+    if region_name_col is None:
+        region_name_col = next((c for c in _NAME_CANDIDATES if c in gdf.columns), None)
 
     # Ensure that a code and name columns were found
-    if code_col is None or name_col is None:
+    if code_col is None or region_name_col is None:
         raise ValueError(
             f"Could not detect code/name columns in {list(gdf.columns)}. "
-            "Pass code_col and name_col explicitly."
+            "Pass code_col and region_name_col explicitly."
         )
 
-    return gdf[[code_col, name_col, "geometry"]].rename(
-        columns={code_col: "province_code", name_col: "province_name"}
+    return gdf[[code_col, region_name_col, "geometry"]].rename(
+        columns={code_col: "province_code", region_name_col: "province_name"}
     )
 
 
-def load_basins(path: str | Path, name_col: str | None = None) -> gpd.GeoDataFrame:
+def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.GeoDataFrame:
     """Load "Global Oceans and Seas" basin boundaries from a shapefile
     (Flanders Marine Institute (2021). Global Oceans and Seas, version 1.
     Available online at https://www.marineregions.org/. https://doi.org/10.14284/542).
@@ -268,7 +268,7 @@ def load_basins(path: str | Path, name_col: str | None = None) -> gpd.GeoDataFra
 
     Args:
         path (str or Path): Path to the basins ``.shp`` file.
-        name_col (str): Basin name column. Auto-detected when ``None``.
+        region_name_col (str): Basin name column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Basin boundaries with columns ``basin_name`` and ``geometry``.
     """
@@ -285,13 +285,13 @@ def load_basins(path: str | Path, name_col: str | None = None) -> gpd.GeoDataFra
     gdf = gpd.read_file(path)
 
     # Define basin name column (case-insensitive match)
-    if name_col is None:
+    if region_name_col is None:
         cols_lower = {c.lower(): c for c in gdf.columns}
-        name_col = cols_lower.get("name")
-    if name_col is None:
-        raise ValueError(f"Could not detect name column in {list(gdf.columns)}. Pass name_col explicitly.")
+        region_name_col = cols_lower.get("name")
+    if region_name_col is None:
+        raise ValueError(f"Could not detect name column in {list(gdf.columns)}. Pass region_name_col explicitly.")
 
-    return gdf[[name_col, "geometry"]].rename(columns={name_col: "basin_name"})
+    return gdf[[region_name_col, "geometry"]].rename(columns={region_name_col: "basin_name"})
 
 
 def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
@@ -433,21 +433,21 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     return result
 
 
-def water_mass_statistics(df: pd.DataFrame, param_cols: list[str] | str,
+def water_mass_statistics(df: pd.DataFrame, parameters: list[str] | str,
                           region_col: str = "region") -> pd.DataFrame:
     """Compute per-region descriptive statistics for one or more parameters.
 
     Args:
         df (pandas.DataFrame): DataFrame with region assignments
             (from :func:`water_mass_masks`) and parameter columns.
-        param_cols (list[str] or str): Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
+        parameters (list[str] or str): Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
         region_col (str): Region column. Default ``"region"``.
     Returns:
         pandas.DataFrame: MultiIndex columns ``(parameter, statistic)``
             with count, mean, std, min, max. Rows are regions.
     """
-    param_cols = resolve_param_columns(df, param_cols)
-    return df.groupby(region_col)[param_cols].agg(["count", "mean", "std", "min", "max"])
+    parameters = resolve_param_columns(df, parameters)
+    return df.groupby(region_col)[parameters].agg(["count", "mean", "std", "min", "max"])
 
 
 def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,

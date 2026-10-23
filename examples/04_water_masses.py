@@ -84,7 +84,7 @@ if __name__ == "__main__":
     # Per-region statistics
     print("=== water_mass_statistics ===")
     stats = water_mass_statistics(
-        df_m, param_cols=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
+        df_m, parameters=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
     )
     print(stats.to_string(), "\n")
 
@@ -110,7 +110,7 @@ if __name__ == "__main__":
         print(df_lh["region"].value_counts().head(10).to_string(), "\n")
 
         stats_lh = water_mass_statistics(
-            df_lh, param_cols=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
+            df_lh, parameters=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
         )
         print(stats_lh.head(10).to_string())
     else:
@@ -128,7 +128,7 @@ if __name__ == "__main__":
         print(df_j["label"].value_counts().head(10).to_string(), "\n")
 
         stats_j = water_mass_statistics(
-            df_j, param_cols=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
+            df_j, parameters=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
             region_col="label",
         )
         print(stats_j.head(10).to_string())
@@ -149,7 +149,7 @@ if __name__ == "__main__":
 
         # Per-basin statistics
         stats_basins = water_mass_statistics(
-            df_basins, param_cols=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
+            df_basins, parameters=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
         )
         print(stats_basins.head(10).to_string())
     else:
@@ -178,7 +178,7 @@ if __name__ == "__main__":
             print("Install comfort-db[plot] to save a spatial-distribution map of the filtered data.")
         else:
             out_path = f"output/{basin_name.replace(' ', '_').lower()}_nitrate_map.png"
-            plot_spatial_distribution(basin_dfs["NITRATE"], colorbar_label=f"NITRATE samples ({basin_name})",
+            plot_spatial_distribution(basin_dfs["NITRATE"], colourbar_label=f"NITRATE samples ({basin_name})",
                                       save_as=out_path)
             print(f"Saved spatial check to {out_path}")
     else:
@@ -198,7 +198,7 @@ if __name__ == "__main__":
 
         # Per-biome statistics
         stats_b = water_mass_statistics(
-            df_b, param_cols=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
+            df_b, parameters=["NITRATE", "TEMPERATURE", "SALINITY", "sigma0", "spiciness0"],
             region_col="label",
         )
         print(stats_b.head(10).to_string())

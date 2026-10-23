@@ -926,9 +926,9 @@ def _populate_grid_controls(table_name):
     State("grid-table", "value"),
     prevent_initial_call=True,
 )
-def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global, table_name):
+def _render_grid(value_col, depth_range, time_idx_range, plot_type, show_global, table_name):
     """Query a depth/time range from the wide table and render."""
-    if not table_name or not param_col:
+    if not table_name or not value_col:
         raise PreventUpdate
 
     depths = _grid_cache.get("depths", [])
@@ -966,7 +966,7 @@ def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global,
 
     # Build status text
     n_total = len(df)
-    n_valid = df[param_col].notna().sum()
+    n_valid = df[value_col].notna().sum()
     depth_label = (
         _format_range_label(depth_range[0], depth_range[1], "{:.0f}") + " m"
         if depth_range is not None else "all"
@@ -976,10 +976,10 @@ def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global,
         if time_range is not None else "all"
     )
     status = (f"{n_valid:,} / {n_total:,} cells - "
-              f"{param_col}  |  depth: {depth_label}  |  time: {time_label}")
+              f"{value_col}  |  depth: {depth_label}  |  time: {time_label}")
 
     label = f"depth {depth_label}" + (f", time {time_label}" if time_range is not None else "")
-    fig = _grid_figure(df, param_col, label, plot_type, show_global)
+    fig = _grid_figure(df, value_col, label, plot_type, show_global)
     return fig, status, "", False
 
 
@@ -1008,18 +1008,18 @@ def _show_grid_time(idx_range):
         return ""
 
 
-def _grid_figure(df, param_col, depth_label, plot_type, show_global=False):
+def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
     """Build a Plotly figure for the grid tab."""
     if plot_type == "map":
         # Show only cells with data, aggregated to one value per lat/lon (mean)
-        valid = df[df[param_col].notna()]
+        valid = df[df[value_col].notna()]
         is_aggregated = valid.duplicated(subset=["LATITUDE", "LONGITUDE"]).any()
-        plot_df = valid.groupby(["LATITUDE", "LONGITUDE"], as_index=False)[param_col].mean()
+        plot_df = valid.groupby(["LATITUDE", "LONGITUDE"], as_index=False)[value_col].mean()
         title_suffix = " (mean)" if is_aggregated else ""
         fig = px.scatter_geo(
-            plot_df, lat="LATITUDE", lon="LONGITUDE", color=param_col,
+            plot_df, lat="LATITUDE", lon="LONGITUDE", color=value_col,
             color_continuous_scale="Viridis",
-            title=f"{param_col}{title_suffix} - {depth_label}",
+            title=f"{value_col}{title_suffix} - {depth_label}",
         )
         # Crop map to grid extent
         lat_min, lat_max = df["LATITUDE"].min(), df["LATITUDE"].max()
@@ -1060,10 +1060,10 @@ def _grid_figure(df, param_col, depth_label, plot_type, show_global=False):
         fig.update_layout(coloraxis_showscale=False)
     else:
         # Histogram of non-null values
-        valid = df[param_col].dropna()
+        valid = df[value_col].dropna()
         fig = px.histogram(
-            valid, x=param_col, nbins=80,
-            title=f"{param_col} - {depth_label}",
+            valid, x=value_col, nbins=80,
+            title=f"{value_col} - {depth_label}",
         )
 
     fig.update_layout(template="plotly_white")
@@ -1185,9 +1185,9 @@ def _load_csv(contents, filename):
     Input("csv-global-map", "value"),
     prevent_initial_call=True,
 )
-def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
+def _render_csv(value_col, depth_range, time_idx_range, plot_type, show_global):
     """Query a depth/time range from the CSV table and render."""
-    if _csv_cache["df"] is None or not param_col:
+    if _csv_cache["df"] is None or not value_col:
         raise PreventUpdate
 
     times = _csv_cache.get("times", [])
@@ -1210,7 +1210,7 @@ def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
 
     # Build status text
     n_total = len(df)
-    n_valid = df[param_col].notna().sum()
+    n_valid = df[value_col].notna().sum()
     depth_label = (
         _format_range_label(depth_range[0], depth_range[1], "{:.0f}") + " m"
         if depth_range is not None else "all"
@@ -1220,10 +1220,10 @@ def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
         if time_range is not None else "all"
     )
     status = (f"{n_valid:,} / {n_total:,} cells - "
-              f"{param_col} | depth: {depth_label} | time: {time_label}")
+              f"{value_col} | depth: {depth_label} | time: {time_label}")
 
     label = f"depth {depth_label}" + (f", time {time_label}" if time_range is not None else "")
-    fig = _grid_figure(df, param_col, label, plot_type, show_global)
+    fig = _grid_figure(df, value_col, label, plot_type, show_global)
     return fig, status, "", False
 
 

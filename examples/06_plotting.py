@@ -88,19 +88,19 @@ if __name__ == "__main__":
     # 1a. Vertical temperature profiles (first 5 stations) with mixed layer depth
     sample_ids = sorted(df_t["ID"].unique())[:5]
     df_t_sample = df_t[df_t["ID"].isin(sample_ids)]
-    mld = mixed_layer_depth(df_t_sample, temp_col="TEMPERATURE", depth_col="LEV_M")
+    mld = mixed_layer_depth(df_t_sample, temperature_col="TEMPERATURE", depth_col="LEV_M")
     plot_profile(df_t_sample,
-                 param_col="TEMPERATURE", param_label="Temperature [°C]",
+                 value_col="TEMPERATURE", xlabel="Temperature [°C]",
                  depth_markers=mld, depth_marker_col="MLD_m",
                  ax=axes[0, 0])
     axes[0, 0].set_title("Temperature profiles (dashed = MLD)")
 
     # 1b. Oxygen section - binned
-    plot_section(df_o, param_col="OXYGEN", param_label=oxygen_label, binned=True, ax=axes[0, 1])
+    plot_section(df_o, value_col="OXYGEN", colourbar_label=oxygen_label, binned=True, ax=axes[0, 1])
     axes[0, 1].set_title("Oxygen section (binned mean)")
 
     # 1c. T-S diagram with isopycnal contours and depth colouring
-    plot_ts_diagram(df_ts, temp_col="TEMPERATURE", sal_col="SALINITY",
+    plot_ts_diagram(df_ts, temperature_col="TEMPERATURE", salinity_col="SALINITY",
                     ylabel="Temperature [°C]", xlabel="Salinity [PSU]",
                     ax=axes[1, 0])
 
@@ -118,8 +118,8 @@ if __name__ == "__main__":
         sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR",
     )
     pyc = pycnocline_depth(df_dens_sample, density_col="sigma0", depth_col="LEV_M")
-    ax_pyc = plot_profile(df_dens_sample, param_col="sigma0",
-                          param_label=r"$\sigma_0$ [kg/m$^3$]",
+    ax_pyc = plot_profile(df_dens_sample, value_col="sigma0",
+                          xlabel=r"$\sigma_0$ [kg/m$^3$]",
                           depth_markers=pyc, depth_marker_col="pycnocline_depth_m")
     ax_pyc.set_title("Density profiles (dashed = pycnocline depth)")
 
@@ -128,8 +128,8 @@ if __name__ == "__main__":
     # Compute cumulative distances along track
     df_o_transect["DISTANCE_KM"] = along_track_distance(df_o_transect, order_col="DATEANDTIME")
     # Plot section along the track
-    ax_transect = plot_section(df_o_transect, param_col="OXYGEN", param_label=oxygen_label,
-                               along_col="DISTANCE_KM", along_label="Distance along track [km]",
+    ax_transect = plot_section(df_o_transect, value_col="OXYGEN", colourbar_label=oxygen_label,
+                               along_col="DISTANCE_KM", xlabel="Distance along track [km]",
                                binned=True)
     ax_transect.set_title("Oxygen section along cruise track")
 

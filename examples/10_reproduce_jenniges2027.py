@@ -206,8 +206,8 @@ def main():
         if not ts_data.empty:
             plot_ts_diagram(
                 ts_data,
-                temp_col="P_TEMPERATURE",
-                sal_col="P_SALINITY",
+                temperature_col="P_TEMPERATURE",
+                salinity_col="P_SALINITY",
                 depth_col="LEV_M",
                 save_as=_save_path(output_dir, "ts_diagram.png"),
             )
@@ -236,7 +236,7 @@ def main():
         ]:
             name = f"corr_{x_col.replace('P_', '')}_{y_col.replace('P_', '')}"
             plot_correlation(
-                df_wide, x_col=x_col, y_col=y_col, color_col="LEV_M",
+                df_wide, x_col=x_col, y_col=y_col, colour_col="LEV_M",
                 save_as=_save_path(output_dir, f"{name}.png"),
             )
             plt.close()
