@@ -24,7 +24,6 @@ from comfort.gridding import average_duplicate_locations
 from comfort.physics import add_teos10_variables
 from comfort.plot import plot_ts_diagram
 from comfort.qc import flag_salinity_like_oxygen
-from comfort.units import UnitsConverter
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -40,10 +39,7 @@ def main():
     with comfort.connect(db_path) as conn:
         # Get total oxygen count
         num_observations = get_num_samples(conn=conn, table_name="P_OXYGEN")
-        print(f"Total number of oxygen observations: {num_observations}")
-
-        # Init the units converter
-        converter = UnitsConverter.from_connection(conn)
+        log.info(f"Total number of oxygen observations: {num_observations}")
 
         # Load global data with SQL-level QC filtering, oxygen is converted
         # to umol/kg on load (SQL-joined co-located T/S, App. C densities)
@@ -56,9 +52,8 @@ def main():
         for param, df_param in raw.items():
             log.info("  %-12s %10d rows", param, len(df_param))
 
-        # Define plotting label
-        oxygen_unit = converter.default_unit_name("P_OXYGEN")
-        oxygen_label = f"Oxygen [{oxygen_unit}]" if oxygen_unit else "Oxygen"
+        # Define plotting label (oxygen is converted to umol/kg on load; unit parts separated by a space like the SA label)
+        oxygen_label = r"Oxygen [µmol kg$^{-1}$]"
 
     # Drop oxygen rows that are suspected mislabelled salinity values
     suspect = flag_salinity_like_oxygen(raw["OXYGEN"])
@@ -86,7 +81,7 @@ def main():
 
     # Get count of remaining oxygen observations
     num_remaining_observations =len(df.dropna())
-    print(f"Remaining number of oxygen observations: {num_remaining_observations}")
+    log.info(f"Remaining number of oxygen observations: {num_remaining_observations}")
 
     # Global T-S diagram with isopycnal contours, coloured by oxygen concentration
     ax = plot_ts_diagram(
