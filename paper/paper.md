@@ -41,7 +41,7 @@ Only quality-controlled (`QC_GOOD`) data are loaded, units are harmonised (`comf
 oxygen values that are identical to their co-located practical salinity are dropped (`flag_salinity_like_oxygen`). 
 Duplicate spatio-temporal locations are averaged (`average_duplicate_locations`) and temperature, salinity and oxygen inner-joined. 
 Absolute Salinity ($S_A$) and Conservative Temperature ($\Theta$) are derived via TEOS-10 (`comfort.physics`). 
-The remaining 40,425,889 data points (out of 67,085,418 oxygen observations in the dataset) are averaged into hexagonal bins and coloured by oxygen concentration. 
+The remaining 40,434,271 data points (out of 67,085,418 oxygen observations in the dataset) are averaged into hexagonal bins and coloured by oxygen concentration. 
 The three visible low-oxygen zones in the plot broadly correspond to known oxygen-depleted areas 
 in the Baltic, Black and Arabian Sea [@paulmier2009].*
 
