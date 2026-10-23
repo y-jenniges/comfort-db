@@ -1,6 +1,10 @@
 """Parameter value scaling for the COMFORT database."""
 from __future__ import annotations
 
+__all__ = [
+    "ParamScaler",
+]
+
 import logging
 import sqlite3
 from typing import TYPE_CHECKING

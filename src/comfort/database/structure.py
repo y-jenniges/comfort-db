@@ -4,6 +4,11 @@ remove_tables_like adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
 """
 from __future__ import annotations
 
+__all__ = [
+    "create_combined_parameter_table",
+    "remove_tables_like",
+]
+
 import logging
 import sqlite3
 

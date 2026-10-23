@@ -32,6 +32,7 @@ from comfort.geo import (
     water_mass_masks,
     water_mass_statistics,
 )
+from comfort.gridding import average_duplicate_locations
 from comfort.physics import add_teos10_variables, compute_spiciness
 
 load_dotenv()
@@ -59,7 +60,7 @@ if __name__ == "__main__":
 
     # --- Adding density (sigma0) and spiciness info ---
     print("=== add_teos10_variables + compute_spiciness ===")
-    averaged = comfort.average_duplicate_locations(dfs)
+    averaged = average_duplicate_locations(dfs)
     loc_cols = ["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]
     df_wm = (averaged["TEMPERATURE"]
              .merge(averaged["SALINITY"], on=loc_cols)

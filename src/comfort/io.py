@@ -1,6 +1,17 @@
 """High-level I/O helpers for reading and subsetting COMFORT parameter data."""
 from __future__ import annotations
 
+__all__ = [
+    "connect",
+    "describe_variables",
+    "info",
+    "list_parameters",
+    "load_comfort",
+    "read_parameter",
+    "read_station",
+    "subset_region",
+]
+
 import logging
 import sqlite3
 from collections.abc import Iterator

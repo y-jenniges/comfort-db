@@ -1,6 +1,16 @@
 """Profile analysis functions for COMFORT data."""
 from __future__ import annotations
 
+__all__ = [
+    "average_duplicate_records_per_profile",
+    "detect_depth_col",
+    "interpolate_depth_levels",
+    "mixed_layer_depth",
+    "profile_completeness",
+    "pycnocline_depth",
+    "vertical_gradient",
+]
+
 import logging
 import numpy as np
 import pandas as pd

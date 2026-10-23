@@ -7,6 +7,19 @@ Getting started with TEOS-10 and the Gibbs Seawater (GSW) Oceanographic Toolbox.
 """
 from __future__ import annotations
 
+__all__ = [
+    "add_teos10_variables",
+    "compute_aou",
+    "compute_buoyancy_frequency",
+    "compute_density",
+    "compute_potential_vorticity",
+    "compute_spiciness",
+    "convert_salinity",
+    "convert_temperature",
+    "convert_to_potential_temperature",
+    "resolve_pressure",
+]
+
 import logging
 import gsw
 import numpy as np

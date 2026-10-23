@@ -4,6 +4,19 @@ Adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
 """
 from __future__ import annotations
 
+__all__ = [
+    "Grid",
+    "GridManager",
+    "average_duplicate_locations",
+    "create_wide_table_online",
+    "drop_land_cells",
+    "get_missing_value_info_offline",
+    "get_missing_value_info_offline_per_param",
+    "get_missing_value_info_per_param",
+    "load_wide_table",
+    "seasonal_mean",
+]
+
 import json
 import logging
 import os

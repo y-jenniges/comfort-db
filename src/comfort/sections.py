@@ -1,6 +1,11 @@
 """Along-track section/transect analysis for COMFORT oceanographic data."""
 from __future__ import annotations
 
+__all__ = [
+    "bin_section",
+    "section_difference",
+]
+
 import pandas as pd
 from numpy.typing import ArrayLike
 

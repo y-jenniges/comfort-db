@@ -1,6 +1,20 @@
 """Geospatial utility functions for COMFORT data."""
 from __future__ import annotations
 
+__all__ = [
+    "along_track_distance",
+    "classify_from_grid",
+    "distance_to_coast",
+    "load_basins",
+    "load_biomes",
+    "load_jenniges_provinces",
+    "load_longhurst",
+    "region_bbox",
+    "select_regions",
+    "water_mass_masks",
+    "water_mass_statistics",
+]
+
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING

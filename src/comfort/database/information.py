@@ -4,6 +4,15 @@ Adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
 """
 from __future__ import annotations
 
+__all__ = [
+    "does_table_exist",
+    "get_min_max_dates",
+    "get_minmax",
+    "get_names_of_all_parameter_tables",
+    "get_num_samples",
+    "get_table_as_df",
+]
+
 import logging
 import sqlite3
 import numpy as np
