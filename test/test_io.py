@@ -17,6 +17,14 @@ except ImportError:
 
 needs_shapely = pytest.mark.skipif(not _has_shapely, reason="shapely not installed ([geo] extra)")
 
+_has_xarray = True
+try:
+    import xarray
+except ImportError:
+    _has_xarray = False
+
+needs_xarray = pytest.mark.skipif(not _has_xarray, reason="xarray not installed ([grid] extra)")
+
 
 @pytest.fixture
 def comfort_db(tmp_path):
@@ -1098,6 +1106,7 @@ class TestLoadComfortErrorHandling:
             load_comfort(comfort_db, parameters=["NITRATE"], convert_units=True, as_xarray=False)
 
 
+@needs_xarray
 class TestMissingMetadataIds:
     """Missing instrument/platform IDs resolve to "unknown", never to "-1"."""
 

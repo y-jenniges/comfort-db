@@ -512,7 +512,7 @@ class Grid:
             # Snap the day-month bin
             dates = df["DATEANDTIME"].astype("datetime64[ns]")
             # Days index of the year (1 Jan = 0)
-            day_index = dates.dt.dayofyear - 1
+            day_index = dates.dt.day_of_year - 1
             # Check if the day is from a non-leap year after February
             after_feb_non_leap = (~dates.dt.is_leap_year) & (dates.dt.month > 2)
             # Add one day for non-leap years after February (to align with leap reference year)
