@@ -50,7 +50,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from comfort import connect
-from comfort.gridding import SpaceGrid, average_duplicate_locations
+from comfort.gridding import Grid, average_duplicate_locations
 from comfort.io import load_comfort
 from comfort.physics import convert_to_potential_temperature
 from comfort.qc import QC_GOOD
@@ -130,7 +130,7 @@ def main():
         # Step 8: Gridding (1 deg x 12 depth intervals, time-averaged)       #
         # ------------------------------------------------------------------ #
         log.info("Step 8: Creating spatial grid and mapping parameters...")
-        grid = SpaceGrid(
+        grid = Grid(
             lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             lon_min=LON_MIN, lon_max=LON_MAX, dlon=GRID_DEG,
             z_array=DEPTH_INTERVALS,

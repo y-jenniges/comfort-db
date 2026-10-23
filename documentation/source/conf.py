@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.abspath('../../src'))
 # -- Project information -----------------------------------------------------
 
 project = 'comfort-db'
-copyright = '2026, Yvonne Jenniges'
-author = 'Yvonne Jenniges'
+copyright = '2026, Yvonne Jenniges, Universität Bremen'
+author = 'Yvonne Jenniges, Are Olsen, Boris Peter Koch, Sebastian Maneth'
 
 
 # -- General configuration ---------------------------------------------------

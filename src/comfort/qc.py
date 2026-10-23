@@ -4,7 +4,12 @@ from __future__ import annotations
 import pandas as pd
 import logging
 import operator as op
+import re
 from collections import namedtuple
+
+from .util import validate_identifier
+
+logger = logging.getLogger(__name__)
 
 # Map of comparison operator strings to their Python equivalents
 _OP_MAP = {
@@ -23,6 +28,65 @@ QC_ALL = []
 # Accept records that passed basic quality control (PQF1 checked, PQF2 acceptable).
 QC_GOOD = [QCFilter("PQF1", ">0"), QCFilter("PQF2", ">2")]
 
+# Operator followed by a decimal number, e.g. ">0", ">= 2", "!=-1"
+_CONDITION_RE = re.compile(r"^\s*(>=|<=|==|!=|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
+
+
+def _parse_flag(column: str, condition: str) -> tuple[str, str, str]:
+    """Validate one quality flag and split its condition into operator and number.
+
+    Args:
+        column (str): Name of the flag column, e.g. ``"PQF1"``.
+        condition (str): Operator followed by a number, e.g. ``">0"``.
+            Supported operators: ``>=``, ``<=``, ``>``, ``<``, ``==``, ``!=``.
+    Returns:
+        tuple[str, str, str]: Column name, operator and number.
+    Raises:
+        ValueError: If *column* is not a safe SQL identifier or *condition*
+            is not a supported operator followed by a number.
+    """
+    # Validate the column name
+    validate_identifier(column)
+
+    # Split the condition into operator and number
+    match = _CONDITION_RE.match(condition) if isinstance(condition, str) else None
+    if match is None:
+        raise ValueError(
+            f"Invalid quality flag condition {condition!r} for column {column!r}: "
+            "expected one of >=, <=, >, <, ==, != followed by a number, e.g. '>0'."
+        )
+    return column, match.group(1), match.group(2)
+
+
+def qc_conditions(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
+                  table_alias: str | None = None) -> list[str]:
+    """Return the SQL conditions for the given quality flags.
+
+    Args:
+        quality_flags: Quality flag criteria, e.g. ``QC_GOOD``.
+        table_alias: Optional table alias to prefix column names.
+    Returns:
+        list[str]: One condition per flag, e.g. ``["p.PQF1>0", "p.PQF2>2"]``.
+        Empty when *quality_flags* is ``None`` or empty.
+    Raises:
+        ValueError: If a flag or *table_alias* is invalid (see :func:`_parse_flag`).
+    """
+    # No quality flags: nothing to filter
+    if not quality_flags:
+        return []
+
+    # Validate the table alias and build the column prefix
+    if table_alias:
+        validate_identifier(table_alias)
+    prefix = f"{table_alias}." if table_alias else ""
+
+    # Build each condition from the validated parts
+    conditions = []
+    for column, condition in quality_flags:
+        column, operator, number = _parse_flag(column, condition)
+        conditions.append(f"{prefix}{column}{operator}{number}")
+    return conditions
+
 
 def build_where_clause(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
                        table_alias: str | None = None,
@@ -36,10 +100,10 @@ def build_where_clause(quality_flags: list[QCFilter] | list[tuple[str, str]] | N
     Returns:
         Clause string, or ``""`` when *quality_flags* is empty.
     """
-    if not quality_flags:
+    conditions = qc_conditions(quality_flags, table_alias)
+    if not conditions:
         return ""
-    prefix = f"{table_alias}." if table_alias else ""
-    return keyword + " " + " AND ".join(f"{prefix}{col}{cond}" for col, cond in quality_flags)
+    return f"{keyword} " + " AND ".join(conditions)
 
 
 def apply_qc_flags(df: pd.DataFrame,
@@ -62,52 +126,43 @@ def apply_qc_flags(df: pd.DataFrame,
 
     # Start with all rows selected, then narrow down
     mask = pd.Series(True, index=df.index)
-    for col, cond in quality_flags:
+    for column, condition in quality_flags:
+        # Parse and validate the quality flag
+        column, operator, number = _parse_flag(column, condition)
 
-        # Check if column exists
-        if col not in df.columns:
-            logging.warning("apply_qc_flags: column %r not in DataFrame, skipped", col)
-            continue
+        # A missing flag column would silently leave the data unfiltered
+        if column not in df.columns:
+            raise ValueError(f"apply_qc_flags: column {column!r} not in DataFrame")
 
-        # Parse the operator string and apply the respective comparison
-        for sym, fn in _OP_MAP.items():
-            if cond.startswith(sym):
-                mask &= fn(df[col], float(cond[len(sym):]))
-                break
+        mask &= _OP_MAP[operator](df[column], float(number))
 
     return df[mask].copy()
 
 
-# TEOS-10 reference-scale factor: Absolute Salinity [g/kg] per unit Practical Salinity
-_SP_TO_SA = 35.16504 / 35
-
-
 def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
                               salinity_col: str | None = None,
-                              min_diff: float = 0.05, max_diff: float = 0.30) -> pd.Series:
-    """Flag oxygen values that numerically match co-located salinity.
-
-    Detects a known COMFORT data issue: ~0.8% of ``P_OXYGEN`` rows likely
-    carry a salinity value mislabelled as oxygen (µmol/kg) in the raw
-    dataset.
+                              tol: float = 0.0) -> pd.Series:
+    """Flag oxygen values that are identical to the co-located Practical Salinity
+    (known COMFORT data issue, about 14% of oxygen rows are affected).
+    See ``known_data_issues/known_data_issues.md``.
 
     Args:
-        df (pandas.DataFrame): Must contain *oxygen_col* and a salinity
-            column - either Absolute Salinity (``SA``) or Practical Salinity
-            (``SALINITY``/``salinity``, converted with the TEOS-10
-            reference-scale factor 35.16504/35 before comparison).
+        df (pandas.DataFrame): Must contain *oxygen_col* and a Practical
+            Salinity column (``SALINITY``/``salinity``).
         oxygen_col (str): Oxygen value column. Default ``'OXYGEN'``.
-        salinity_col (str): Salinity column to compare against. ``None``
-            auto-detects ``SA`` first, then ``SALINITY``/``salinity``.
-            A column named ``SA`` (any casing) is treated as Absolute
-            Salinity, anything else as Practical Salinity.
-        min_diff (float): Lower bound of the suspect band. Default 0.05.
-        max_diff (float): Upper bound of the suspect band. Default 0.30.
+        salinity_col (str): Practical Salinity column to compare against.
+            ``None`` auto-detects ``SALINITY``/``salinity``.
+        tol (float): Maximum absolute difference between oxygen and salinity
+            for a row to be flagged. Default 0 flags exact copies only.
     Returns:
         pandas.Series: Bool mask aligned with df (True = suspect row).
     Raises:
-        ValueError: If the oxygen or salinity column cannot be found.
+        ValueError: If the oxygen or salinity column cannot be found, or if *tol* is negative.
     """
+    if tol < 0:
+        # Tolerance must be positive (or zero)
+        raise ValueError(f"flag_salinity_like_oxygen: tol must be >= 0, got {tol}")
+
     # Resolve column names case-insensitively
     def _find(name):
         for col in df.columns:
@@ -120,25 +175,21 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     if oxy is None:
         raise ValueError(f"flag_salinity_like_oxygen: column {oxygen_col!r} not found")
 
-    # Auto-detect the salinity column when not given explicitly (SA preferred over SALINITY)
+    # Auto-detect the salinity column when not given explicitly
     if salinity_col is None:
-        sal = _find("SA") or _find("SALINITY")
+        sal = _find("SALINITY")
         if sal is None:
-            raise ValueError("flag_salinity_like_oxygen: no SA or SALINITY column found")
+            raise ValueError("flag_salinity_like_oxygen: No SALINITY column found")
     else:
         sal = _find(salinity_col)
         if sal is None:
-            raise ValueError(f"flag_salinity_like_oxygen: column {salinity_col!r} not found")
+            raise ValueError(f"flag_salinity_like_oxygen: Column {salinity_col!r} not found")
 
-    # Convert Practical Salinity to the Absolute Salinity
-    absolute = df[sal] if sal.lower() == "sa" else df[sal] * _SP_TO_SA
-
-    # Suspect rows: Oxygen sits within [min_diff, max_diff] of the salinity
-    # value - a real oxygen reading would likely not track salinity this closely
-    mask = (absolute - df[oxy]).between(min_diff, max_diff).fillna(False)
+    # Suspect rows: Oxygen equals the salinity value
+    mask = (df[oxy] - df[sal]).abs() <= tol
     if mask.any():
         # Print how common the issue is in this DataFrame
-        logging.warning(
+        logger.warning(
             "flag_salinity_like_oxygen: %d of %d rows (%.2f%%) look like mislabelled salinity",
             int(mask.sum()), len(df), 100 * mask.mean(),
         )

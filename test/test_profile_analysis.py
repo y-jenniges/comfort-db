@@ -122,6 +122,15 @@ class TestVerticalGradient:
         out = vertical_gradient(df)
         assert out["VAL_gradient"].notna().all()
 
+    # Repeated depths are averaged first, so both rows get the same finite gradient
+    def test_duplicate_depths_share_finite_gradient(self):
+        # Averaged levels: 10 (0 m), 7 (100 m), 4 (200 m) -> -0.03 everywhere
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1],
+                           "LEV_DBAR": [0, 100, 100, 200],
+                           "VAL": [10.0, 8.0, 6.0, 4.0]})
+        out = vertical_gradient(df)
+        assert np.allclose(out["VAL_gradient"], -0.03)
+
 
 class TestMixedLayerDepth:
     @staticmethod
@@ -148,7 +157,7 @@ class TestMixedLayerDepth:
         # 100m: delta=0.04 > 0.03 → crossing interpolated between 50m and 100m
         # target = 25.0 + 0.03 = 25.03 → 50 + (25.03-25.0)*(100-50)/(25.04-25.0) = 87.5
         result = mixed_layer_depth(self._profile_with_mld_at_100(),
-                                    density_col="sigma0", delta_density=0.03)
+                                   density_col="sigma0", delta_density=0.03, max_ref_distance=None)
         assert result["MLD_m"].iloc[0] == pytest.approx(87.5)
 
     # When the threshold is never crossed, there is no valid MLD
@@ -164,10 +173,35 @@ class TestMixedLayerDepth:
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1],
                            "LEV_DBAR": [0.0, 50.0, 100.0, 200.0],
                            "CT": [15.0, 15.0, 14.75, 12.0]})
-        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2)
+        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2, max_ref_distance=None)
         # ref=15.0, 100m: |14.75-15.0|=0.25>0.2 → crossing interpolated between 50m and 100m
         # target = 15.0 - 0.2 = 14.8 → 50 + (14.8-15.0)*(100-50)/(14.75-15.0) = 90.0
         assert result["MLD_m"].iloc[0] == pytest.approx(90.0)
+
+    # Density decreasing with depth does not end the mixed layer
+    def test_density_decrease_is_not_exceedance(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [10.0, 100.0, 200.0],
+                           "sigma0": [25.0, 24.9, 24.8]})
+        result = mixed_layer_depth(df, density_col="sigma0", delta_density=0.03)
+        assert pd.isna(result["MLD_m"].iloc[0])
+
+    # Temperature increase counts
+    def test_temperature_increase_counts(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [10.0, 100.0, 200.0],
+                           "CT": [10.0, 10.0, 10.5]})
+        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2)
+        assert result["MLD_m"].iloc[0] == pytest.approx(140.0)
+
+    # No level near the reference depth means no valid MLD
+    def test_reference_too_far_returns_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [80.0, 100.0, 200.0],
+                           "sigma0": [25.0, 25.0, 25.2]})
+        assert pd.isna(mixed_layer_depth(df, density_col="sigma0")["MLD_m"].iloc[0])
+        result = mixed_layer_depth(df, density_col="sigma0", max_ref_distance=None)
+        assert not pd.isna(result["MLD_m"].iloc[0])
 
     # When both are given, density_col takes priority over temp_col
     def test_density_preferred_over_temp(self):
@@ -247,15 +281,43 @@ class TestPycnoclineDepth:
         assert pd.isna(result["pycnocline_depth_m"].iloc[0])
         assert not pd.isna(result["max_gradient"].iloc[0])
 
-    # The pycnocline is placed at the depth of maximum |d(density)/dz|
+    # The pycnocline is placed at the depth of maximum d(density)/dz
     def test_pycnocline_at_correct_depth(self):
         result = pycnocline_depth(self._profile_with_pycno_at_100(), density_col="sigma0")
         assert result["pycnocline_depth_m"].iloc[0] == 100.0
 
-    # max_gradient is reported as a magnitude, not signed
+    # max_gradient is the strongest density increase with depth, so positive
     def test_max_gradient_positive(self):
         result = pycnocline_depth(self._profile_with_pycno_at_100(), density_col="sigma0")
         assert result["max_gradient"].iloc[0] > 0
+
+    # A density inversion stronger than the stable gradient is ignored
+    def test_strong_inversion_ignored(self):
+        # Gradients: -0.02 (0m, inversion), -0.01, 0.005, 0.006 (150m, max increase), 0.002
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 100.0, 150.0, 200.0],
+                           "sigma0": [25.0, 24.0, 24.0, 24.5, 24.6]})
+        result = pycnocline_depth(df, density_col="sigma0")
+        assert result["pycnocline_depth_m"].iloc[0] == 150.0
+        assert result["max_gradient"].iloc[0] == pytest.approx(0.006)
+
+    # A profile without any density increase has no pycnocline
+    def test_fully_inverted_profile_gives_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 100.0, 150.0, 200.0],
+                           "sigma0": [26.0, 25.5, 25.0, 24.5, 24.0]})
+        result = pycnocline_depth(df, density_col="sigma0")
+        assert pd.isna(result["pycnocline_depth_m"].iloc[0])
+
+    # Repeated depths are averaged, so no zero depth step produces an infinite gradient
+    def test_duplicate_depths_give_finite_gradient(self):
+        # Averaged levels: 25.0 (0 m), 25.1 (50 m), 26.0 (100 m), 26.2 (150 m); max at 100 m
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 50.0, 100.0, 150.0],
+                           "sigma0": [25.0, 25.0, 25.2, 26.0, 26.2]})
+        result = pycnocline_depth(df, density_col="sigma0")
+        assert result["pycnocline_depth_m"].iloc[0] == 100.0
+        assert result["max_gradient"].iloc[0] == pytest.approx(0.011)
 
     # A profile with a single depth level has no gradient to compute
     def test_short_profile_skipped(self):
@@ -303,6 +365,14 @@ class TestInterpolateDepthLevels:
         v1 = p1[p1["LEV_DBAR"] == 50]["VAL"].iloc[0]
         v2 = p2[p2["LEV_DBAR"] == 50]["VAL"].iloc[0]
         assert v1 == pytest.approx(v2, abs=0.01)
+
+    # Repeated depths are averaged, not dropped in row order
+    def test_duplicate_depths_are_averaged(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [0.0, 100.0, 100.0],
+                           "VAL": [10.0, 8.0, 6.0]})
+        result = interpolate_depth_levels(df, target_depths=[100], method="linear")
+        assert result["VAL"].iloc[0] == pytest.approx(7.0)
 
     # method="linear" reproduces plain piecewise-linear interpolation
     def test_linear_method(self):
@@ -418,3 +488,53 @@ class TestDetectDepthCol:
                            "VAL": [10.0, 8.0, 6.0]})
         result = vertical_gradient(df)
         assert "VAL_gradient" in result.columns
+
+
+class TestEmptyResults:
+    """A function that finds no profile still returns its documented columns."""
+
+    _cols = ["ID", "PROFILE_NUMBER", "LEV_M", "SIGMA0"]
+
+    def _empty(self):
+        # An empty df
+        return pd.DataFrame({c: pd.Series(dtype=float) for c in self._cols})
+
+    def _single_level(self):
+        # A single-level profile (cannot be analysed)
+        return pd.DataFrame({"ID": [1], "PROFILE_NUMBER": [1], "LEV_M": [0.0], "SIGMA0": [25.0]})
+
+    # profile_completeness keeps the key and statistic columns, with and without reference depths
+    def test_profile_completeness(self):
+        result = profile_completeness(self._empty())
+        assert result.empty
+        assert list(result.columns) == ["ID", "PROFILE_NUMBER", "n_levels", "depth_min", "depth_max", "depth_range"]
+        result = profile_completeness(self._empty(), reference_depths=[0, 10])
+        assert list(result.columns)[-1] == "coverage_fraction"
+
+    # mixed_layer_depth keeps the key and MLD_m columns
+    def test_mixed_layer_depth(self):
+        for df in (self._empty(), self._single_level()):
+            result = mixed_layer_depth(df, density_col="SIGMA0")
+            assert result.empty
+            assert list(result.columns) == ["ID", "PROFILE_NUMBER", "MLD_m"]
+
+    # pycnocline_depth keeps the key, depth and gradient columns
+    def test_pycnocline_depth(self):
+        for df in (self._empty(), self._single_level()):
+            result = pycnocline_depth(df, density_col="SIGMA0")
+            assert result.empty
+            assert list(result.columns) == ["ID", "PROFILE_NUMBER", "pycnocline_depth_m", "max_gradient"]
+
+    # interpolate_depth_levels keeps the columns of a normal result (depth, value, key)
+    def test_interpolate_depth_levels(self):
+        normal = pd.DataFrame({"ID": [1, 1], "PROFILE_NUMBER": [1, 1], "LEV_M": [0.0, 10.0], "SIGMA0": [25.0, 26.0]})
+        expected = list(interpolate_depth_levels(normal, [0.0, 5.0], param_col="SIGMA0").columns)
+        for df in (self._empty(), self._single_level()):
+            result = interpolate_depth_levels(df, [0.0, 5.0], param_col="SIGMA0")
+            assert result.empty
+            assert list(result.columns) == expected
+
+    # A custom profile_col is used as column in empty result
+    def test_custom_profile_col(self):
+        result = mixed_layer_depth(self._empty(), density_col="SIGMA0", profile_col="PROFILE_NUMBER")
+        assert list(result.columns) == ["PROFILE_NUMBER", "MLD_m"]

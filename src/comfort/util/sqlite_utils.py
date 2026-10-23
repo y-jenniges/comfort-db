@@ -9,6 +9,8 @@ import re
 import sqlite3
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 # Only allow safe SQL identifiers (letters, digits, underscores)
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -18,7 +20,7 @@ def vacuum(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("VACUUM;")
     except sqlite3.OperationalError as e:
-        logging.warning("VACUUM failed: %s", e)
+        logger.warning("VACUUM failed: %s", e)
 
 
 def validate_identifier(name: str) -> None:

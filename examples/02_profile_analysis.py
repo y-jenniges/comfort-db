@@ -24,7 +24,7 @@ from comfort.profile_analysis import (
     pycnocline_depth,
     vertical_gradient,
 )
-from comfort.physics import add_teos10_variables
+from comfort.physics import add_teos10_variables, resolve_pressure
 
 load_dotenv()
 
@@ -82,8 +82,8 @@ if __name__ == "__main__":
     # (sigma0 = potential density anomaly)
     join_key = ["ID", "PROFILE_NUMBER", "LEV_M"]
     df_ts = df_t.merge(df_s[join_key + ["SALINITY"]], on=join_key)
-    df_ts = add_teos10_variables(df_ts, sp_col="SALINITY", t_col="TEMPERATURE",
-                                 pressure_col="LEV_M")
+    df_ts["LEV_DBAR"] = resolve_pressure(df_ts)
+    df_ts = add_teos10_variables(df_ts, sp_col="SALINITY", t_col="TEMPERATURE")
 
     # Pick profiles with enough depth levels for MLD detection
     deep_profiles = (df_ts.groupby(profile_key)

@@ -12,16 +12,20 @@ import gsw
 import numpy as np
 import pandas as pd
 
+from .profile_analysis import _empty_profile_frame, _resolve_profile_col, _profile_key_dict
+
+logger = logging.getLogger(__name__)
+
 
 def _to1d(x):
     """Convert x to a 1D float64 numpy array."""
     return np.atleast_1d(np.asarray(x, dtype=float))
 
 
-def _find_col(df, col):
+def _find_col(df, col, required=True):
     """Return the actual column name in *df* matching *col* (case-insensitive).
 
-    Raises KeyError if no match is found.
+    Raises KeyError if no match is found or returns None if *required* is False.
     """
     # Return the col
     if col in df.columns:
@@ -34,10 +38,66 @@ def _find_col(df, col):
             return c
 
     # Column not found
+    if not required:
+        return None
+
+    # Required column not found raises
     raise KeyError(
         f"Column {col!r} not found in DataFrame. "
         f"Available columns: {list(df.columns)}"
     )
+
+
+def resolve_pressure(df: pd.DataFrame, pressure_col: str = "LEV_DBAR",
+                     depth_col: str = "LEV_M", lat_col: str = "LATITUDE") -> pd.Series:
+    """Resolve sea pressure [dbar] for every row using the best information available, in this order:
+
+    1. The measured pressure (*pressure_col*, if not NaN),
+    2. Pressure computed from depth and latitude (``gsw.p_from_z``),
+    3. Depth in metres itself as a proxy for dbar (if no latitude is available),
+    4. NaN.
+
+    Depths more than 5 m above the sea surface are treated as invalid.
+
+    Args:
+        df (pandas.DataFrame): DataFrame with any of the pressure, depth and latitude columns (case-insensitive).
+        pressure_col (str): Column with measured sea pressure [dbar].
+        depth_col (str): Column with depth [m, positive down].
+        lat_col (str): Column with latitude [°N].
+    Returns:
+        pandas.Series: Sea pressure [dbar].
+    """
+    # Get column names for pressure, depth and latitude
+    p_col = _find_col(df, pressure_col, required=False)
+    d_col = _find_col(df, depth_col, required=False)
+    lat = _find_col(df, lat_col, required=False)
+
+    # Use pressure column if available
+    pressure = df[p_col].astype(float) if p_col else pd.Series(np.nan, index=df.index)
+
+    # Check if depth column is given
+    if d_col is not None:
+        # gsw.p_from_z needs height (negative down) and raises for z > 5 m
+        depth = df[d_col].astype(float)
+        depth = depth.where(depth >= -5)
+
+        # Pressure from depth and latitude
+        if lat is not None:
+            from_depth = pd.Series(gsw.p_from_z(-depth.to_numpy(), df[lat].to_numpy(dtype=float)), index=df.index)
+            pressure = pressure.fillna(from_depth)
+
+        # Depth as proxy for pressure
+        proxy = pressure.isna() & depth.notna()
+        if proxy.any():
+            logger.warning("resolve_pressure: %d of %d rows without pressure and latitude, "
+                            "using depth [m] as a proxy for dbar", int(proxy.sum()), len(df))
+            pressure = pressure.fillna(depth)
+
+    # Count the remaining number of NaN pressure values
+    n_nan = int(pressure.isna().sum())
+    if n_nan:
+        logger.warning("resolve_pressure: %d of %d rows have no pressure information (NaN)", n_nan, len(df))
+    return pressure
 
 
 def convert_salinity(sp: float | np.ndarray | pd.Series,
@@ -136,8 +196,9 @@ def compute_density(sa: float | np.ndarray | pd.Series,
 
 def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
                                pressure_col: str = "LEV_DBAR",
-                               profile_col: str = "PROFILE_NUMBER",
-                               lat_col: str = "LATITUDE") -> pd.DataFrame:
+                               lat_col: str = "LATITUDE",
+                               profile_col: str | list[str] | None = None,
+                               ) -> pd.DataFrame:
     """Compute Brunt-Vaisala (buoyancy) frequency N2 for each profile.
 
     N2 > 0 indicates stable stratification.
@@ -148,24 +209,27 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
         sa_col (str): Column with Absolute Salinity [g/kg].
         ct_col (str): Column with Conservative Temperature [°C].
         pressure_col (str): Column with sea pressure [dbar].
-        profile_col (str): Column identifying individual profiles.
+        profile_col (str | list[str] | None): Column(s) identifying individual profiles.
         lat_col (str): Latitude column [°N] for gravitational
             acceleration correction. Falls back to 0 if absent.
     Returns:
         pandas.DataFrame: One row per consecutive level pair per profile
-            with columns [profile_col, ``'pressure_mid'``, ``'N2'``]
-            (N2 in 1/s2).
+            with the profile key columns (``ID`` and ``PROFILE_NUMBER``
+            by default), ``'pressure_mid'`` and ``'N2'`` (N2 in 1/s2).
     """
     lat_available = lat_col in df.columns
     rows = []
 
+    # Get group columns
+    group_cols = _resolve_profile_col(df, profile_col=profile_col)
+
     # Iterate over profiles
-    for pid, group in df.groupby(profile_col):
+    for pid, group in df.groupby(group_cols):
         # Check if profile has min. 2 levels
         cols = [pressure_col, sa_col, ct_col] + ([lat_col] if lat_available else [])
         valid = group[cols].dropna().sort_values(pressure_col)
         if len(valid) < 2:
-            logging.debug("compute_buoyancy_frequency: profile %s has < 2 levels, skipped", pid)
+            logger.debug("compute_buoyancy_frequency: profile %s has < 2 levels, skipped", pid)
             continue
 
         # Fall back to equatorial gravity if latitude not available
@@ -179,8 +243,11 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
             lat=lat,
         )
         for val, pmid in zip(n2, p_mid):
-            rows.append({profile_col: pid, "pressure_mid": float(pmid), "N2": float(val)})
+            rows.append({**_profile_key_dict(profile_col=group_cols, pid=pid), "pressure_mid": float(pmid), "N2": float(val)})
 
+    if not rows:
+        # Return empty df
+        return _empty_profile_frame(group_cols, ["pressure_mid", "N2"])
     return pd.DataFrame(rows)
 
 

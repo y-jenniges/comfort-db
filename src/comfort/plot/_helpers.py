@@ -77,7 +77,6 @@ def _resolve_data(
     conn: sqlite3.Connection | None,
     parameter: str | None,
     quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
-    extended: bool = False,
     profiles: list[int] | None = None,
 ) -> pd.DataFrame:
     """Return *df* if provided, otherwise load from the database.
@@ -85,13 +84,9 @@ def _resolve_data(
     Args:
         df: User-supplied data. Returned as-is if not ``None``.
         conn: Database connection (required when *df* is ``None``).
-        parameter: Parameter name without the ``P_`` prefix (required
-            when *df* is ``None``).
+        parameter: Parameter name without the ``P_`` prefix (required when *df* is ``None``).
         quality_flags: QC filter tuples forwarded to the reader.
-        extended: If ``True`` use :func:`~comfort.io.read_extended`
-            (includes lat/lon/time).
-        profiles: Profile numbers to load. Pushed to SQL when loading
-            from DB.
+        profiles: Profile numbers to load. Pushed to SQL when loading from DB.
     """
     # Pass-through when the caller already has a DataFrame
     if df is not None:
@@ -101,10 +96,6 @@ def _resolve_data(
             "Provide either a DataFrame (df) or a database connection (conn) "
             "together with a parameter name (parameter)."
         )
-    # Extended tables include lat/lon/time from station
-    if extended:
-        from ..io import read_extended
-        return read_extended(conn, parameter, quality_flags)
     from ..io import read_parameter
 
     return read_parameter(conn, parameter, quality_flags, profiles=profiles)

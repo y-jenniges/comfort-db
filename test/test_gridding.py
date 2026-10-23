@@ -16,7 +16,7 @@ from comfort.database.information import does_table_exist, get_table_as_df
 from comfort.gridding import (
     Grid,
     GridManager,
-    SpaceGrid,
+    generate_grid_id,
     average_duplicate_locations,
     create_wide_table_online,
     drop_land_cells,
@@ -214,7 +214,7 @@ class TestDropLandCells:
         counts = result.groupby("DATEANDTIME").size()
         assert counts["2000"] == counts["2001"]
 
-    # --- SpaceGrid behaviour --------------------------------------------- #
+    # --- Grid without time axis ------------------------------------------------ #
     def _make_wide_no_time(self, water, val):
         """Each row is a distinct grid cell (distinct LATITUDE)."""
         return pd.DataFrame({
@@ -308,6 +308,24 @@ class TestGridValidation:
         with pytest.raises(ValueError, match="mode"):
             Grid(**{**self._COMMON_PARAMS, "mode": "INVALID", "bathymetry_grid_path": "/nonexistent/path.nc"})
 
+    # The time parameters are all-or-nothing
+    @pytest.mark.parametrize("missing", ["time_min", "time_max", "mode", "dtime"])
+    def test_partial_time_parameters_raise(self, missing):
+        with pytest.raises(ValueError, match=missing):
+            Grid(**{**self._COMMON_PARAMS, missing: None})
+
+    # Grid is accepted without time parameters (then fails on the missing bathymetry file)
+    def test_no_time_parameters_accepted(self):
+        params = {**self._COMMON_PARAMS, "time_min": None, "time_max": None, "mode": None, "dtime": None}
+        with pytest.raises(FileNotFoundError):
+            Grid(**params)
+
+    # A time selection needs a time axis
+    def test_selection_without_time_raises(self):
+        params = {**self._COMMON_PARAMS, "time_min": None, "time_max": None, "mode": None, "dtime": None, "selection": [True]}
+        with pytest.raises(ValueError, match="selection"):
+            Grid(**params)
+
     # Latitude bounds outside [-90, 90] are rejected
     def test_lat_out_of_range_raises(self):
         with pytest.raises(ValueError):
@@ -322,6 +340,45 @@ class TestGridValidation:
     def test_dz_none_without_z_array_raises(self):
         with pytest.raises(ValueError):
             Grid(**{**self._COMMON_PARAMS, "dz": None, "bathymetry_grid_path": "/nonexistent/path.nc"})
+
+    # A range that divides evenly is accepted (the grid then fails on missing bathymetry file)
+    def test_positive_bounds_evenly_divisible_accepted(self):
+        with pytest.raises(FileNotFoundError):
+            Grid(**{**self._COMMON_PARAMS, "lat_min": 2, "lat_max": 12, "dlat": 5})
+
+    # A range that does not divide evenly is rejected
+    def test_positive_bounds_not_divisible_raises(self):
+        with pytest.raises(ValueError, match="Latitude range"):
+            Grid(**{**self._COMMON_PARAMS, "lat_min": 2, "lat_max": 8, "dlat": 5})
+
+    # Longitude and depth ranges are checked the same way
+    def test_lon_and_depth_not_divisible_raise(self):
+        with pytest.raises(ValueError, match="Longitude range"):
+            Grid(**{**self._COMMON_PARAMS, "lon_min": 2, "lon_max": 8, "dlon": 5})
+        with pytest.raises(ValueError, match="Depth range"):
+            Grid(**{**self._COMMON_PARAMS, "z_min": 20, "z_max": 80, "dz": 50})
+
+    # Float steps are compared with a tolerance (1 % 0.1 is not 0 in floating point)
+    def test_float_step_accepted(self):
+        with pytest.raises(FileNotFoundError):
+            Grid(**{**self._COMMON_PARAMS, "lat_min": 0, "lat_max": 1, "dlat": 0.1})
+
+    # min must be smaller than max for latitude, longitude and depth
+    @pytest.mark.parametrize("params", [
+        dict(lat_min=30, lat_max=10),
+        dict(lat_min=10, lat_max=10),
+        dict(lon_min=50, lon_max=-50),
+        dict(z_min=500, z_max=100),
+    ])
+    def test_min_not_smaller_than_max_raises(self, params):
+        with pytest.raises(ValueError, match="smaller than"):
+            Grid(**{**self._COMMON_PARAMS, **params})
+
+    # Steps must be positive
+    @pytest.mark.parametrize("params", [dict(dlat=0), dict(dlon=-1), dict(dz=0), dict(dz=-100)])
+    def test_non_positive_step_raises(self, params):
+        with pytest.raises(ValueError, match="must be > 0"):
+            Grid(**{**self._COMMON_PARAMS, **params})
 
 
 def _full_grid_df(with_time=False, time_array=("2000-01-01 00:00:00",)):
@@ -350,12 +407,12 @@ def _make_grid_stub(mode="Y", time_array=("2000-01-01 00:00:00",), time_max="200
     return grid
 
 
-def _make_space_grid_stub():
-    """Build a dummy SpaceGrid (no bathymetry/xarray needed)."""
-    grid = object.__new__(SpaceGrid)
+def _make_no_time_grid_stub():
+    """Build a dummy Grid without time axis (no bathymetry/xarray needed)."""
+    grid = object.__new__(Grid)
     for k, v in dict(
         lat_min=0, lat_max=10, dlat=5, lon_min=0, lon_max=10, dlon=5,
-        z_min=0, z_max=100, dz=50, z_array=None,
+        z_min=0, z_max=100, dz=50, z_array=None, mode=None,
     ).items():
         setattr(grid, k, v)
     grid.grid = _full_grid_df(with_time=False)
@@ -479,10 +536,10 @@ class TestGridBinSeasonalMean:
         assert cell["P_TEMPERATURE"].iloc[0] == 10.0
 
 
-class TestSpaceGridBin:
-    # SpaceGrid.bin() has no time axis, so it delegates straight to bin_space()
+class TestNoTimeGridBin:
+    # A grid without time axis delegates bin() straight to bin_space()
     def test_bin_delegates_to_bin_space(self):
-        grid = _make_space_grid_stub()
+        grid = _make_no_time_grid_stub()
         df = pd.DataFrame({
             "LATITUDE": [1.0, 2.0],
             "LONGITUDE": [1.0, 2.0],
@@ -493,13 +550,62 @@ class TestSpaceGridBin:
         assert len(result) == 1
         assert result["VAL"].iloc[0] == 2.0
 
+    # Time operations are rejected instead of silently doing nothing
+    def test_time_operations_raise(self):
+        grid = _make_no_time_grid_stub()
+        df = pd.DataFrame({"LATITUDE": [1.0], "LONGITUDE": [1.0], "LEV_M": [10.0], "VAL": [1.0]})
+        with pytest.raises(ValueError, match="time axis"):
+            grid.bin_time(df, "VAL")
+        with pytest.raises(ValueError, match="time axis"):
+            grid.bin(df, "VAL", agg="seasonal_mean")
+
+    # has_time follows from mode
+    def test_has_time(self):
+        assert not _make_no_time_grid_stub().has_time
+        assert _make_grid_stub().has_time
+
+
+class TestNoTimeMapTables:
+    """Test Grid.map_tables for a grid without time axis against an in-memory database."""
+
+    @staticmethod
+    def _conn():
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE station (ID INTEGER, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)")
+        conn.execute("CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL)")
+        conn.executemany("INSERT INTO station VALUES (?, ?, ?, ?)", [
+            (1, 1.0, 1.0, "2000-01-01 00:00:00"),
+            (2, 2.0, 2.0, "2000-01-02 00:00:00"),
+            (3, 20.0, 1.0, "2000-01-03 00:00:00"),  # outside the grid extent
+        ])
+        conn.executemany("INSERT INTO P_NITRATE VALUES (?, ?, ?)",
+                         [(1, 10.0, 1.0), (2, 20.0, 3.0), (3, 10.0, 99.0)])
+        return conn
+
+    # Coordinates come from station, observations in one cell are aggregated, bare names work
+    def test_joins_station_and_aggregates_per_cell(self):
+        grid = _make_no_time_grid_stub()
+        grid.grid_id = 998
+        conn = self._conn()
+        mapped = grid.map_tables(conn, param_tables=["NITRATE"])
+
+        assert mapped == ["P_NITRATE_998"]
+        out = get_table_as_df(conn, "P_NITRATE_998")
+        assert "DATEANDTIME" not in out.columns
+        # The out-of-extent observation is dropped, the two others share one cell
+        assert len(out) == 1
+        assert out["P_NITRATE"].iloc[0] == 2.0
+        assert out["count"].iloc[0] == 2
+        assert out["median"].iloc[0] == 2.0
+        assert out["idx"].notna().all()
+
 
 class TestMapDataframes:
     """Test map_dataframes, which first creates the grid and then maps the data to it."""
 
     # Multiple parameters merge onto the same full grid template, each as its own P_<name> column
     def test_merges_multiple_parameters_onto_full_template(self):
-        grid = _make_space_grid_stub()
+        grid = _make_no_time_grid_stub()
         dataframes = {
             "NITRATE": pd.DataFrame({
                 "LATITUDE": [1.0, 2.0], "LONGITUDE": [1.0, 2.0], "LEV_M": [10.0, 10.0],
@@ -522,7 +628,7 @@ class TestMapDataframes:
 
     # bin_fn overrides the default mean aggregation with a custom per-parameter function
     def test_custom_bin_fn_overrides_default_agg(self):
-        grid = _make_space_grid_stub()
+        grid = _make_no_time_grid_stub()
         calls = []
 
         def bin_fn(df, value_col):
@@ -556,7 +662,7 @@ class TestMapDataframes:
 
     # dropping_land_cells=True (default) removes a land cell with no data for any parameter
     def test_drops_empty_land_cells_by_default(self):
-        grid = _make_space_grid_stub()
+        grid = _make_no_time_grid_stub()
         # Mark one cell as land with no data anywhere for any parameter
         grid.grid.loc[
             (grid.grid["LATITUDE"] == 2.5) & (grid.grid["LONGITUDE"] == 2.5)
@@ -572,7 +678,7 @@ class TestMapDataframes:
 
     # dropping_land_cells=False keeps that same empty land cell
     def test_dropping_land_cells_false_keeps_empty_land_cells(self):
-        grid = _make_space_grid_stub()
+        grid = _make_no_time_grid_stub()
         grid.grid.loc[
             (grid.grid["LATITUDE"] == 2.5) & (grid.grid["LONGITUDE"] == 2.5)
             & (grid.grid["LEV_M"] == 0.0), "water",
@@ -616,30 +722,6 @@ class TestOnlineWideTableFunctions:
         conn = self._mapped_conn()
         assert does_table_exist(conn, "grid_999", "table")
         assert does_table_exist(conn, "P_NITRATE_999", "table")
-
-    # When an E_* extended view exists, map_tables reads LATITUDE/LONGITUDE/ DATEANDTIME from it
-    # instead of joining station (no station table here to do the join)
-    def test_map_tables_uses_extended_view_when_present(self):
-        # Create dummy nitrate table and view
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL)")
-        conn.execute(
-            "CREATE VIEW E_NITRATE AS SELECT 9.0 AS LATITUDE, 9.0 AS LONGITUDE, "
-            "LEV_M, VAL, '2000-03-01 00:00:00' AS DATEANDTIME FROM P_NITRATE"
-        )
-        conn.executemany("INSERT INTO P_NITRATE VALUES (?,?,?)", [(1, 10.0, 5.0)])
-        conn.commit()
-
-        grid = _make_grid_stub()
-        grid.grid_id = 998
-        grid.grid_name = "grid_998"
-        grid.time_min = "2000-01-01 00:00:00"
-        grid.map_tables(conn, param_tables=["P_NITRATE"])
-
-        df = get_table_as_df(conn, "P_NITRATE_998")
-        cell = df[df["P_NITRATE"].notna()]
-        assert len(cell) == 1
-        assert cell["LATITUDE"].iloc[0] == pytest.approx(7.5)  # 9.0 snaps to the 5-10 cell centre
 
     # Bare parameter names ("NITRATE") are accepted everywhere "P_NITRATE" is
     def test_bare_parameter_name_accepted_everywhere(self):
@@ -790,3 +872,342 @@ class TestGridManagerWithBathymetry:
             assert not gm.does_grid_exist(grid.grid_id)
         finally:
             gm.close()
+
+
+class TestGenerateId:
+    # IDs generated at same second are distinct and increasing
+    def test_unique_and_increasing(self):
+        ids = [generate_grid_id() for _ in range(1000)]
+        assert len(set(ids)) == 1000
+        assert ids == sorted(ids)
+
+    # IDs are plain integers
+    def test_is_int(self):
+        assert isinstance(generate_grid_id(), int)
+
+    # Two wide tables for the same grid created in quick succession do not collide
+    def test_wide_table_names_unique(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE grid_1 (idx INTEGER, DATEANDTIME, LEV_M, LATITUDE, LONGITUDE, water)")
+        conn.execute("CREATE TABLE P_X_1 (idx INTEGER, P_X)")
+        a = create_wide_table_online(conn, 1, ["X"])
+        b = create_wide_table_online(conn, 1, ["X"])
+        assert a != b
+        conn.close()
+
+
+def _make_manager_grid(grid_id):
+    """Build a dummy Grid adn insert it into a dummy grid_info table."""
+    # Dummy grid
+    grid = _make_grid_stub()
+
+    # Insert dummy grid into dummy grid_info tables
+    for k, v in dict(
+        grid_id=grid_id, grid_name=f"grid_{grid_id}", selection=None,
+        time_min="2000-01-01 00:00:00", dtime=1,
+    ).items():
+        setattr(grid, k, v)
+    return grid
+
+
+class TestAddGrid:
+    @pytest.fixture
+    def gm(self, tmp_path):
+        # Define a grid manager
+        manager = GridManager(str(tmp_path / "test.sqlite"))
+        yield manager
+        manager.close()
+
+    # Grid table and grid_info row are both written
+    def test_adds_table_and_row(self, gm):
+        grid = _make_manager_grid(11)
+        gm.add_grid(grid)
+        assert gm.does_grid_exist(11)
+        assert does_table_exist(gm.connection, "grid_11", "table")
+
+    # A duplicate grid_id raises and leaves the first grid intact
+    def test_duplicate_id_raises_and_keeps_first(self, gm):
+        gm.add_grid(_make_manager_grid(11))
+        with pytest.raises(Exception):
+            gm.add_grid(_make_manager_grid(11))
+        assert gm.does_grid_exist(11)
+        assert len(get_table_as_df(gm.connection, "grid_11")) == len(_make_manager_grid(11).grid)
+
+    # A failing grid_info insert drops the grid table
+    def test_failed_insert_leaves_no_table(self, gm):
+        # A grid_info row with this ID but no grid table makes the insert fail
+        gm.connection.execute("INSERT INTO grid_info (grid_id) VALUES (12)")
+        gm.connection.commit()
+        with pytest.raises(sqlite3.Error):
+            gm.add_grid(_make_manager_grid(12))
+        assert not does_table_exist(gm.connection, "grid_12", "table")
+
+    # A grid without time axis (dtime is NULL) is found again by its parameters
+    def test_no_time_grid_found_by_params(self, gm):
+        grid = _make_no_time_grid_stub()
+        for k, v in dict(grid_id=21, grid_name="grid_21", selection=None,
+                         time_min=None, time_max=None, dtime=None).items():
+            setattr(grid, k, v)
+        gm.add_grid(grid)
+        found = gm.get_grid_id_from_params(0, 10, 5, 0, 10, 5, z_min=0, z_max=100, dz=50)
+        assert found == 21
+
+    # A table with the grid name that already exists is not overwritten
+    def test_existing_table_not_overwritten(self, gm):
+        gm.connection.execute("CREATE TABLE grid_13 (x INTEGER)")
+        gm.connection.execute("INSERT INTO grid_13 VALUES (1)")
+        gm.connection.commit()
+        with pytest.raises(ValueError):
+            gm.add_grid(_make_manager_grid(13))
+        assert gm.connection.execute("SELECT x FROM grid_13").fetchall() == [(1,)]
+        assert not gm.does_grid_exist(13)
+
+
+def _add_mapped_tables(gm, grid_id):
+    """Add a mapped parameter table and a wide table for a grid, as map_tables/create_wide_table_online do."""
+    gm.connection.execute(f"CREATE TABLE P_NITRATE_{grid_id} (idx INTEGER)")
+    gm.connection.execute(f"CREATE TABLE wide_{grid_id}_555 (idx INTEGER)")
+    gm.connection.commit()
+
+
+class TestRemoveGrid:
+    @pytest.fixture
+    def gm(self, tmp_path):
+        # Dummy grid manager
+        manager = GridManager(str(tmp_path / "test.sqlite"))
+        yield manager
+        manager.close()
+
+    @staticmethod
+    def _table_names(gm):
+        # Get table names
+        return {r[0] for r in gm.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+    # The grid_info row, grid table, mapped tables and wide tables are removed, other grids and tables stay
+    def test_removes_only_this_grid(self, gm):
+        gm.add_grid(_make_manager_grid(31))
+        gm.add_grid(_make_manager_grid(32))
+        _add_mapped_tables(gm, 31)
+        _add_mapped_tables(gm, 32)
+        gm.connection.execute("CREATE TABLE P_NITRATE (ID INTEGER)")
+
+        gm.remove_grid(31)
+
+        assert not gm.does_grid_exist(31)
+        assert gm.does_grid_exist(32)
+        assert self._table_names(gm) == {"grid_info", "grid_32", "P_NITRATE_32", "wide_32_555", "P_NITRATE"}
+
+    # grid_info keeps its primary key and column types after removing a grid
+    def test_keeps_grid_info_schema(self, gm):
+        gm.add_grid(_make_manager_grid(31))
+        gm.add_grid(_make_manager_grid(32))
+        before = gm.connection.execute("PRAGMA table_info(grid_info)").fetchall()
+        gm.remove_grid(31)
+        assert gm.connection.execute("PRAGMA table_info(grid_info)").fetchall() == before
+        with pytest.raises(sqlite3.IntegrityError):
+            gm.connection.execute("INSERT INTO grid_info (grid_id) VALUES (32)")
+
+    # A custom grid_info table name is used, the default one is not touched
+    def test_custom_grid_info_table(self, tmp_path):
+        with GridManager(str(tmp_path / "test.sqlite"), "my_info") as gm:
+            gm.add_grid(_make_manager_grid(33))
+            gm.connection.execute("CREATE TABLE grid_info (grid_id)")
+            gm.connection.execute("INSERT INTO grid_info VALUES (99)")
+            gm.remove_grid(33)
+            assert not gm.does_grid_exist(33)
+            assert gm.connection.execute("SELECT grid_id FROM grid_info").fetchall() == [(99,)]
+
+    # A row in grid_info whose grid table is already gone is still removed
+    def test_removes_row_without_table(self, gm):
+        gm.add_grid(_make_manager_grid(34))
+        gm.connection.execute("DROP TABLE grid_34")
+        gm.connection.commit()
+        gm.remove_grid(34)
+        assert not gm.does_grid_exist(34)
+
+    # remove_all_grids empties grid_info and drops every grid's tables
+    def test_remove_all_grids(self, gm):
+        gm.add_grid(_make_manager_grid(35))
+        gm.add_grid(_make_manager_grid(36))
+        _add_mapped_tables(gm, 35)
+        gm.remove_all_grids()
+        assert gm.connection.execute("SELECT COUNT(*) FROM grid_info").fetchone() == (0,)
+        assert self._table_names(gm) == {"grid_info"}
+
+    # Removing an unknown grid does nothing
+    def test_unknown_grid_is_noop(self, gm):
+        gm.add_grid(_make_manager_grid(37))
+        gm.remove_grid(12345)
+        assert gm.does_grid_exist(37)
+
+    # A failure while dropping rolls back the row deletion and the earlier drops
+    def test_failure_rolls_back(self, gm):
+        gm.add_grid(_make_manager_grid(38))
+        _add_mapped_tables(gm, 38)
+        # An invalid table name makes validate_identifier raise part-way through the drops
+        gm.connection.execute('CREATE TABLE "bad name_38" (x)')
+        gm.connection.commit()
+        with pytest.raises(ValueError):
+            gm.remove_grid(38)
+        assert gm.does_grid_exist(38)
+        assert {"grid_38", "P_NITRATE_38", "wide_38_555"} <= self._table_names(gm)
+
+
+class TestGridLookup:
+    """get_grid_id_from_params finds a stored grid independent of how its parameters are written."""
+
+    @pytest.fixture
+    def gm(self, tmp_path):
+        # Dummy grid manager
+        manager = GridManager(str(tmp_path / "test.sqlite"))
+        yield manager
+        manager.close()
+
+    @staticmethod
+    def _stored(gm, grid_id, **overrides):
+        # Build test grid, optionally override parameters
+        grid = _make_manager_grid(grid_id)
+        for k, v in overrides.items():
+            setattr(grid, k, v)
+        gm.add_grid(grid)
+
+    # Define a base row in grid_info table
+    _BASE = dict(lat_min=0, lat_max=10, dlat=5, lon_min=0, lon_max=10, dlon=5,
+                 z_min=0, z_max=100, dz=50, time_min="2000-01-01 00:00:00",
+                 time_max="2001-01-01", mode="Y", dtime=1)
+
+    # int and float depth parameters describe the same grid
+    def test_int_and_float_depths_match(self, gm):
+        self._stored(gm, 41)
+        assert gm.get_grid_id_from_params(**{**self._BASE, "z_min": 0.0, "z_max": 100.0, "dz": 50.0}) == 41
+
+    # Date strings with or without time of day describe the same grid
+    def test_equivalent_time_strings_match(self, gm):
+        self._stored(gm, 42)
+        assert gm.get_grid_id_from_params(**{**self._BASE, "time_min": "2000-01-01", "time_max": "2001-01-01 00:00:00"}) == 42
+
+    # z_array: order and int/float do not matter (Grid sorts it)
+    def test_z_array_order_and_type_do_not_matter(self, gm):
+        self._stored(gm, 43, z_array=np.array([0.0, 50.0, 100.0]))
+        params = {k: v for k, v in self._BASE.items() if k not in ("z_min", "z_max", "dz")}
+        assert gm.get_grid_id_from_params(**params, z_array=[100, 0, 50]) == 43
+
+    # Different grids are told apart
+    def test_different_grid_not_found(self, gm):
+        self._stored(gm, 44)
+        assert gm.get_grid_id_from_params(**{**self._BASE, "dz": 25}) is None
+        assert gm.get_grid_id_from_params(**{**self._BASE, "dtime": 2}) is None
+
+
+def _make_time_grid_stub(mode, dtime):
+    """Build a dummy Grid with only the attributes the time array and _map_time need."""
+    grid = object.__new__(Grid)
+    for k, v in dict(mode=mode, dtime=dtime, selection=None,
+                     time_min="2000-01-01", time_max="2001-01-01").items():
+        setattr(grid, k, v)
+    grid.time_array = grid._create_time_array()
+    return grid
+
+
+def _snap(grid, dates):
+    """Return the time bin each date is mapped to by _map_time."""
+    df = pd.DataFrame({"DATEANDTIME": pd.to_datetime(dates)})
+    return grid._map_time(df)["DATEANDTIME"].tolist()
+
+
+class TestTimeModes:
+    # M: dtime-sized month bins, every snapped value is a node of the time array
+    def test_month_dtime_3(self):
+        grid = _make_time_grid_stub("M", 3)
+        assert grid.time_array.tolist() == ["01", "04", "07", "10"]
+        dates = ["2005-01-15", "2005-02-10", "2005-03-31", "2005-05-01", "2005-12-31"]
+        assert _snap(grid, dates) == ["01", "01", "01", "04", "10"]
+
+    # M with dtime=1 keeps the plain two-digit month
+    def test_month_dtime_1(self):
+        grid = _make_time_grid_stub("M", 1)
+        assert _snap(grid, ["2005-02-10", "2005-11-30"]) == ["02", "11"]
+
+    # D: dtime-sized day bins
+    def test_day_dtime_10(self):
+        grid = _make_time_grid_stub("D", 10)
+        assert grid.time_array.tolist() == ["01", "11", "21", "31"]
+        assert _snap(grid, ["2005-03-01", "2005-03-10", "2005-03-11", "2005-03-31"]) == ["01", "01", "11", "31"]
+
+    # MD nodes cover the whole leap reference year, including 29 Feb and 31 Dec
+    def test_month_day_nodes_cover_year(self):
+        grid = _make_time_grid_stub("MD", 1)
+        assert len(grid.time_array) == 366
+        assert "02-29 00:00:00" in grid.time_array
+        assert grid.time_array[-1] == "12-31 00:00:00"
+
+    # MD drops the time of day so that observations match a node
+    def test_month_day_drops_time_of_day(self):
+        grid = _make_time_grid_stub("MD", 1)
+        assert _snap(grid, ["2005-03-15 12:30:00", "2005-12-31 23:59:00"]) == ["03-15 00:00:00", "12-31 00:00:00"]
+
+    # MD aligns the days of non-leap and leap years to the same calendar date
+    def test_month_day_leap_alignment(self):
+        grid = _make_time_grid_stub("MD", 1)
+        assert _snap(grid, ["2005-03-01", "2004-03-01", "2005-12-31", "2004-12-31"]) == [
+            "03-01 00:00:00", "03-01 00:00:00", "12-31 00:00:00", "12-31 00:00:00"]
+
+    # MD with dtime>1 snaps to the start of the bin, which is a node
+    def test_month_day_dtime_30(self):
+        grid = _make_time_grid_stub("MD", 30)
+        nodes = set(grid.time_array.tolist())
+        snapped = _snap(grid, ["2005-01-15", "2005-03-15", "2005-12-31"])
+        assert snapped[0] == "01-01 00:00:00"
+        assert set(snapped) <= nodes
+
+    # Every date of the year maps onto a time array node
+    @pytest.mark.parametrize("mode,dtime", [("M", 1), ("M", 5),
+                                            ("D", 1), ("D", 7),
+                                            ("MD", 1), ("MD", 45)])
+    def test_every_date_maps_to_a_node(self, mode, dtime):
+        grid = _make_time_grid_stub(mode, dtime)
+        dates = pd.date_range("2004-01-01", "2005-12-31", freq="D")
+        # Equal sets: No date lands outside the nodes, and no node is left without a date
+        assert set(_snap(grid, dates)) == set(grid.time_array.tolist())
+
+
+class TestEmptyMissingValueInfo:
+    """Missing-value summaries keep their documented columns for degenerate input."""
+
+    # No P_* columns at all: Empty summary
+    def test_offline_without_parameter_columns(self):
+        for df in (pd.DataFrame({"a": [1, 2]}), pd.DataFrame({"a": pd.Series(dtype=float)})):
+            result = get_missing_value_info_offline(df)
+            assert result.empty
+            assert list(result.columns) == ["parameter", "absolute", "relative"]
+
+    # The per-parameter variant returns exactly the documented columns
+    def test_offline_per_param_columns(self):
+        df = pd.DataFrame({
+            "LATITUDE": [1.0, 2.0], "LONGITUDE": [1.0, 2.0], "LEV_M": [0.0, 0.0],
+            "DATEANDTIME": ["2000", "2000"], "water": [True, True], "P_X": [1.0, np.nan],
+        })
+        result = get_missing_value_info_offline_per_param([df])
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
+
+    # Relative missingness of a grid without any rows is 0 instead of a division by zero (0 grid cells)
+    def test_offline_per_param_zero_cells(self):
+        df = pd.DataFrame({
+            "LATITUDE": pd.Series(dtype=float), "LONGITUDE": pd.Series(dtype=float),
+            "LEV_M": pd.Series(dtype=float), "DATEANDTIME": pd.Series(dtype=object),
+            "water": pd.Series(dtype=bool), "P_X": pd.Series(dtype=float),
+        })
+        result = get_missing_value_info_offline_per_param([df])
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
+        assert result["relative"].iloc[0] == 0.0
+
+    # Relative missingness of a grid with only land cells without data is 0 instead of a division by zero
+    # (land cells without data are not counted as grid cells)
+    def test_offline_per_param_all_land_cells(self):
+        df = pd.DataFrame({
+            "LATITUDE": [1.0], "LONGITUDE": [1.0], "LEV_M": [0.0],
+            "DATEANDTIME": ["2000"], "water": [False], "P_X": [np.nan],
+        })
+        result = get_missing_value_info_offline_per_param([df])
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
+        assert result["relative"].iloc[0] == 0.0

@@ -1,4 +1,6 @@
 """Tests for comfort.physics, i.e. TEOS-10 physical oceanography functions."""
+import logging
+
 import gsw
 import pandas as pd
 import numpy as np
@@ -14,7 +16,70 @@ from comfort.physics import (
     convert_salinity,
     convert_temperature,
     convert_to_potential_temperature,
+    resolve_pressure,
 )
+
+
+class TestResolvePressure:
+    # A measured pressure is used as is
+    def test_measured_pressure_wins(self):
+        df = pd.DataFrame({"LEV_DBAR": [100.0], "LEV_M": [50.0], "LATITUDE": [45.0]})
+        assert resolve_pressure(df).iloc[0] == 100.0
+
+    # Missing pressure is computed from depth (positive down) and latitude
+    def test_pressure_from_depth_and_latitude(self):
+        df = pd.DataFrame({"LEV_M": [1000.0], "LATITUDE": [45.0]})
+        expected = float(gsw.p_from_z(-1000.0, 45.0))
+        assert np.isclose(resolve_pressure(df).iloc[0], expected)
+
+    # Each row is resolved on its own
+    def test_rows_are_resolved_independently(self):
+        df = pd.DataFrame({"LEV_DBAR": [250.0, np.nan], "LEV_M": [240.0, 1000.0], "LATITUDE": [45.0, 45.0]})
+        result = resolve_pressure(df)
+        assert result.iloc[0] == 250.0
+        assert np.isclose(result.iloc[1], float(gsw.p_from_z(-1000.0, 45.0)))
+
+    # Without latitude the depth [m] is used as a proxy (logged)
+    def test_depth_proxy_without_latitude(self, caplog):
+        df = pd.DataFrame({"LEV_M": [10.0, 20.0]})
+        with caplog.at_level(logging.WARNING):
+            result = resolve_pressure(df)
+        assert list(result) == [10.0, 20.0]
+        assert "2 of 2 rows without pressure and latitude" in caplog.text
+
+    # Nothing to resolve from: NaN (logged)
+    def test_nan_without_any_information(self, caplog):
+        df = pd.DataFrame({"VAL": [1.0, 2.0]})
+        with caplog.at_level(logging.WARNING):
+            result = resolve_pressure(df)
+        assert result.isna().all()
+        assert "2 of 2 rows have no pressure information" in caplog.text
+
+    # A row with neither pressure nor depth stays NaN, the others are resolved
+    def test_partial_nan(self):
+        df = pd.DataFrame({"LEV_DBAR": [np.nan, np.nan], "LEV_M": [100.0, np.nan], "LATITUDE": [45.0, 45.0]})
+        result = resolve_pressure(df)
+        assert np.isfinite(result.iloc[0])
+        assert np.isnan(result.iloc[1])
+
+    # Depths far above the surface are invalid and must not crash gsw or serve as a proxy
+    def test_invalid_negative_depth_is_nan(self):
+        df = pd.DataFrame({"LEV_M": [100.0, -50.0], "LATITUDE": [45.0, 45.0]})
+        result = resolve_pressure(df)
+        assert np.isfinite(result.iloc[0])
+        assert np.isnan(result.iloc[1])
+
+    # Column names are matched case-insensitively and the result keeps the input index
+    def test_case_insensitive_and_index_preserved(self):
+        df = pd.DataFrame({"lev_m": [1000.0, 2000.0], "latitude": [45.0, 45.0]}, index=[7, 9])
+        result = resolve_pressure(df)
+        assert list(result.index) == [7, 9]
+        assert np.isfinite(result).all()
+
+    # Custom column names are honoured
+    def test_custom_columns(self):
+        df = pd.DataFrame({"p": [5.0], "z": [100.0], "lat": [0.0]})
+        assert resolve_pressure(df, pressure_col="p", depth_col="z", lat_col="lat").iloc[0] == 5.0
 
 
 class TestConvertSalinity:
@@ -153,6 +218,41 @@ class TestComputeBuoyancyFrequency:
         df = self._stable_df().drop(columns="LATITUDE")
         result = compute_buoyancy_frequency(df, "SA", "CT")
         assert len(result) == 2
+
+    # PROFILE_NUMBER is only unique within a station -> Stations sharing it must not be merged
+    def test_stations_sharing_profile_number_are_separate(self):
+        df = pd.concat([self._stable_df().assign(ID=1), self._stable_df().assign(ID=2)], ignore_index=True)
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        assert len(result) == 4
+        assert {"ID", "PROFILE_NUMBER", "pressure_mid", "N2"}.issubset(result.columns)
+        assert sorted(result["ID"].unique()) == [1, 2]
+        assert (result["N2"] > 0).all()
+
+    # Each station gives the same result as when it is processed alone
+    def test_station_result_matches_processing_it_alone(self):
+        df = pd.concat([self._stable_df().assign(ID=1), self._stable_df().assign(ID=2)], ignore_index=True)
+        combined = compute_buoyancy_frequency(df, "SA", "CT")
+        alone = compute_buoyancy_frequency(self._stable_df().assign(ID=1), "SA", "CT")
+        assert np.allclose(combined[combined["ID"] == 1]["N2"], alone["N2"])
+
+    # Without an ID column the profile number alone is the key
+    def test_without_id_column_no_id_in_output(self):
+        result = compute_buoyancy_frequency(self._stable_df(), "SA", "CT")
+        assert "ID" not in result.columns
+
+    # An explicit profile_col is used as given
+    def test_explicit_profile_col(self):
+        df = pd.concat([self._stable_df().assign(ID=1), self._stable_df().assign(ID=1, PROFILE_NUMBER=2)], ignore_index=True)
+        result = compute_buoyancy_frequency(df, "SA", "CT", profile_col="PROFILE_NUMBER")
+        assert list(result.columns[:1]) == ["PROFILE_NUMBER"]
+        assert len(result) == 4
+
+    # Without any profile (empty input) the result still has the key and N2 columns
+    def test_empty_input_keeps_columns(self):
+        df = pd.DataFrame({c: pd.Series(dtype=float) for c in ["ID", "PROFILE_NUMBER", "LEV_DBAR", "SA", "CT"]})
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        assert result.empty
+        assert list(result.columns) == ["ID", "PROFILE_NUMBER", "pressure_mid", "N2"]
 
 
 class TestComputePotentialVorticity:

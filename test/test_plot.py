@@ -89,11 +89,6 @@ def demo_conn():
     conn.executemany("INSERT INTO P_TEMPERATURE VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows_t)
     conn.executemany("INSERT INTO P_SALINITY VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows_s)
     conn.executemany("INSERT INTO P_OXYGEN VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows_o)
-    for p in ("TEMPERATURE", "SALINITY", "OXYGEN"):
-        conn.execute(
-            f"CREATE VIEW E_{p} AS SELECT t.*, s.LATITUDE, s.LONGITUDE, "
-            f"s.DATEANDTIME FROM P_{p} t JOIN station s ON t.ID = s.ID"
-        )
     conn.commit()
     yield conn
     conn.close()
@@ -141,16 +136,16 @@ class TestPlotProfile:
         assert ax is not None
         plt.close()
 
-    # Section plot also works from an already-loaded extended DataFrame
+    # Section plot also works from an already-loaded DataFrame
     def test_section_from_dataframe(self, demo_conn):
-        df = comfort.io.read_extended(demo_conn, "OXYGEN")
+        df = comfort.io.read_parameter(demo_conn, "OXYGEN")
         ax = plot_section(df)
         assert ax is not None
         plt.close()
 
     # binned=True draws an averaged pcolormesh instead of a raw scatter
     def test_section_binned(self, demo_conn):
-        df = comfort.io.read_extended(demo_conn, "OXYGEN")
+        df = comfort.io.read_parameter(demo_conn, "OXYGEN")
         ax = plot_section(df, binned=True, along_bins=5, depth_bins=3)
         assert any(isinstance(c, QuadMesh) for c in ax.collections)
         plt.close()
@@ -286,9 +281,9 @@ class TestDistributions:
 #--- Counting --------------------------------------------------------#
 
 class TestCounting:
-    # Yearly binning of an already-loaded extended DataFrame
+    # Yearly binning of an already-loaded DataFrame
     def test_count_samples_over_time_year(self, demo_conn):
-        df = comfort.io.read_extended(demo_conn, "TEMPERATURE")
+        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
         counts = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
         assert "YEAR" in counts.columns
         assert "COUNT" in counts.columns
@@ -296,7 +291,7 @@ class TestCounting:
 
     # The counts DataFrame renders as a bar chart, one bar per row
     def test_plot_counts_bar(self, demo_conn):
-        df = comfort.io.read_extended(demo_conn, "TEMPERATURE")
+        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
         counts = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
         ax = plot_counts_bar(counts)
         assert len(ax.patches) == len(counts)
@@ -309,8 +304,8 @@ class TestPlotAnnualCoverage:
     # One line per parameter dict entry
     def test_basic(self, demo_conn):
         dfs = {
-            "TEMPERATURE": comfort.io.read_extended(demo_conn, "TEMPERATURE"),
-            "SALINITY": comfort.io.read_extended(demo_conn, "SALINITY"),
+            "TEMPERATURE": comfort.io.read_parameter(demo_conn, "TEMPERATURE"),
+            "SALINITY": comfort.io.read_parameter(demo_conn, "SALINITY"),
         }
         ax = plot_annual_coverage(dfs)
         assert ax is not None
@@ -319,14 +314,14 @@ class TestPlotAnnualCoverage:
 
     # normalise=True works
     def test_normalized(self, demo_conn):
-        dfs = {"TEMPERATURE": comfort.io.read_extended(demo_conn, "TEMPERATURE")}
+        dfs = {"TEMPERATURE": comfort.io.read_parameter(demo_conn, "TEMPERATURE")}
         ax = plot_annual_coverage(dfs, normalise=True)
         assert ax is not None
         plt.close()
 
     # A caller-supplied ax is drawn into and returned as-is
     def test_custom_ax(self, demo_conn):
-        dfs = {"TEMPERATURE": comfort.io.read_extended(demo_conn, "TEMPERATURE")}
+        dfs = {"TEMPERATURE": comfort.io.read_parameter(demo_conn, "TEMPERATURE")}
         fig, ax = plt.subplots()
         result = plot_annual_coverage(dfs, ax=ax)
         assert result is ax
@@ -373,9 +368,8 @@ class TestDualModeErrors:
 
 
 class TestComputeOnlyCountFunctions:
-    # Default yearly binning against the E_* view
+    # Default yearly binning straight from the database
     def test_count_samples_over_time_from_db(self, demo_conn):
-        # Queries E_* view (has LATITUDE/LONGITUDE/DATEANDTIME columns)
         result = count_samples_over_time_from_db(demo_conn, "TEMPERATURE")
         assert "YEAR" in result.columns
         assert "COUNT" in result.columns
@@ -530,3 +524,34 @@ class TestPlotMissingValueInfoMapJoint:
         result = plot_missing_value_info_map_joint(_missing_value_wide_df(), ["P_NITRATE"], ax=ax)
         assert result is ax
         plt.close()
+
+
+class TestEmptyCoverageResults:
+    """Coverage helpers on empty input return their documented columns."""
+
+    # An empty df has no year range -> Nothing to count
+    def test_count_samples_over_time_year_empty(self):
+        df = pd.DataFrame({"DATEANDTIME": pd.Series(dtype="datetime64[ns]")})
+        result = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
+        assert result.empty
+        assert list(result.columns) == ["YEAR", "COUNT"]
+
+    # No parameters requested: Empty df with the documented columns
+    def test_count_negative_samples_no_parameters(self, demo_conn):
+        result = count_negative_samples(demo_conn, [])
+        assert result.empty
+        assert list(result.columns) == [
+            "parameter", "number of samples", "number of negative samples", "proportion of negative samples",
+        ]
+
+    # No duplicates found: Empty summary with defined columns
+    def test_duplicates_summary_empty(self):
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE P_X (ID INTEGER, LEV_M REAL, VAL REAL)")
+        result = detect_and_plot_spatiotemporal_duplicates(conn, ["X"])
+        conn.close()
+        assert result.empty
+        assert list(result.columns) == [
+            "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
+            "proportion of row duplicates", "proportion of time loc duplicates",
+        ]

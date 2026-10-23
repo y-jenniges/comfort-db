@@ -11,6 +11,8 @@ import pandas as pd
 if TYPE_CHECKING:
     import geopandas as gpd
 
+logger = logging.getLogger(__name__)
+
 
 # Mean Earth radius for haversine distance calculations
 _EARTH_RADIUS_KM = 6371.0
@@ -22,17 +24,18 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     """Approximates the distance of each observation to the nearest coastline.
 
     Uses Natural Earth coastlines (cached via cartopy) unless a custom
-    geometry is provided. Coastline vertices are indexed with a KDTree
-    for fast approximate nearest-neighbour search, followed by exact
-    haversine distance for the top-5 candidates. Fully vectorised -
-    suitable for large DataFrames.
+    geometry is provided. Nearest-neighbour search runs on a unit-sphere
+    KDTree (works at any latitude and across ±180°). The distance
+    is to the nearest coastline vertex, not segment. Use a finer
+    *resolution* to reduce the overestimate. Rows with missing or
+    out-of-range coordinates get NaN.
 
     Args:
         df (pandas.DataFrame): DataFrame with latitude and longitude columns.
         lat_col (str): Latitude column [°N].
         lon_col (str): Longitude column [°E].
-        resolution (str): Natural Earth resolution (``'110m'``, ``'50m'``
-            or ``'10m'``). Ignored when ``coastline_geom`` is provided.
+        resolution (str): Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
+            Ignored when ``coastline_geom`` is provided.
         coastline_geom: Pre-loaded coastline as a shapely geometry, list
             of geometries or geopandas GeoSeries/GeoDataFrame.
     Returns:
@@ -43,80 +46,97 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     # Load coastline vertices
     coast_pts = _get_coast_points(resolution, coastline_geom)
     if coast_pts is None or len(coast_pts) == 0:
-        logging.error("distance_to_coast: no coastline points could be loaded")
+        logger.error("distance_to_coast: no coastline points could be loaded")
         return pd.Series(np.nan, index=df.index)
 
-    # Convert to radians for haversine
-    coast_lon_r = np.radians(coast_pts[:, 0])
-    coast_lat_r = np.radians(coast_pts[:, 1])
+    # Get observes lat/lon
+    obs_lat = df[lat_col].values.astype(float)
+    obs_lon = df[lon_col].values.astype(float)
 
-    obs_lon_r = np.radians(df[lon_col].values.astype(float))
-    obs_lat_r = np.radians(df[lat_col].values.astype(float))
+    # Rows with unusable coordinates stay NaN
+    valid = (np.isfinite(obs_lat) & np.isfinite(obs_lon) & (np.abs(obs_lat) <= 90) & (np.abs(obs_lon) <= 180))
+    if not valid.all():
+        # Log count of invalid coordinates
+        logger.warning("distance_to_coast: %d of %d rows have missing or invalid "
+                        "coordinates and get NaN", int((~valid).sum()), len(valid))
 
-    # Build KDTree for fast approximate nearest-neighbour lookup
-    tree = cKDTree(np.column_stack([coast_lon_r, coast_lat_r]))
-    k = min(5, len(coast_pts))
-    _, idxs = tree.query(np.column_stack([obs_lon_r, obs_lat_r]), k=k)
+    result = np.full(len(df), np.nan)
+    if valid.any():
+        # Build the k-d tree on unit sphere coordinates
+        tree = cKDTree(_to_unit_sphere(coast_pts[:, 1], coast_pts[:, 0]))
+        euclidean_dist, _ = tree.query(_to_unit_sphere(obs_lat[valid], obs_lon[valid]), k=1)
 
-    if idxs.ndim == 1:
-        idxs = idxs[:, np.newaxis]
+        # Euclidean length on the unit sphere back to arc length (clip to prevent float overshoot)
+        result[valid] = 2 * _EARTH_RADIUS_KM * np.arcsin(np.clip(euclidean_dist / 2, 0.0, 1.0))
 
-    # Exact haversine for top-k candidates
-    cand_lat = coast_lat_r[idxs]
-    cand_lon = coast_lon_r[idxs]
-    obs_lat_2d = obs_lat_r[:, np.newaxis]
-    obs_lon_2d = obs_lon_r[:, np.newaxis]
+    return pd.Series(result, index=df.index)
 
-    dlat = cand_lat - obs_lat_2d
-    dlon = cand_lon - obs_lon_2d
-    a = (np.sin(dlat / 2) ** 2
-         + np.cos(obs_lat_2d) * np.cos(cand_lat) * np.sin(dlon / 2) ** 2)
-    dist_km = 2 * _EARTH_RADIUS_KM * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
 
-    return pd.Series(dist_km.min(axis=1), index=df.index)
+def _to_unit_sphere(lat_deg, lon_deg) -> np.ndarray:
+    """Return an (N, 3) array of unit-sphere xyz coordinates."""
+    lat_r = np.radians(lat_deg)
+    lon_r = np.radians(lon_deg)
+    return np.column_stack([np.cos(lat_r) * np.cos(lon_r),
+                            np.cos(lat_r) * np.sin(lon_r),
+                            np.sin(lat_r)])
 
 
 def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
-                         lon_col: str = "LONGITUDE", order_col: str | None = None) -> pd.Series:
+                         lon_col: str = "LONGITUDE", order_col: str | None = None,
+                         station_col: str | list[str] | None = None) -> pd.Series:
     """Cumulative great-circle distance along a track [km].
 
-    Collapses to unique ``(lat_col, lon_col)`` stations, orders them by
-    *order_col* (or by first appearance in *df* when ``None``) and sums
-    ``gsw.distance`` between consecutive stations. Rows sharing a station
-    (e.g. different depth levels of one profile) get the same value.
+    Orders the stations by *order_col* (or by first appearance in *df* if ``None``) and sums
+    ``gsw.distance`` between consecutive stations.
 
     Args:
         df (pandas.DataFrame): DataFrame with latitude/longitude columns.
         lat_col (str): Latitude column [°N].
         lon_col (str): Longitude column [°E].
-        order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``
-            or ``PROFILE_NUMBER``). Defaults to first-appearance order.
+        order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``).
+            Defaults to first-appearance order.
+        station_col (str or list[str]): Column(s) identifying a station
+            (e.g. ``"ID"``). Defaults to ``None``, i.e. stations at identical
+            ``(lat_col, lon_col)`` are treated as one.
     Returns:
         pandas.Series: Cumulative distance [km] from the first station,
         same index as df.
     """
+    # Label each row with its station
+    if station_col is None:
+        # Use lat/lon as station key
+        key = [lat_col, lon_col]
+    else:
+        # Use passed station column(s) as station key
+        key = [station_col] if isinstance(station_col, str) else list(station_col)
+    station_id = df.groupby(key, sort=False, dropna=False).ngroup().values  # give each station a unique int key
+
     # Reduce to one row per station, ordered along the track
-    cols = [lat_col, lon_col] if order_col is None else [lat_col, lon_col, order_col]
-    stations = df[cols].drop_duplicates([lat_col, lon_col])
+    per_row = pd.DataFrame({"lat": df[lat_col].values, "lon": df[lon_col].values, "station": station_id})
+    agg = {"lat": "first", "lon": "first"}
     if order_col is not None:
-        stations = stations.sort_values(order_col)
+        # Add column to order by to per_row and define aggregation
+        per_row["order"] = df[order_col].values
+        agg["order"] = "min"  # take earliest value
+    stations = per_row.groupby("station").agg(agg)  # collapse to one row per station
+    if order_col is not None:
+        # Apply optional station ordering ("stable" -> ties keep existing order)
+        stations = stations.sort_values("order", kind="stable")
 
     # Great-circle distance between consecutive stations
     if len(stations) < 2:
+        # No distance for one station possible
         cum_km = np.zeros(len(stations))
     else:
+        # Distance between >1 stations
         step_km = gsw.distance(
-            stations[lon_col].values.astype(float), stations[lat_col].values.astype(float)
+            stations["lon"].values.astype(float), stations["lat"].values.astype(float)
         ) / 1000.0
         cum_km = np.concatenate([[0.0], np.cumsum(step_km)])
 
-    # Broadcast each station's cumulative distance back onto every row
-    # sharing its (lat, lon), e.g. multiple depth levels of one profile
-    lookup = pd.Series(cum_km, index=pd.MultiIndex.from_arrays(
-        [stations[lat_col].values, stations[lon_col].values]
-    ))
-    keys = pd.MultiIndex.from_arrays([df[lat_col].values, df[lon_col].values])
-    return pd.Series(lookup.loc[keys].values, index=df.index)
+    # Broadcast each station's cumulative distance back onto every row of that station
+    lookup = pd.Series(cum_km, index=stations.index)
+    return pd.Series(lookup.reindex(station_id).values, index=df.index)
 
 
 def _get_coast_points(resolution, coastline_geom):
@@ -317,8 +337,10 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
                      output_col: str = "region") -> pd.DataFrame:
     """Assign each observation to a 2d geographic region.
 
-    For overlapping regions the first match wins (dict order /
-    GeoDataFrame row order). Observations outside every region get ``NaN``.
+    Points on a region boundary count as inside. For overlapping regions
+    (including a boundary shared by two regions) the first match wins
+    (dict order / GeoDataFrame row order). Observations outside every
+    region get ``NaN``.
 
     ``regions`` may be any of:
 
@@ -356,16 +378,18 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
             crs="EPSG:4326",
         )
 
-        # Init regions geo df
+        # Init regions geo df (_parse_regions guarantees lon/lat degrees)
         regions_gdf = gpd.GeoDataFrame(
             {"_rname": [n for n, _ in named_regions],
+             "_pos": range(len(named_regions)),
              "geometry": [g for _, g in named_regions]},
             crs="EPSG:4326",
         )
 
-        # Join
-        joined = gpd.sjoin(obs_gdf, regions_gdf, how="left", predicate="within")
-        joined = joined[~joined.index.duplicated(keep="first")]
+        # Join (use "intersects" (not within) so points on a region boundary are assigned)
+        joined = gpd.sjoin(obs_gdf, regions_gdf, how="left", predicate="intersects")
+        joined = joined.sort_values("_pos", kind="stable")  # sort by region position
+        joined = joined[~joined.index.duplicated(keep="first")]  # for multiple matching regions, assign to the first
         region_series = joined["_rname"].reindex(range(len(df)))
 
         # Assemble final df
@@ -384,7 +408,7 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     for _, row in df.iterrows():
         # Containment test
         pt = Point(row[lon_col], row[lat_col])
-        match = next((name for name, poly in named_regions if poly.contains(pt)), None)
+        match = next((name for name, poly in named_regions if poly.intersects(pt)), None)
         labels.append(match)
 
     # Assemble final df
@@ -493,6 +517,40 @@ def _resolve_name_col(columns, region_name_col):
     return region_name_col
 
 
+def _check_lonlat(named_regions):
+    """Raise ValueError if any region coordinate is outside lon/lat range."""
+    for name, poly in named_regions:
+        # Skip empt polygons
+        if poly.is_empty:
+            continue
+
+        # Get lat/lon bounds
+        lon_min, lat_min, lon_max, lat_max = poly.bounds
+
+        # Check if bounds are valid
+        if lon_min < -180 or lon_max > 360 or lat_min < -90 or lat_max > 90:
+            raise ValueError(
+                f"Region {name!r} has coordinates outside lon/lat range (bounds "
+                f"{poly.bounds}); regions must be in degrees. For a GeoDataFrame with an "
+                "unknown CRS, set it first with gdf.set_crs(...)."
+            )
+    return named_regions
+
+
+def _to_lonlat(geo):
+    """Reproject a GeoDataFrame/GeoSeries to EPSG:4326. If no CRS is given, assume lon/lat."""
+    if geo.crs is None:
+        # No CRS given -> warn and use lon/lat
+        logger.warning("Regions have no CRS; assuming lon/lat degrees (EPSG:4326)")
+        _check_lonlat(list(zip(range(len(geo)), geo.geometry)))
+        return geo
+
+    if geo.crs != "EPSG:4326":
+        # Convert all CRS to lon/lat (EPSG:4326)
+        return geo.to_crs("EPSG:4326")
+    return geo
+
+
 def _parse_regions(regions, region_name_col):
     """Return a list of ``(name, shapely.Polygon)`` tuples from any input format."""
     from shapely.geometry import Polygon
@@ -503,7 +561,7 @@ def _parse_regions(regions, region_name_col):
         for name, geom in regions.items():
             poly = geom if hasattr(geom, "contains") else Polygon(geom)
             result.append((name, poly))
-        return result
+        return _check_lonlat(result)
 
     # Regions as CSV
     path = Path(regions) if isinstance(regions, (str, Path)) else None
@@ -511,10 +569,10 @@ def _parse_regions(regions, region_name_col):
         from shapely import wkt
         csv_df = pd.read_csv(path)
         name_col = _resolve_name_col(csv_df.columns, region_name_col)
-        return [
+        return _check_lonlat([
             (row[name_col], wkt.loads(row["geometry"]))
             for _, row in csv_df.iterrows()
-        ]
+        ])
 
     # Regions as shapefile
     if path is not None and path.suffix.lower() == ".shp":
@@ -525,7 +583,7 @@ def _parse_regions(regions, region_name_col):
                 "geopandas is required to read shapefiles; "
                 "install it with: pip install \"comfort-db[geo]\""
             )
-        gdf = gpd.read_file(path)
+        gdf = _to_lonlat(gpd.read_file(path))
         name_col = _resolve_name_col(gdf.columns, region_name_col)
         return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]
 
@@ -533,10 +591,11 @@ def _parse_regions(regions, region_name_col):
     try:
         import geopandas as gpd
         if isinstance(regions, gpd.GeoSeries):
-            return list(regions.items())
+            return list(_to_lonlat(regions).items())
         if isinstance(regions, gpd.GeoDataFrame):
-            name_col = _resolve_name_col(regions.columns, region_name_col)
-            return [(row[name_col], row.geometry) for _, row in regions.iterrows()]
+            gdf = _to_lonlat(regions)
+            name_col = _resolve_name_col(gdf.columns, region_name_col)
+            return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]
     except ImportError:
         pass
 
@@ -575,7 +634,7 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
         available = df["LEV_M"].unique()
         closest = float(available[np.abs(available - depth).argmin()])
         if closest != depth:
-            logging.info(
+            logger.info(
                 "load_jenniges_provinces: requested depth %.1f m, "
                 "using closest available %.1f m", depth, closest,
             )

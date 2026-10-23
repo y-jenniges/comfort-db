@@ -23,6 +23,7 @@ from comfort.physics import (
     compute_spiciness,
     convert_salinity,
     convert_temperature,
+    resolve_pressure,
 )
 
 load_dotenv()
@@ -48,25 +49,25 @@ if __name__ == "__main__":
     # Average duplicates and merge T + S on (station, profile, depth)
     join_key = ["ID", "PROFILE_NUMBER", "LEV_M"]
     df_t = dfs["TEMPERATURE"].groupby(join_key, as_index=False).agg(
-        {"TEMPERATURE": "mean", "LATITUDE": "first", "LONGITUDE": "first"})
+        {"TEMPERATURE": "mean", "LEV_DBAR": "mean", "LATITUDE": "first", "LONGITUDE": "first"})
     df_s = dfs["SALINITY"].groupby(join_key, as_index=False).agg(
         {"SALINITY": "mean"})
     df = df_t.merge(df_s, on=join_key)
+    df["LEV_DBAR"] = resolve_pressure(df)  # get or compute available pressure
     n_profiles = df.groupby(["ID", "PROFILE_NUMBER"]).ngroups
     print(f"  Merged T+S: {n_profiles} profiles, {len(df)} rows\n")
 
     # Individual conversions
     print("=== convert_salinity (SP -> SA) ===")
-    df["SA"] = convert_salinity(df["SALINITY"], df["LEV_M"],
-                                df["LONGITUDE"], df["LATITUDE"])
+    df["SA"] = convert_salinity(df["SALINITY"], df["LEV_DBAR"], df["LONGITUDE"], df["LATITUDE"])
     print(df[["LEV_M", "SALINITY", "SA"]].head(5).to_string(index=False), "\n")
 
     print("=== convert_temperature (in-situ -> CT) ===")
-    df["CT"] = convert_temperature(df["TEMPERATURE"], df["SA"], df["LEV_M"], to="CT")
+    df["CT"] = convert_temperature(df["TEMPERATURE"], df["SA"], df["LEV_DBAR"], to="CT")
     print(df[["LEV_M", "TEMPERATURE", "CT"]].head(5).to_string(index=False), "\n")
 
     print("=== convert_temperature (in-situ -> pt0) ===")
-    df["pt0"] = convert_temperature(df["TEMPERATURE"], df["SA"], df["LEV_M"], to="pt0")
+    df["pt0"] = convert_temperature(df["TEMPERATURE"], df["SA"], df["LEV_DBAR"], to="pt0")
     print(df[["LEV_M", "TEMPERATURE", "pt0"]].head(5).to_string(index=False), "\n")
 
     print("=== compute_density (sigma0) ===")
@@ -75,19 +76,15 @@ if __name__ == "__main__":
 
     # Add SA, CT, sigma0 in one call
     print("=== add_teos10_variables (one call) ===")
-    df_auto = add_teos10_variables(dfs["TEMPERATURE"].head(20).merge(
-        dfs["SALINITY"].head(20)[join_key + ["SALINITY"]], on=join_key),
-        sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_M",
-    )
+    df_in = dfs["TEMPERATURE"].head(20).merge(dfs["SALINITY"].head(20)[join_key + ["SALINITY"]], on=join_key)
+    df_in["LEV_DBAR"] = resolve_pressure(df_in)  # get or compute available pressure
+    df_auto = add_teos10_variables(df_in, sp_col="SALINITY", t_col="TEMPERATURE")
     print(df_auto[["LEV_M", "TEMPERATURE", "SALINITY", "SA", "CT", "sigma0"]]
           .head(5).to_string(index=False), "\n")
 
-    # Buoyancy frequency (N^2) for a single profile
+    # Buoyancy frequency (N^2), computed per (station, profile)
     print("=== compute_buoyancy_frequency ===")
-    first_id, first_pn = df["ID"].iloc[0], df["PROFILE_NUMBER"].iloc[0]
-    sample = df[(df["ID"] == first_id) & (df["PROFILE_NUMBER"] == first_pn)]
-    n2 = compute_buoyancy_frequency(sample, sa_col="SA", ct_col="CT",
-                                    pressure_col="LEV_M")
+    n2 = compute_buoyancy_frequency(df, sa_col="SA", ct_col="CT")
     print(n2.head(8).to_string(index=False), "\n")
 
     # Spiciness

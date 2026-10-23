@@ -11,7 +11,5 @@ from .information import (
 )
 from .structure import (
     create_combined_parameter_table,
-    create_extended_parameter_tables,
-    execute_sql_scripts,
     remove_tables_like,
 )

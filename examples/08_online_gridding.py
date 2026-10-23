@@ -1,6 +1,7 @@
-"""Illustrates online gridding, i.e. gridding in the database at
-the example of data in the Mediterranean Sea.
-Offline/in-memory gridding examples are e.g. examples 9 and 10.
+"""Illustrates database-backed gridding at the example of data in the Mediterranean Sea:
+The data is filtered and joined in SQL, binned in memory and the gridded tables are stored
+in the database, where the wide table is then built by a pure SQL join.
+Gridding of data already loaded in memory is shown in example 9.
 
 Requires:
     COMFORT_DB_PATH - path to the COMFORT SQLite database

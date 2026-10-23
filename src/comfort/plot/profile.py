@@ -42,7 +42,7 @@ def plot_profile(
     Accepts either a *df* or a database *conn* along with a *parameter* name.
 
     Args:
-        df: Parameter DataFrame (P_* or E_* extended view).
+        df: Parameter DataFrame.
         param_col: Column with measured values.
         depth_col: Column with depth in metres.
         station_col: Column identifying the station. ``PROFILE_NUMBER``
@@ -154,8 +154,6 @@ def plot_section(
     """Vertical section plot (depth vs. along-track position).
 
     Accepts either a *df* or a database *conn* along with a *parameter* name.
-    When loaded from the database, the extended table (``E_*``) is used to
-    obtain latitude and longitude.
 
     The horizontal axis defaults to whichever of latitude or longitude spans
     a larger range or can be set explicitly via *along_col*. For an arbitrary
@@ -164,7 +162,7 @@ def plot_section(
     *along_col*.
 
     Args:
-        df: Extended parameter DataFrame.
+        df: Parameter DataFrame with latitude/longitude columns.
         param_col: Column with measured values.
         depth_col: Column with depth in metres.
         along_col: Column to use as horizontal axis. Auto-selected from
@@ -199,7 +197,7 @@ def plot_section(
     Raises:
         ValueError: If no position column can be found and *along_col* is not set.
     """
-    df = _resolve_data(df, conn, parameter, quality_flags, extended=True)
+    df = _resolve_data(df, conn, parameter, quality_flags)
 
     # Auto-select the coordinate axis with the larger spatial range
     if along_col is None:

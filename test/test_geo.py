@@ -90,6 +90,39 @@ class TestDistanceToCoast:
         result = distance_to_coast(df, coastline_geom=geoms)
         assert 100.0 < float(result.iloc[0]) < 125.0
 
+    # Nearest vertex is also found at high latitude
+    def test_nearest_vertex_at_high_latitude (self):
+        from shapely.geometry import MultiPoint
+        df = pd.DataFrame({"LATITUDE": [80.0], "LONGITUDE": [0.0]})  # observation at 80°N, 0°E
+        # Coast vertex A is 10° east on the same parallel (~192 km away), nearer than vertex B, 2° north (~222 km away)
+        coast = MultiPoint([(10.0, 80.0), (0.0, 82.0)])  # coast close to North Pole
+        result = distance_to_coast(df, coastline_geom=coast)
+        assert 185.0 < float(result.iloc[0]) < 200.0
+
+    # Neighbours across the +-180 meridian have similar distance to coast
+    def test_across_antimeridian(self):
+        from shapely.geometry import LineString
+        coast = LineString([(-179.0, lat) for lat in range(-10, 11)])
+        df = pd.DataFrame({"LATITUDE": [0.0], "LONGITUDE": [179.0]})
+        result = distance_to_coast(df, coastline_geom=coast)
+        assert 215.0 < float(result.iloc[0]) < 230.0
+
+    # Invalid coordinates give NaN, valid rows are unaffected
+    def test_invalid_coordinates_give_nan(self, caplog):
+        df = pd.DataFrame({"LATITUDE": [0.0, np.nan, 95.0, 0.0, 0.0],
+                           "LONGITUDE": [1.0, 1.0, 1.0, np.nan, 200.0]})
+        with caplog.at_level("WARNING"):
+            result = distance_to_coast(df, coastline_geom=self._vertical_coastline())
+        assert np.isfinite(result.iloc[0])
+        assert result.iloc[1:].isna().all()
+        assert "4 of 5" in caplog.text
+
+    # Empty input df returns empty result (no error)
+    def test_empty_dataframe(self):
+        df = pd.DataFrame({"LATITUDE": [], "LONGITUDE": []})
+        result = distance_to_coast(df, coastline_geom=self._vertical_coastline())
+        assert len(result) == 0
+
     # Distances are never negative
     def test_non_negative(self):
         df = pd.DataFrame({"LATITUDE": [0.0, 5.0, -5.0], "LONGITUDE": [3.0, 1.0, 7.0]})
@@ -141,6 +174,51 @@ class TestAlongTrackDistance:
         # Ordered by SEQ: lon 0 -> 1 -> 2, so the lon=1 station is closer to start than lon=2
         dist_by_lon = dict(zip(df["LONGITUDE"], result))
         assert dist_by_lon[1.0] < dist_by_lon[2.0]
+
+    # A track returning to an earlier position: station_col keeps the return leg
+    def test_station_col_separates_revisited_position(self):
+        df = pd.DataFrame({
+            "ID": [1, 2, 3],
+            "LATITUDE": [0.0, 0.0, 0.0],
+            "LONGITUDE": [0.0, 1.0, 0.0],
+        })
+        by_coords = along_track_distance(df)
+        by_id = along_track_distance(df, station_col="ID")
+        assert by_coords.iloc[2] == by_coords.iloc[0] == 0.0
+        assert 200.0 < float(by_id.iloc[2]) < 250.0
+        assert by_id.iloc[1] < by_id.iloc[2]
+
+    # A list of columns forms the station key, rows of one station (different depths) share a distance
+    def test_station_col_list_and_depth_rows(self):
+        df = pd.DataFrame({
+            "CRUISE": ["x", "x", "x"],
+            "ID": [1, 1, 2],
+            "LATITUDE": [0.0, 0.0, 0.0],
+            "LONGITUDE": [0.0, 0.0, 1.0],
+            "LEV_M": [0, 10, 0],
+        })
+        result = along_track_distance(df, station_col=["CRUISE", "ID"])
+        assert result.iloc[0] == result.iloc[1] == 0.0
+        assert result.iloc[2] > 0.0
+
+    # A station is placed by its earliest order value, not by its first row in df
+    def test_order_uses_earliest_value_per_station(self):
+        df = pd.DataFrame({
+            "ID": [1, 1, 2],
+            "LATITUDE": [0.0, 0.0, 0.0],
+            "LONGITUDE": [2.0, 2.0, 1.0],
+            "SEQ": [9, 1, 5],
+        })
+        result = along_track_distance(df, order_col="SEQ", station_col="ID")
+        # Station 1 (SEQ min(1,9)=1 ) comes first, station 2 (SEQ 5) is 1 degree further
+        assert result.iloc[0] == result.iloc[1] == 0.0
+        assert 100.0 < float(result.iloc[2]) < 125.0
+
+    # An unknown station column raises an error
+    def test_missing_station_col_raises(self):
+        df = pd.DataFrame({"LATITUDE": [0.0, 1.0], "LONGITUDE": [0.0, 0.0]})
+        with pytest.raises(KeyError):
+            along_track_distance(df, station_col="ID")
 
     # Output index matches the input DataFrame's index
     def test_preserves_index(self):
@@ -248,6 +326,69 @@ class TestWaterMassMasks:
         result = water_mass_masks(df, self._box_regions())
         assert list(result.index) == [10, 20, 30]
 
+    @staticmethod
+    def _adjacent_boxes():
+        """Two boxes sharing the edge lon=10."""
+        return {
+            "a": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+            "b": [(10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)],
+        }
+
+    # Points on a region edge are assigned, not dropped
+    def test_boundary_point_is_assigned(self):
+        df = pd.DataFrame({"LATITUDE": [0.0, 5.0], "LONGITUDE": [5.0, 0.0]})
+        result = water_mass_masks(df, self._adjacent_boxes())
+        assert list(result["region"]) == ["a", "a"]
+
+    # A point on a shared edge goes to the first region, in either order
+    def test_shared_boundary_first_region_wins(self):
+        df = pd.DataFrame({"LATITUDE": [5.0], "LONGITUDE": [10.0]})
+        boxes = self._adjacent_boxes()
+        assert water_mass_masks(df, boxes)["region"].iloc[0] == "a"
+        reversed_boxes = {k: boxes[k] for k in ("b", "a")}
+        assert water_mass_masks(df, reversed_boxes)["region"].iloc[0] == "b"
+
+    # Dict regions outside lon/lat range are rejected
+    def test_dict_outside_lonlat_raises(self):
+        regions = {"far": [(0.0, 0.0), (1e6, 0.0), (1e6, 1e6), (0.0, 1e6)]}
+        with pytest.raises(ValueError, match="lon/lat"):
+            water_mass_masks(_obs_df(), regions)
+
+    @pytest.mark.skipif(not _has_geopandas, reason="geopandas not installed ([geo] extra)")
+    # A projected GeoDataFrame is reprojected, not relabelled as lon/lat
+    def test_projected_geodataframe_is_reprojected(self):
+        import geopandas as gpd
+        from shapely.geometry import Polygon
+        gdf = gpd.GeoDataFrame(
+            {"name": ["box"], "geometry": [Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])]},
+            crs="EPSG:4326",
+        ).to_crs("EPSG:3857")
+        df = pd.DataFrame({"LATITUDE": [5.0, 50.0], "LONGITUDE": [5.0, 50.0]})
+        result = water_mass_masks(df, gdf)
+        assert result["region"].iloc[0] == "box"
+        assert pd.isna(result["region"].iloc[1])
+
+    @pytest.mark.skipif(not _has_geopandas, reason="geopandas not installed ([geo] extra)")
+    # Without a CRS lon/lat is assumed, with a warning
+    def test_geodataframe_without_crs_assumes_lonlat(self, caplog):
+        import geopandas as gpd
+        from shapely.geometry import Polygon
+        gdf = gpd.GeoDataFrame({"name": ["box"], "geometry": [Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])]})
+        df = pd.DataFrame({"LATITUDE": [5.0], "LONGITUDE": [5.0]})
+        with caplog.at_level("WARNING"):
+            result = water_mass_masks(df, gdf)
+        assert result["region"].iloc[0] == "box"
+        assert "no CRS" in caplog.text
+
+    @pytest.mark.skipif(not _has_geopandas, reason="geopandas not installed ([geo] extra)")
+    # Without a CRS, invalid lat/lon coordinates raise instead of silently matching nothing
+    def test_geodataframe_without_crs_projected_raises(self):
+        import geopandas as gpd
+        from shapely.geometry import Polygon
+        gdf = gpd.GeoDataFrame({"name": ["box"], "geometry": [Polygon([(0, 0), (1e6, 0), (1e6, 1e6), (0, 1e6)])]})
+        with pytest.raises(ValueError, match="set_crs"):
+            water_mass_masks(_obs_df(), gdf)
+
 
 class TestWaterMassStatistics:
     @staticmethod
@@ -317,6 +458,18 @@ class TestRegionBbox:
     def test_single_region_bbox(self):
         result = region_bbox({"north": self._regions["north"]})
         assert result == (40.0, 50.0, 0.0, 10.0)
+
+    # A projected GeoDataFrame yields a bbox in degrees
+    @pytest.mark.skipif(not _has_geopandas, reason="geopandas not installed ([geo] extra)")
+    def test_projected_geodataframe_gives_degrees(self):
+        import geopandas as gpd
+        from shapely.geometry import Polygon
+        gdf = gpd.GeoDataFrame(
+            {"name": ["box"], "geometry": [Polygon([(1, 2), (3, 2), (3, 4), (1, 4)])]},
+            crs="EPSG:4326",
+        ).to_crs("EPSG:3857")
+        result = region_bbox(gdf)
+        assert np.allclose(result, (2.0, 4.0, 1.0, 3.0))
 
     # Works with a shapely polygon wrapped in a dict
     def test_shapely_polygon_input(self):

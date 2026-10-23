@@ -130,7 +130,6 @@ def plot_monthly_histogram(
     """Twelve-panel histogram (one subplot per month).
 
     Accepts either a *df* or a database *conn* along with a *parameter* name.
-    When loaded from the database the extended table is used to obtain dates.
 
     Args:
         df: DataFrame with value and date columns.
@@ -145,8 +144,7 @@ def plot_monthly_histogram(
     Returns:
         The matplotlib Figure.
     """
-    # Extended table needed to access the date column
-    df = _resolve_data(df, conn, parameter, quality_flags, extended=True)
+    df = _resolve_data(df, conn, parameter, quality_flags)
     temp = df.copy()
     temp[date_col] = pd.to_datetime(temp[date_col])
 

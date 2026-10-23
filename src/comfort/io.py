@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
 
@@ -17,8 +17,10 @@ if TYPE_CHECKING:
 from .profile_analysis import interpolate_depth_levels
 from .database.information import get_names_of_all_parameter_tables
 from .geo import region_bbox, water_mass_masks
-from .qc import QCFilter, build_where_clause
+from .qc import QCFilter, build_where_clause, qc_conditions
 from .util.sqlite_utils import validate_identifier
+
+logger = logging.getLogger(__name__)
 
 
 def _refine_to_region(df, region, region_name_col):
@@ -29,7 +31,7 @@ def _refine_to_region(df, region, region_name_col):
 
     # Check if latitude and longitude columns are given
     if "LATITUDE" not in df.columns or "LONGITUDE" not in df.columns:
-        logging.warning("Region filter requested but LATITUDE/LONGITUDE columns not found - filter skipped.")
+        logger.warning("Region filter requested but LATITUDE/LONGITUDE columns not found - filter skipped.")
         return df
 
     # Filter for exact regions
@@ -55,6 +57,12 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
 # Depth levels (similar to Jenniges et al. 2025 (https://doi.org/10.1016/j.ecoinf.2025.103390)
 DEPTH_INTERVALS = np.array([0, 50, 100, 200, 300, 400, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000])
 
+# Columns of the info()/describe_variables() summaries (used for empty results)
+_INFO_COLUMNS = ["parameter", "n_samples", "depth_min_m", "depth_max_m", "date_min", "date_max"]
+_DESCRIBE_COLUMNS = ["parameter", "n_samples", "n_stations", "n_profiles", "n_instruments",
+                     "depth_min_m", "depth_max_m", "val_min", "val_max",
+                     "units", "instruments", "platforms"]
+
 
 def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
     """Print a quick summary of the COMFORT database without loading data.
@@ -73,8 +81,8 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
     try:
         params = list_parameters(conn)
         if not params:
-            logging.warning("info: no parameter tables found")
-            return pd.DataFrame()
+            logger.warning("info: no parameter tables found")
+            return pd.DataFrame(columns=_INFO_COLUMNS)
 
         # Collect sample count and depth/date range per parameter
         rows = []
@@ -82,20 +90,19 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
             validate_identifier(param)
             table = f"P_{param}"
             cur = conn.cursor()
+
+            # Get depth range
             cur.execute(
                 f"SELECT COUNT(*), MIN(LEV_M), MAX(LEV_M) FROM {table};"
             )
             n, dmin, dmax = cur.fetchone()
 
             # Get date range via station join
-            try:
-                cur.execute(
-                    f"SELECT MIN(s.DATEANDTIME), MAX(s.DATEANDTIME) "
-                    f"FROM {table} p JOIN station s ON p.ID = s.ID;"
-                )
-                date_min, date_max = cur.fetchone()
-            except Exception:
-                date_min, date_max = None, None
+            cur.execute(
+                f"SELECT MIN(s.DATEANDTIME), MAX(s.DATEANDTIME) "
+                f"FROM {table} p JOIN station s ON p.ID = s.ID;"
+            )
+            date_min, date_max = cur.fetchone()
 
             rows.append({
                 "parameter": param,
@@ -107,7 +114,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
             })
 
         result = pd.DataFrame(rows)
-        logging.info(result.to_string(index=False))
+        logger.info(result.to_string(index=False))
         return result
     finally:
         if own_conn:
@@ -159,49 +166,25 @@ def read_parameter(conn: sqlite3.Connection, param_name: str,
             Longhurst province) instead of or in addition to the lat/lon box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
         region_name_col (str): Region name column for *region*.
-        limit (int): Maximum number of rows to return. ``None`` returns all.
-            Useful as a safeguard for large tables.
+        limit (int): Maximum number of rows to return (the first rows in
+            table order). ``None`` returns all. Useful as a safeguard for
+            large tables.
         extra_station_cols (list[str]): Additional ``station`` columns to
             include (e.g. ``["CRUISE_ID", "ST_NUMBER_ORIGIN"]``).
     Returns:
         pandas.DataFrame
     """
-    # Validate identifiers
-    validate_identifier(param_name)
-    for col in extra_station_cols or []:
-        validate_identifier(col)
-
     # Bounding box of the region (ANDed with the explicit bounds in the SQL query)
     region_box = region_bbox(region, region_name_col) if region is not None else None
 
-    # Build query with geo, profile and quality filters
-    params: list = []
-    conditions = [f"p.{col}{cond}" for col, cond in (quality_flags or [])]
-    if profiles is not None:
-        placeholders = ",".join("?" * len(profiles))
-        conditions.append(f"p.PROFILE_NUMBER IN ({placeholders})")
-        params.extend(profiles)
-    _append_geo_conditions(
-        conditions, params, "s.", "s.", "p.", "s.",
-        lat_min, lat_max, lon_min, lon_max,
-        depth_min, depth_max, date_min, date_max,
-        region_box=region_box,
-    )
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    extra_select = "".join(f", s.{col}" for col in (extra_station_cols or []))
-    sql = (
-        f"SELECT p.*, s.LATITUDE, s.LONGITUDE{extra_select}, "
-        f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME "
-        f"FROM P_{param_name.upper()} p "
-        f"LEFT JOIN station s ON p.ID = s.ID {where}"
-    )
+    # Get the data from the database
+    df = _read_with_geo(conn, param_name, quality_flags,
+                        lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max,
+                        depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
+                        limit=limit, region_box=region_box,
+                        profiles=profiles, extra_station_cols=extra_station_cols)
 
-    # Add optional limit to query
-    if limit is not None:
-        sql += f" LIMIT {int(limit)}"
-
-    # Fetch data from database into a df, then refine SQL's bbox to the exact region polygon
-    df = pd.read_sql_query(sql + ";", conn, params=params)
+    # Refine SQL's bbox to exact region polygon
     return _refine_to_region(df, region, region_name_col)
 
 
@@ -217,38 +200,6 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
     if "DATEANDTIME" in df.columns:
         df["DATEANDTIME"] = df["DATEANDTIME"].str.slice(0, 19)
     return df
-
-
-def read_extended(conn: sqlite3.Connection, param_name: str,
-                  quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
-                  limit: int | None = None) -> pd.DataFrame:
-    """Read an E_* extended view (parameter + lat/lon/time) as a DataFrame.
-
-    Low-level helper. Prefer :func:`load_comfort` for most use cases.
-    The E_* views must be created first via
-    :func:`comfort.database.structure.create_extended_parameter_tables`.
-
-    Args:
-        conn (sqlite3.Connection): Connection to the database.
-        param_name (str): Parameter name (without ``'E_'`` prefix).
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): QC filters,
-            e.g. ``QC_GOOD``.
-        limit (int): Maximum number of rows to return. ``None`` returns all.
-            Useful as a safeguard for large tables.
-    Returns:
-        pandas.DataFrame
-    """
-    # Validate identifier
-    validate_identifier(param_name)
-
-    # Build quality filter
-    where = build_where_clause(quality_flags)
-
-    # Fetch data directly into DataFrame
-    sql = f"SELECT * FROM E_{param_name.upper()} {where}"
-    if limit is not None:
-        sql += f" LIMIT {int(limit)}"
-    return pd.read_sql_query(sql + ";", conn)
 
 
 def describe_variables(conn: sqlite3.Connection,
@@ -288,8 +239,8 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Warn if no parameter left
     if not params:
-        logging.warning("describe_variables: no parameter tables found")
-        return pd.DataFrame()
+        logger.warning("describe_variables: no parameter tables found")
+        return pd.DataFrame(columns=_DESCRIBE_COLUMNS)
 
     # Compute aggregate statistics per parameter
     where = build_where_clause(quality_flags)
@@ -330,15 +281,12 @@ def describe_variables(conn: sqlite3.Connection,
         # Get platform IDs via station join
         platform_ids: list[int] = []
         if has_platform_id:
-            try:
-                cur.execute(
-                    f"SELECT DISTINCT s.PLATFORM_ID "
-                    f"FROM {table} p JOIN station s ON p.ID = s.ID "
-                    f"{qc_where_aliased};"
-                )
-                platform_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
-            except Exception:
-                pass
+            cur.execute(
+                f"SELECT DISTINCT s.PLATFORM_ID "
+                f"FROM {table} p JOIN station s ON p.ID = s.ID "
+                f"{qc_where_aliased};"
+            )
+            platform_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
 
         rows.append({
             "parameter": param,
@@ -358,15 +306,11 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Resolve unit IDs to names
     id_to_unit = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
-    result["units"] = result["units_ids"].apply(
-        lambda ids: " / ".join(
-            id_to_unit.get(i, str(i)) for i in sorted(ids)
-        ) if ids else None
-    )
+    result["units"] = result["units_ids"].apply(lambda ids: _join_names(ids, id_to_unit))
     # Warn about mixed units
     for _, row in result.iterrows():
         if len(row["units_ids"]) > 1:
-            logging.warning(
+            logger.warning(
                 "%s contains %d different units (%s) - values may not be comparable",
                 row["parameter"], len(row["units_ids"]), row["units"],
             )
@@ -374,20 +318,12 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Resolve instrument IDs to names
     id_to_instrument = _load_lookup_map(conn, "INSTRUMENT")
-    result["instruments"] = result["instrument_ids"].apply(
-        lambda ids: " / ".join(
-            id_to_instrument.get(i, str(i)) for i in sorted(ids)
-        ) if ids else None
-    )
+    result["instruments"] = result["instrument_ids"].apply(lambda ids: _join_names(ids, id_to_instrument))
     result = result.drop(columns="instrument_ids")
 
     # Resolve platform IDs to names
     id_to_platform = _load_lookup_map(conn, "PLATFORM")
-    result["platforms"] = result["platform_ids"].apply(
-        lambda ids: " / ".join(
-            id_to_platform.get(i, str(i)) for i in sorted(ids)
-        ) if ids else None
-    )
+    result["platforms"] = result["platform_ids"].apply(lambda ids: _join_names(ids, id_to_platform))
     result = result.drop(columns="platform_ids")
 
     return result
@@ -397,25 +333,54 @@ def _load_lookup_map(conn, table: str, id_col: str = "ID", name_col: str = "NAME
     """Return a dict mapping id_col -> name_col, or {} when the table is absent."""
     from .database.information import does_table_exist
 
-    try:
-        if not does_table_exist(conn, table):
-            return {}
-        cur = conn.cursor()
-        cur.execute(f"SELECT {id_col}, {name_col} FROM {table};")
-        return {row[0]: row[1] for row in cur.fetchall()}
-    except Exception as exc:
-        logging.debug("_load_lookup_map: could not resolve %s (%s)", table, exc)
+    # Check if table exists
+    if not does_table_exist(conn, table):
         return {}
+    cur = conn.cursor()
+
+    # Get table info
+    cur.execute(f"PRAGMA table_info({table});")
+    columns = {row[1].upper() for row in cur.fetchall()}
+
+    # Check for missing columns
+    if id_col.upper() not in columns or name_col.upper() not in columns:
+        logger.debug("_load_lookup_map: %s lacks %s/%s", table, id_col, name_col)
+        return {}
+
+    cur.execute(f"SELECT {id_col}, {name_col} FROM {table};")
+    return {row[0]: row[1] for row in cur.fetchall()}
 
 
 def _station_has_column(conn, column: str) -> bool:
     """Check whether the station table has a given column."""
-    try:
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(station);")
+    return any(row[1].upper() == column.upper() for row in cur.fetchall())
+
+
+class _Lookups(NamedTuple):
+    """Name maps for the xarray coordinates and unit attributes of load_comfort."""
+    instrument: dict
+    platform: dict
+    units: dict
+    station_platform: dict
+
+
+def _load_lookups(conn) -> _Lookups:
+    """Read the instrument, platform and unit ID->name maps and the station->platform_id map."""
+    # Station -> platform_id mapping (if column exists)
+    station_platform: dict[int, int] = {}
+    if _station_has_column(conn, "PLATFORM_ID"):
         cur = conn.cursor()
-        cur.execute("PRAGMA table_info(station);")
-        return any(row[1].upper() == column.upper() for row in cur.fetchall())
-    except Exception:
-        return False
+        cur.execute("SELECT ID, PLATFORM_ID FROM station;")
+        station_platform = {row[0]: row[1] for row in cur.fetchall() if row[1] is not None}
+
+    return _Lookups(
+        instrument=_load_lookup_map(conn, "INSTRUMENT"),
+        platform=_load_lookup_map(conn, "PLATFORM"),
+        units=_load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT"),
+        station_platform=station_platform,
+    )
 
 
 def subset_region(df: pd.DataFrame,
@@ -453,7 +418,7 @@ def subset_region(df: pd.DataFrame,
         if bound_val is None:
             return mask
         if col not in df.columns:
-            logging.warning(
+            logger.warning(
                 "subset_region: %r requested but column %r not found - filter skipped",
                 bound_name, col,
             )
@@ -474,7 +439,7 @@ def subset_region(df: pd.DataFrame,
     # Date range filter
     if date_min is not None or date_max is not None:
         if "DATEANDTIME" not in df.columns:
-            logging.warning(
+            logger.warning(
                 "subset_region: date filter requested but column 'DATEANDTIME' not found - filter skipped"
             )
         else:
@@ -502,17 +467,16 @@ def load_comfort(
         max_gap: float | None = None,
         interp_method: str = "pchip",
         as_xarray: bool = True,
-        normalise_columns: bool = False,
         convert_units: bool = False,
         use_density: bool = False,
         on_missing: str = "drop",
+        density_fallback: str = "constant",
         limit: int | None = None,
 ) -> xr.Dataset | dict[str, pd.DataFrame]:
     """Load COMFORT data into a filtered xarray Dataset or dict of DataFrames.
 
     All filtering (QC flags, spatial bounds and date range) is pushed to SQL
-    so only the requested rows are loaded into memory. Tries E_* views first
-    and falls back to ``P_* JOIN station``.
+    so only the requested rows are loaded into memory (``P_* JOIN station``).
 
     If *target_depths* is specified, the profiles are interpolated onto
     those depths using the specified interpolation method *interp_method*
@@ -553,8 +517,6 @@ def load_comfort(
             *target_depths* is ``None``.
         as_xarray (bool): ``True`` returns ``xr.Dataset``, ``False`` returns
             ``dict[param_name, pandas.DataFrame]``.
-        normalise_columns (bool): When ``True`` and ``as_xarray=False``,
-            rename all DataFrame columns to lowercase. Default ``False``.
         convert_units (bool): When ``True``, convert each parameter's values
             to its default unit using :class:`comfort.units.UnitsConverter`.
         use_density (bool): When ``True`` and ``convert_units=True``, use
@@ -566,9 +528,13 @@ def load_comfort(
         on_missing (str): Policy for rows that cannot be converted when
             ``convert_units=True``: ``'drop'`` (default),
             ``'keep'`` (retain original value and UNITS_ID) or ``'raise'``.
-        limit (int): Maximum number of rows to load per parameter.
-            ``None`` loads all matching rows. Useful as a safeguard for
-            large tables like TEMPERATURE or SALINITY.
+        density_fallback (str): With ``use_density=True``, policy for rows whose
+            density cannot be computed (missing/NaN salinity, temperature or
+            position): ``'constant'`` (default, use 1.025 kg/L), ``'drop'`` or
+            ``'raise'``. Counts are logged.
+        limit (int): Maximum number of rows to return (the first rows in
+            table order). ``None`` returns all. Useful as a safeguard for
+            large tables.
     Returns:
         xarray.Dataset or dict[str, pandas.DataFrame].
         For the dict path each DataFrame has the measurement column named
@@ -592,129 +558,130 @@ def load_comfort(
     conn = sqlite3.connect(db_path_or_conn) if own_conn else db_path_or_conn
     try:
         # Default to all available parameters
+        available = list_parameters(conn)
         if parameters is None:
-            parameters = list_parameters(conn)
+            parameters = available
+        else:
+            # Fail (before loading anything) if a requested parameter table is missing
+            unknown = {p for p in parameters if p.upper() not in {a.upper() for a in available}}
+            if unknown:
+                raise ValueError(f"Unknown parameters: {sorted(unknown)}")
 
         # Resolve lookup tables for xarray coordinates
-        _instrument_map = _load_lookup_map(conn, "INSTRUMENT")
-        _platform_map = _load_lookup_map(conn, "PLATFORM")
-        _units_map = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
-
-        # Station → platform_id mapping (when column exists)
-        _station_platform: dict[int, int] = {}
-        if _station_has_column(conn, "PLATFORM_ID"):
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT ID, PLATFORM_ID FROM station;")
-                _station_platform = {
-                    row[0]: row[1] for row in cur.fetchall() if row[1] is not None
-                }
-            except Exception:
-                pass
+        lookups = _load_lookups(conn)
 
         # Build unit converter when requested
         _converter = None
         if convert_units:
-            try:
-                from .units import UnitsConverter
-                _converter = UnitsConverter.from_connection(conn)
-            except ValueError:
-                logging.info("load_comfort: UNITS/DATABASE_TABLES not found, skipping unit conversion")
+            from .units import UnitsConverter
+            _converter = UnitsConverter.from_connection(conn)
 
-        # Track per-parameter unit IDs for xarray attrs and warnings
+        # Track per-parameter unit IDs for xarray attrs
         _param_unit_ids: dict[str, set] = {}
 
         # Load each parameter with SQL-level filtering
         dfs = {}
         for param in parameters:
-            logging.info("load_comfort: Loading %s...", param)
-            # Get target unit
-            p_up = param.upper()
-            target = _converter.default_unit_id(f"P_{p_up}") if _converter else None
-
-            # Check if temperature and/or salinity are required for unit conversions
-            may_need_density = target in (3, 14)
-            with_temperature = may_need_density and (
-                p_up == "OXYGEN" or (use_density and p_up == "CHLOROPHYLL"))
-            with_salinity = may_need_density and (use_density or p_up == "OXYGEN")
-
-            try:
-                # Load param with space, time and optionally T and S columns
-                df = _read_with_geo(conn, param, quality_flags, limit=limit,
-                                    with_temperature=with_temperature,
-                                    with_salinity=with_salinity, **geo_kwargs)
-            except Exception as exc:
-                logging.warning("load_comfort: could not read %s (%s)", param, exc)
-                continue
-
-            # Refine to exact polygon refine (SQL only filters for region bbox)
-            df = _refine_to_region(df, region, region_name_col)
-
-            if not df.empty:
-                # Track distinct units
-                if "UNITS_ID" in df.columns:
-                    uid_set = set(df["UNITS_ID"].dropna().unique())
-                    _param_unit_ids[param] = uid_set
-                    if len(uid_set) > 1 and _converter is None:
-                        names = ", ".join(
-                            _units_map.get(int(u), str(int(u)))
-                            for u in sorted(uid_set)
-                        )
-                        logging.warning(
-                            "%s contains %d different units (%s) - "
-                            "values may not be comparable; consider convert_units=True",
-                            param, len(uid_set), names,
-                        )
-
-                # Convert to default unit before renaming VAL
-                if _converter is not None and "VAL" in df.columns:
-                    df = _converter.convert_dataframe(df, f"P_{param}",
-                                                      use_density=use_density,
-                                                      on_missing=on_missing)
-                    # Empty df warning
-                    if df.empty:
-                        logging.warning("load_comfort: no %s rows left after unit conversion", param)
-                        continue
-
-                    # Update unit IDs
-                    if "UNITS_ID" in df.columns:
-                        _param_unit_ids[param] = set(df["UNITS_ID"].dropna().unique())
-
-                # Rename generic VAL column to parameter name
-                if "VAL" in df.columns:
-                    df = df.rename(columns={"VAL": param})
-                if normalise_columns:
-                    df.columns = df.columns.str.lower()
-                dfs[param] = df
+            loaded = _load_parameter(
+                conn, param, converter=_converter, lookups=lookups, quality_flags=quality_flags,
+                limit=limit, use_density=use_density, on_missing=on_missing,
+                density_fallback=density_fallback, region=region, region_name_col=region_name_col,
+                geo_kwargs=geo_kwargs,
+            )
+            if loaded is not None:
+                dfs[param], _param_unit_ids[param] = loaded
     finally:
+        # Close connection
         if own_conn:
             conn.close()
 
     if not dfs:
-        logging.warning("load_comfort: no data found for the given filters")
+        # No data was found
+        logger.warning("load_comfort: No data found for the given filters")
         if as_xarray:
             import xarray as xr
             return xr.Dataset()
         return {}
 
-    # target_depths=None: Return each profile at its native measured depths
+    # Return each profile at its native measured depths (if no target_depths given)
     if target_depths is None:
         if not as_xarray:
             return dfs
-        return _build_scattered_dataset(
-            dfs, _instrument_map, _platform_map, _units_map, _station_platform, _param_unit_ids,
-        )
+        return _build_scattered_dataset(dfs, lookups=lookups, param_unit_ids=_param_unit_ids)
 
     # target_depths given: Project every parameter onto it
     depths = np.asarray(target_depths, dtype=float)
     interp_dfs = {
-        param: interpolate_depth_levels(df, depths, param_col=param, depth_col="LEV_M",
-                                        max_gap=max_gap, method=interp_method)
+        param: interpolate_depth_levels(df, depths, param_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
         for param, df in dfs.items()
     }
     if not as_xarray:
+        # Return dfs
         return interp_dfs
 
+    # Build and return xarray dataset
+    return _build_profile_dataset(dfs, interp_dfs=interp_dfs, depths=depths, lookups=lookups, param_unit_ids=_param_unit_ids)
+
+
+def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, use_density,
+                    on_missing, density_fallback, region, region_name_col, geo_kwargs):
+    """Load one parameter for :func:`load_comfort`: Read, refine to the region, convert units, rename.
+    Returns ``(df, unit_ids)``.
+    """
+    logger.info("load_comfort: Loading %s...", param)
+
+    # Check if temperature and/or salinity are required for unit conversions
+    with_temperature, with_salinity = (
+        converter.required_inputs(f"P_{param.upper()}", use_density) if converter else (False, False))
+
+    # Load param with space, time and optionally T and S columns
+    df = _read_with_geo(conn, param, quality_flags, limit=limit,
+                        with_temperature=with_temperature,
+                        with_salinity=with_salinity, **geo_kwargs)
+
+    # Refine to exact polygon refine (SQL only filters for region bbox)
+    df = _refine_to_region(df, region, region_name_col)
+    if df.empty:
+        return None
+
+    # Track distinct units
+    unit_ids: set = set()
+    if "UNITS_ID" in df.columns:
+        unit_ids = set(df["UNITS_ID"].dropna().unique())
+        if len(unit_ids) > 1 and converter is None:
+            logger.warning(
+                "%s contains %d different units (%s) - "
+                "values may not be comparable; consider convert_units=True",
+                param, len(unit_ids), _join_names(unit_ids, lookups.units, sep=", "),
+            )
+
+    # Convert to default unit before renaming VAL
+    if converter is not None and "VAL" in df.columns:
+        df = converter.convert_dataframe(df, f"P_{param}",
+                                         use_density=use_density,
+                                         on_missing=on_missing,
+                                         density_fallback=density_fallback)
+        # Empty df warning
+        if df.empty:
+            logger.warning("load_comfort: no %s rows left after unit conversion", param)
+            return None
+
+        # Update unit IDs
+        if "UNITS_ID" in df.columns:
+            unit_ids = set(df["UNITS_ID"].dropna().unique())
+
+    # Rename generic VAL column to parameter name
+    if "VAL" in df.columns:
+        df = df.rename(columns={"VAL": param})
+    return df, unit_ids
+
+
+def _build_profile_dataset(dfs, interp_dfs, depths, lookups, param_unit_ids):
+    """Build an xr.Dataset on a shared (profile, depth) grid from depth-interpolated parameters.
+
+    Profiles are identified by (station ID, profile number). Their coordinates (position, time,
+    instrument, platform) come from the first row of each profile in the un-interpolated *dfs*.
+    """
     # Build xarray Dataset with a shared (profile, depth) grid
     import xarray as xr
 
@@ -738,15 +705,15 @@ def load_comfort(
             key = pid if isinstance(pid, tuple) else (None, pid)
             if key not in meta:
                 row = group.iloc[0]
-                sid = int(row["ID"]) if "ID" in row.index and row["ID"] is not None else -1
+                sid = int(row["ID"]) if "ID" in row.index and pd.notna(row["ID"]) else np.nan
                 meta[key] = {
                     "latitude": row.get("LATITUDE", np.nan),
                     "longitude": row.get("LONGITUDE", np.nan),
                     "time": row.get("DATEANDTIME", None),
                     "station_id": sid,
-                    "profile_number": int(row["PROFILE_NUMBER"]) if "PROFILE_NUMBER" in row.index else -1,
-                    "instrument_id": int(row["INSTRUMENT_ID"]) if "INSTRUMENT_ID" in row.index else -1,
-                    "platform_id": _station_platform.get(sid, -1),
+                    "profile_number": int(row["PROFILE_NUMBER"]),
+                    "instrument_id": row.get("INSTRUMENT_ID", np.nan),
+                    "platform_id": lookups.station_platform.get(sid, np.nan),
                 }
 
     # Pivot each parameter's interpolated values onto the shared grid
@@ -775,25 +742,19 @@ def load_comfort(
     # Build coordinate arrays from profile metadata
     lats = np.array([meta.get(p, {}).get("latitude", np.nan) for p in all_profiles])
     lons = np.array([meta.get(p, {}).get("longitude", np.nan) for p in all_profiles])
-    station_ids = np.array([meta.get(p, {}).get("station_id", -1) for p in all_profiles])
-    profile_numbers = np.array([meta.get(p, {}).get("profile_number", -1) for p in all_profiles])
-    instrument_ids = np.array([meta.get(p, {}).get("instrument_id", -1) for p in all_profiles])
-    platform_ids = np.array([meta.get(p, {}).get("platform_id", -1) for p in all_profiles])
+    station_ids = np.array([meta.get(p, {}).get("station_id", np.nan) for p in all_profiles])
+    profile_numbers = np.array([meta[p]["profile_number"] for p in all_profiles])
+    instrument_ids = [meta.get(p, {}).get("instrument_id", np.nan) for p in all_profiles]
+    platform_ids = [meta.get(p, {}).get("platform_id", np.nan) for p in all_profiles]
     raw_times = [meta.get(p, {}).get("time") for p in all_profiles]
     try:
         times = pd.to_datetime(raw_times)
-    except Exception:
+    except (ValueError, TypeError):
         times = np.array(raw_times, dtype=object)
 
-    # Resolve instrument IDs to names; fall back to stringified IDs
-    instruments = np.array([
-        _instrument_map.get(int(iid), str(int(iid))) for iid in instrument_ids
-    ])
-
-    # Resolve platform IDs to names; fall back to stringified IDs
-    platforms = np.array([
-        _platform_map.get(int(pid), str(int(pid))) for pid in platform_ids
-    ])
+    # Resolve instrument and platform IDs to names
+    instruments = _id_names(instrument_ids, lookups.instrument)
+    platforms = _id_names(platform_ids, lookups.platform)
 
     # Assemble xarray Dataset
     ds = xr.Dataset(
@@ -811,15 +772,7 @@ def load_comfort(
     )
 
     # Attach resolved unit names as variable attributes
-    for param in data_vars:
-        uid_set = _param_unit_ids.get(param, set())
-        if len(uid_set) == 1:
-            uid = next(iter(uid_set))
-            ds[param].attrs["units"] = _units_map.get(int(uid), str(int(uid)))
-        elif len(uid_set) > 1:
-            ds[param].attrs["units"] = " / ".join(
-                _units_map.get(int(u), str(int(u))) for u in sorted(uid_set)
-            )
+    _attach_unit_attrs(ds, params=data_vars, param_unit_ids=param_unit_ids, units_map=lookups.units)
 
     # Climate and Forecast (CF) compliant metadata
     ds["depth"].attrs.update({"units": "m", "positive": "down"})
@@ -828,8 +781,31 @@ def load_comfort(
     return ds
 
 
-def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
-                             station_platform, param_unit_ids):
+def _join_names(ids, lookup: dict, sep: str = " / ") -> str | None:
+    """Join the names of *ids* (sorted, falling back to its stringified ID). ``None`` without IDs."""
+    if len(ids) == 0:
+        return None
+    return sep.join(lookup.get(int(i), str(int(i))) for i in sorted(ids))
+
+
+def _attach_unit_attrs(ds, params, param_unit_ids, units_map) -> None:
+    """Set each parameter's ``units`` attribute to the resolved name(s) of the units found in its data."""
+    # Iterate over params
+    for param in params:
+        uid_set = param_unit_ids.get(param, set())  # get unit ids of the parameter
+        if uid_set:
+            # Resolve unit ID names
+            ds[param].attrs["units"] = _join_names(ids=uid_set, lookup=units_map)
+
+
+def _id_names(ids, lookup: dict) -> np.ndarray:
+    """Resolve IDs to names: ``"unknown"`` for a missing ID, the stringified ID if not in *lookup*."""
+    return np.array([
+        "unknown" if pd.isna(i) else lookup.get(int(i), str(int(i))) for i in ids
+    ])
+
+
+def _build_scattered_dataset(dfs, lookups, param_unit_ids):
     """Build an xr.Dataset with each parameter on its own observation
     dimension, at native measured depths (no interpolation, no shared grid).
 
@@ -852,7 +828,7 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
         coords[f"{param}_longitude"] = (dim, df["LONGITUDE"].to_numpy(dtype=float))
         try:
             times = pd.to_datetime(df["DATEANDTIME"]).to_numpy()
-        except Exception:
+        except (ValueError, TypeError):
             times = df["DATEANDTIME"].to_numpy(dtype=object)
         coords[f"{param}_time"] = (dim, times)
 
@@ -862,29 +838,17 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
         coords[f"{param}_profile_number"] = (dim, df["PROFILE_NUMBER"].to_numpy(dtype=int))
 
         # Get instrument IDs
-        instrument_ids = df["INSTRUMENT_ID"].to_numpy(dtype=int) if "INSTRUMENT_ID" in df.columns else np.full(n, -1)
-        coords[f"{param}_instrument"] = (
-            dim, np.array([instrument_map.get(int(i), str(int(i))) for i in instrument_ids])
-        )
+        instrument_ids = df["INSTRUMENT_ID"] if "INSTRUMENT_ID" in df.columns else np.full(n, np.nan)
+        coords[f"{param}_instrument"] = (dim, _id_names(instrument_ids, lookups.instrument))
 
         # Get platform IDs
-        platform_ids = np.array([station_platform.get(int(sid), -1) for sid in station_ids])
-        coords[f"{param}_platform"] = (
-            dim, np.array([platform_map.get(int(p), str(int(p))) for p in platform_ids])
-        )
+        platform_ids = [lookups.station_platform.get(int(sid), np.nan) for sid in station_ids]
+        coords[f"{param}_platform"] = (dim, _id_names(platform_ids, lookups.platform))
 
     ds = xr.Dataset(data_vars, coords=coords)
 
     # Attach resolved unit names as variable attributes
-    for param in dfs:
-        uid_set = param_unit_ids.get(param, set())
-        if len(uid_set) == 1:
-            uid = next(iter(uid_set))
-            ds[param].attrs["units"] = units_map.get(int(uid), str(int(uid)))
-        elif len(uid_set) > 1:
-            ds[param].attrs["units"] = " / ".join(
-                units_map.get(int(u), str(int(u))) for u in sorted(uid_set)
-            )
+    _attach_unit_attrs(ds, dfs, param_unit_ids, lookups.units)
 
     # Metadata per parameter
     for param in dfs:
@@ -898,95 +862,91 @@ def _build_scattered_dataset(dfs, instrument_map, platform_map, units_map,
 def _read_with_geo(conn, param_name, quality_flags,
                    lat_min=None, lat_max=None, lon_min=None, lon_max=None,
                    depth_min=None, depth_max=None, date_min=None, date_max=None,
-                   limit=None, with_temperature=False, with_salinity=False, region_box=None):
+                   limit=None, with_temperature=False, with_salinity=False, region_box=None,
+                   profiles=None, extra_station_cols=None):
     """Read a parameter table with lat/lon/time, pushing all filters to SQL.
 
-    Tries the E_* extended view first and falls back to an explicit P_* JOIN station.
+    Joins ``P_*`` with ``station``. *with_temperature*/*with_salinity* additionally
+    attach the co-located temperature/salinity (needed for unit conversions).
     *region_box* is the bounding box of a region (see :func:`_append_geo_conditions`).
+    *profiles* restricts to profile numbers, *extra_station_cols* adds ``station`` columns.
+    This is the query behind both :func:`read_parameter` and :func:`load_comfort`.
     """
     from .database.information import does_table_exist
 
-    # Validate identifier
+    # Validate identifiers
     validate_identifier(param_name)
+    for col in extra_station_cols or []:
+        validate_identifier(col)
 
+    # Join P_* with station to get geo columns
     params = []
+    conditions = qc_conditions(quality_flags, "p")
+    if profiles is not None:
+        # Filter for profile numbers
+        placeholders = ",".join("?" * len(profiles))
+        conditions.append(f"p.PROFILE_NUMBER IN ({placeholders})")
+        params.extend(profiles)
+    _append_geo_conditions(
+        conditions, params, "s.", "s.", "p.", "s.",
+        lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
+        region_box=region_box,
+    )
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    # Try E_* extended view first; fall back to P_* JOIN station
-    view = f"E_{param_name.upper()}"
-    if does_table_exist(conn, view, table_type="view"):
-        # E_* view already contains lat/lon/time columns
-        conditions = [f"{col}{cond}" for col, cond in (quality_flags or [])]
+    # Optionally attach T/S for unit conversion (QC + space + time filtered)
+    ts_select, ts_join = "", ""
+    ts_params: list = []
+    if with_temperature and does_table_exist(conn, "P_TEMPERATURE"):
+        t_conditions = qc_conditions(quality_flags, "t")
+        t_params: list = []
         _append_geo_conditions(
-            conditions, params, "", "", "", "",
+            t_conditions, t_params, "s2.", "s2.", "t.", "s2.",
             lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
             region_box=region_box,
         )
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-        query = f"SELECT * FROM {view} {where}"
-    else:
-        # Join P_* with station to get geo columns
-        conditions = [f"p.{col}{cond}" for col, cond in (quality_flags or [])]
+        t_where = ("WHERE " + " AND ".join(t_conditions)) if t_conditions else ""
+        ts_select += ", tmp.temperature"
+        ts_join += (f"LEFT JOIN (SELECT t.ID, t.LEV_M, AVG(t.VAL) AS temperature "
+                    f"FROM P_TEMPERATURE t JOIN station s2 ON t.ID = s2.ID {t_where} "
+                    f"GROUP BY t.ID, t.LEV_M) tmp "
+                    f"ON tmp.ID = p.ID AND tmp.LEV_M = p.LEV_M ")
+        ts_params.extend(t_params)
+
+    if with_salinity and does_table_exist(conn, "P_SALINITY"):
+        sal_conditions = qc_conditions(quality_flags, "t")
+        sal_params: list = []
         _append_geo_conditions(
-            conditions, params, "s.", "s.", "p.", "s.",
+            sal_conditions, sal_params, "s2.", "s2.", "t.", "s2.",
             lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
             region_box=region_box,
         )
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        sal_where = ("WHERE " + " AND ".join(sal_conditions)) if sal_conditions else ""
+        ts_select += ", sal.salinity"
+        ts_join += (f"LEFT JOIN (SELECT t.ID, t.LEV_M, AVG(t.VAL) AS salinity "
+                    f"FROM P_SALINITY t JOIN station s2 ON t.ID = s2.ID {sal_where} "
+                    f"GROUP BY t.ID, t.LEV_M) sal "
+                    f"ON sal.ID = p.ID AND sal.LEV_M = p.LEV_M ")
+        ts_params.extend(sal_params)
 
-        # Optionally attach T/S for unit conversion (QC + space + time filtered)
-        ts_select, ts_join = "", ""
-        ts_params: list = []
-        if with_temperature and does_table_exist(conn, "P_TEMPERATURE"):
-            t_conditions = [f"t.{col}{cond}" for col, cond in (quality_flags or [])]
-            t_params: list = []
-            _append_geo_conditions(
-                t_conditions, t_params, "s2.", "s2.", "t.", "s2.",
-                lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
-                region_box=region_box,
-            )
-            t_where = ("WHERE " + " AND ".join(t_conditions)) if t_conditions else ""
-            ts_select += ", tmp.temperature"
-            ts_join += (f"LEFT JOIN (SELECT t.ID, t.LEV_M, AVG(t.VAL) AS temperature "
-                        f"FROM P_TEMPERATURE t JOIN station s2 ON t.ID = s2.ID {t_where} "
-                        f"GROUP BY t.ID, t.LEV_M) tmp "
-                        f"ON tmp.ID = p.ID AND tmp.LEV_M = p.LEV_M ")
-            ts_params.extend(t_params)
+    # Select additional columns from the station table
+    extra_select = "".join(f", s.{col}" for col in (extra_station_cols or []))
 
-        if with_salinity and does_table_exist(conn, "P_SALINITY"):
-            sal_conditions = [f"t.{col}{cond}" for col, cond in (quality_flags or [])]
-            sal_params: list = []
-            _append_geo_conditions(
-                sal_conditions, sal_params, "s2.", "s2.", "t.", "s2.",
-                lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
-                region_box=region_box,
-            )
-            sal_where = ("WHERE " + " AND ".join(sal_conditions)) if sal_conditions else ""
-            ts_select += ", sal.salinity"
-            ts_join += (f"LEFT JOIN (SELECT t.ID, t.LEV_M, AVG(t.VAL) AS salinity "
-                        f"FROM P_SALINITY t JOIN station s2 ON t.ID = s2.ID {sal_where} "
-                        f"GROUP BY t.ID, t.LEV_M) sal "
-                        f"ON sal.ID = p.ID AND sal.LEV_M = p.LEV_M ")
-            ts_params.extend(sal_params)
+    # Assemble the query
+    query = (
+        f"SELECT p.*, s.LATITUDE, s.LONGITUDE{extra_select}, "
+        f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME{ts_select} "
+        f"FROM P_{param_name.upper()} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
+    )
+    # T/S sub-query values come first in the SQL text, so they come first in the parameters
+    params = ts_params + params
 
-        query = (
-            f"SELECT p.*, s.LATITUDE, s.LONGITUDE, "
-            f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME{ts_select} "
-            f"FROM P_{param_name.upper()} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
-        )
-        # Assemble
-        params = ts_params + params
-
-    # Add optional limit to query
+    # Add optional limit, ORDER BY rowid takes the first rows in table order (reproducible)
     if limit is not None:
-        query += f" LIMIT {int(limit)}"
+        query += f" ORDER BY p.rowid LIMIT {int(limit)}"
 
     # Execute query with parametrised geo/date values
-    df = pd.read_sql_query(query, conn, params=params)
-
-    # Normalise timestamp text (E_* views have raw station strings)
-    if "DATEANDTIME" in df.columns and df["DATEANDTIME"].dtype == object:
-        df["DATEANDTIME"] = df["DATEANDTIME"].str.slice(0, 19)
-    return df
+    return pd.read_sql_query(query, conn, params=params)
 
 
 def _append_box_conditions(conditions, params, lat_pfx, lon_pfx,

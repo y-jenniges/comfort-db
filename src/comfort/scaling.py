@@ -12,6 +12,8 @@ from .util.sqlite_utils import validate_identifier
 if TYPE_CHECKING:
     from typing import Any
 
+logger = logging.getLogger(__name__)
+
 
 class ParamScaler:
     """ Scale parameters using a scikit-learn scaler per parameter.
@@ -75,7 +77,7 @@ class ParamScaler:
         for col in columns:
             # Check if column is in the df
             if col not in df.columns:
-                logging.warning(f"scale_columns: column {col!r} not found in dataframe")
+                logger.warning(f"scale_columns: column {col!r} not found in dataframe")
                 continue
 
             # Scale
@@ -174,7 +176,7 @@ class DBParamScaler:
         for table, param in tables_params.items():
             # Validate table name
             validate_identifier(table)
-            logging.info(f"DBParamScaler: scaling {table} ({param})")
+            logger.info(f"DBParamScaler: scaling {table} ({param})")
 
             # Get min/max values
             param_min, param_max = self.get_min_max(table, self.value_column)

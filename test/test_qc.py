@@ -1,10 +1,11 @@
 """Tests for comfort.qc."""
 import logging
+import sqlite3
 import pandas as pd
 import pytest
 
 from comfort.qc import (QC_ALL, QC_GOOD, QCFilter, apply_qc_flags,
-                        build_where_clause, flag_salinity_like_oxygen)
+                        build_where_clause, flag_salinity_like_oxygen, qc_conditions)
 
 
 class TestBuildWhereClause:
@@ -59,6 +60,56 @@ class TestBuildWhereClause:
     # QC_ALL is the no-filtering preset
     def test_qc_all_is_empty(self):
         assert build_where_clause(QC_ALL) == ""
+
+    # A condition carrying extra SQL is rejected
+    def test_injection_in_condition_raises(self):
+        with pytest.raises(ValueError, match="Invalid quality flag condition"):
+            build_where_clause([("PQF1", ">0 OR 1=1")])
+
+    # An unsafe column name is rejected
+    def test_injection_in_column_raises(self):
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            build_where_clause([("PQF1; DROP TABLE station", ">0")])
+
+    # An unsafe table alias is rejected
+    def test_invalid_alias_raises(self):
+        with pytest.raises(ValueError, match="Invalid SQL identifier"):
+            build_where_clause(QC_GOOD, table_alias="p; --")
+
+    # Unsupported operators are rejected on the SQL side too
+    @pytest.mark.parametrize("condition", ["=1", "<>1", "IN (1,2)", ">", "1", ">0.", ""])
+    def test_invalid_condition_raises(self, condition):
+        with pytest.raises(ValueError, match="Invalid quality flag condition"):
+            build_where_clause([("PQF1", condition)])
+
+    # Whitespace in the condition is normalised away in the generated SQL
+    def test_whitespace_normalised(self):
+        assert build_where_clause([("PQF1", " >= 2 ")]) == "WHERE PQF1>=2"
+
+    # The SQL and the DataFrame path select the same rows for the same flags
+    @pytest.mark.parametrize("flags", [QC_GOOD, [("PQF1", "!=0")], [("PQF2", "<=3"), ("PQF1", "==1")]])
+    def test_sql_and_pandas_agree(self, flags):
+        df = pd.DataFrame({"PQF1": [0, 1, 1, 1], "PQF2": [0, 1, 3, 5], "VAL": [10.0, 20.0, 30.0, 40.0]})
+        conn = sqlite3.connect(":memory:")
+        df.to_sql("t", conn, index=False)
+        rows = conn.execute("SELECT VAL FROM t " + build_where_clause(flags) + " ORDER BY VAL").fetchall()
+        conn.close()
+        assert [r[0] for r in rows] == apply_qc_flags(df, flags)["VAL"].tolist()
+
+
+class TestQcConditions:
+    # No flags yield no conditions
+    @pytest.mark.parametrize("flags", [None, [], QC_ALL])
+    def test_empty(self, flags):
+        assert qc_conditions(flags) == []
+
+    # One condition per flag, in order
+    def test_list_of_conditions(self):
+        assert qc_conditions(QC_GOOD) == ["PQF1>0", "PQF2>2"]
+
+    # The alias prefixes every column
+    def test_alias(self):
+        assert qc_conditions(QC_GOOD, "p") == ["p.PQF1>0", "p.PQF2>2"]
 
 
 class TestApplyQcFlags:
@@ -124,14 +175,30 @@ class TestApplyQcFlags:
         assert (result["PQF1"] > 0).all()
         assert (result["PQF2"] > 2).all()
 
-    # A filter on a column absent from df warns and leaves rows untouched
-    def test_missing_column_warns(self, caplog):
-        df = self._df()
-        with caplog.at_level(logging.WARNING):
-            result = apply_qc_flags(df, [QCFilter("SQF", ">0")])
-        assert "SQF" in caplog.text
-        # All rows returned when the filter column is absent
-        assert len(result) == 4
+    # A filter on a column absent from df raises
+    def test_missing_column_raises(self):
+        with pytest.raises(ValueError, match="SQF"):
+            apply_qc_flags(self._df(), [QCFilter("SQF", ">0")])
+
+    # An unsupported operator raises instead of silently filtering nothing
+    def test_invalid_operator_raises(self):
+        with pytest.raises(ValueError, match="Invalid quality flag condition"):
+            apply_qc_flags(self._df(), [QCFilter("PQF1", "=1")])
+
+    # A non-numeric threshold raises a clear error
+    def test_invalid_number_raises(self):
+        with pytest.raises(ValueError, match="Invalid quality flag condition"):
+            apply_qc_flags(self._df(), [QCFilter("PQF1", ">abc")])
+
+    # Whitespace around the operator and number is tolerated, as in SQL
+    def test_whitespace_tolerated(self):
+        result = apply_qc_flags(self._df(), [QCFilter("PQF1", " > 0 ")])
+        assert len(result) == 3
+
+    # Negative thresholds are parsed
+    def test_negative_threshold(self):
+        df = pd.DataFrame({"PQF1": [-2, -1, 0]})
+        assert len(apply_qc_flags(df, [QCFilter("PQF1", ">=-1")])) == 2
 
     # The returned DataFrame is independent of the input
     def test_returns_copy(self):
@@ -147,8 +214,6 @@ class TestApplyQcFlags:
 
 
 class TestFlagSalinityLikeOxygen:
-    _SP_TO_SA = 35.16504 / 35
-
     def _df(self):
         """Two genuine oxygen rows and one salinity value mislabelled as oxygen."""
         sp = 35.0
@@ -164,12 +229,18 @@ class TestFlagSalinityLikeOxygen:
         assert list(mask) == [False, False, True]
         assert "mislabelled salinity" in caplog.text
 
-    # SA (Absolute Salinity) is used instead of Practical Salinity when present
-    def test_sa_column_preferred_over_salinity(self):
+    # Only exact copies are flagged by default
+    def test_float_noise_needs_tolerance(self):
         df = self._df()
-        df["SA"] = df["SALINITY"] * self._SP_TO_SA
-        mask = flag_salinity_like_oxygen(df)
-        assert list(mask) == [False, False, True]
+        df.loc[2, "OXYGEN"] += 1e-9
+        assert not flag_salinity_like_oxygen(df).any()
+        assert list(flag_salinity_like_oxygen(df, tol=1e-6)) == [False, False, True]
+
+    # A value that is merely close is not flagged
+    def test_close_but_not_identical_not_flagged(self):
+        df = self._df()
+        df.loc[2, "OXYGEN"] = 35.0 * 35.16504 / 35
+        assert not flag_salinity_like_oxygen(df).any()
 
     # Column detection is case-insensitive
     def test_lowercase_salinity_column(self):
@@ -195,13 +266,19 @@ class TestFlagSalinityLikeOxygen:
         with pytest.raises(ValueError, match="OXYGEN"):
             flag_salinity_like_oxygen(pd.DataFrame({"SALINITY": [35.0]}))
 
-    # A salinity column (SA or SALINITY) is required
+    # A salinity column is required
     def test_missing_salinity_column_raises(self):
         with pytest.raises(ValueError, match="SALINITY"):
             flag_salinity_like_oxygen(pd.DataFrame({"OXYGEN": [250.0]}))
 
-    # min_diff/max_diff narrow or widen the matching range
-    def test_custom_range(self):
+    # tol widens the matching range: a 0.0005 difference is only flagged with a larger tol
+    def test_custom_tolerance(self):
         df = self._df()
-        mask = flag_salinity_like_oxygen(df, min_diff=1.0, max_diff=2.0)
-        assert not mask.any()
+        df.loc[2, "OXYGEN"] += 0.0005
+        assert not flag_salinity_like_oxygen(df).any()
+        assert list(flag_salinity_like_oxygen(df, tol=1e-3)) == [False, False, True]
+
+    # Negative tolerance raises
+    def test_negative_tolerance_raises(self):
+        with pytest.raises(ValueError, match="tol"):
+            flag_salinity_like_oxygen(self._df(), tol=-1.0)

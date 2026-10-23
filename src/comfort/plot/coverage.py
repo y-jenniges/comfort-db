@@ -135,6 +135,10 @@ def count_samples_over_time(
     temp[date_column] = pd.to_datetime(temp[date_column])
 
     if time_mode == "year":
+        # No dated rows -> No year range to count over
+        if temp[date_column].dropna().empty:
+            return pd.DataFrame(columns=["YEAR", "COUNT"])
+
         # Get min/max years
         min_y = temp[date_column].dt.year.min()
         max_y = temp[date_column].dt.year.max()
@@ -427,10 +431,9 @@ def count_negative_samples(
         })
 
     # Compute proportions and sort for display
-    df = pd.DataFrame(rows)
-    df["proportion of negative samples"] = (
-        df["number of negative samples"] / df["number of samples"] * 100
-    )
+    df = pd.DataFrame(rows, columns=["parameter", "number of samples", "number of negative samples"])
+    df["proportion of negative samples"] = df["number of negative samples"] / df["number of samples"] * 100
+
     return df.sort_values("proportion of negative samples")
 
 
@@ -490,7 +493,8 @@ def detect_and_plot_spatiotemporal_duplicates(
         dpi: Resolution (dots per inch) used when saving.
 
     Returns:
-        Summary DataFrame (empty if no duplicates found).
+        Summary DataFrame with columns ``[parameter, number of samples, number of row duplicates,
+        number of time loc duplicates, proportion of row duplicates, proportion of time loc duplicates]``.
     """
     cursor = conn.cursor()
     quality_statement = build_where_clause(quality_flags)
@@ -559,7 +563,11 @@ def detect_and_plot_spatiotemporal_duplicates(
         plt.close()
 
     if not rows:
-        return pd.DataFrame()
+        # Return empty dataframe
+        return pd.DataFrame(columns=[
+            "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
+            "proportion of row duplicates", "proportion of time loc duplicates",
+        ])
 
     # Compute duplicate proportions
     df = pd.DataFrame(rows)

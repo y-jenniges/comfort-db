@@ -45,8 +45,67 @@ class TestConversionFormulas:
         df = pd.DataFrame({"VAL": [2.0], "UNITS_ID": [7]})
         with caplog.at_level(logging.WARNING):
             density = formulas.real_density(df, use_density=True)
-        assert density == 1.025
-        assert "constant density" in caplog.text
+        assert (density == 1.025).all()  # density fell back to constant
+        assert "1 of 1 rows undefined" in caplog.text  # undefined density count is logged
+        assert "constant density" in caplog.text  # density policy is logged
+
+    @staticmethod
+    def _ts_frame(salinity):
+        return pd.DataFrame({
+            "VAL": [2.0] * len(salinity), "UNITS_ID": [7] * len(salinity),
+            "salinity": salinity, "LATITUDE": [45.0] * len(salinity),
+            "LONGITUDE": [-30.0] * len(salinity),
+        })
+
+    # NaN salinity rows get the constant (default density policy), computed rows are untouched, counts logged
+    def test_density_nan_rows_use_constant_and_log_count(self, formulas, caplog):
+        df = self._ts_frame([35.0, np.nan, 34.0])
+        with caplog.at_level(logging.WARNING):
+            # Warning is logged that density falls back to constant
+            density = formulas.lab_density(df, use_density=True)
+        assert density.iloc[1] == 1.025  # constant density for nan-salinity row
+        assert density.iloc[0] != 1.025 and density.iloc[2] != 1.025  # not-constant density for not-nan-salinity rows
+        assert "1 of 3 rows undefined" in caplog.text  # counts are logged
+
+    # density_fallback='drop' removes rows without a density from the conversion
+    def test_density_fallback_drop_removes_rows(self, formulas):
+        df = self._ts_frame([35.0, np.nan, 34.0])
+        result = formulas.millimolPerLiter_micromolPerKilogram(
+            df, "P_DIC", use_density=True, density_fallback="drop")
+        assert list(result.index) == [0, 2]  # index is not changed
+        assert result["VAL"].notna().all()  # no nan-values
+
+    # density_fallback='drop' with a missing column removes every row
+    def test_density_fallback_drop_missing_column_removes_all(self, formulas):
+        df = pd.DataFrame({"VAL": [2.0], "UNITS_ID": [7]})
+        result = formulas.millimolPerLiter_micromolPerKilogram(
+            df, "P_DIC", use_density=True, density_fallback="drop")
+        assert result.empty
+
+    # density_fallback='raise' fails on NaN rows and on missing columns
+    def test_density_fallback_raise(self, formulas):
+        with pytest.raises(ValueError, match="1 of 2 rows undefined"):
+            formulas.lab_density(self._ts_frame([35.0, np.nan]), True, "raise")
+        with pytest.raises(ValueError, match="columns missing"):
+            formulas.lab_density(pd.DataFrame({"VAL": [1.0]}), True, "raise")
+
+    # Complete inputs never trigger the fallback, whatever the policy
+    def test_density_fallback_irrelevant_when_inputs_complete(self, formulas):
+        df = self._ts_frame([35.0, 34.0])
+        expected = formulas.lab_density(df, True)
+        for policy in ("constant", "drop", "raise"):
+            assert formulas.lab_density(df, True, policy).equals(expected)
+
+    # The constant mode (use_density=False) is independent of the policy
+    def test_density_fallback_ignored_without_use_density(self, formulas):
+        df = pd.DataFrame({"VAL": [1.0]})
+        for policy in ("constant", "drop", "raise"):
+            assert formulas.lab_density(df, False, policy) == 1.025
+
+    # Unknown policies are rejected
+    def test_density_fallback_invalid_raises(self, formulas):
+        with pytest.raises(ValueError, match="density_fallback"):
+            formulas.lab_density(pd.DataFrame({"VAL": [1.0]}), True, "bogus")
 
     # App. C lab_dens: Sample S, T = 22 °C, atmospheric pressure (p = 0)
     def test_lab_density_uses_22C_at_surface(self, formulas):
@@ -105,6 +164,29 @@ class TestConvertDataframe:
         result = uc.convert_dataframe(df, "P_OXYGEN")
         assert result.equals(df)
 
+    # density_fallback is threaded through convert_dataframe (DIC mmol/L -> umol/kg, UNITS_ID 7 -> 3)
+    def test_density_fallback_policies(self):
+        uc = _make_converter(table="P_DIC")
+        df = pd.DataFrame({"VAL": [2.0, 2.0], "UNITS_ID": [7, 7], "salinity": [35.0, np.nan],
+                           "LATITUDE": [45.0, 45.0], "LONGITUDE": [-30.0, -30.0]})
+
+        # Constant density policy
+        constant = uc.convert_dataframe(df, "P_DIC", use_density=True)
+        assert np.isclose(constant["VAL"].iloc[1], 2.0 * 1000 / 1.025)  # constand density due to missing salinity
+        assert not np.isclose(constant["VAL"].iloc[0], 2.0 * 1000 / 1.025)  # density should have been computed
+
+        # Drop nan-densities policy
+        dropped = uc.convert_dataframe(df, "P_DIC", use_density=True, density_fallback="drop")
+        assert list(dropped.index) == [0]
+
+        # Error raising
+        with pytest.raises(ValueError, match="undefined"):
+            # On un-computable density
+            uc.convert_dataframe(df, "P_DIC", use_density=True, density_fallback="raise")
+        with pytest.raises(ValueError, match="density_fallback"):
+            # On unknown density policy
+            uc.convert_dataframe(df, "P_DIC", density_fallback="bogus")
+
     # Percent saturation converts to µmol/kg using lowercase T/S columns
     def test_percent_with_ts_converts(self):
         uc = _make_converter()
@@ -146,6 +228,54 @@ class TestConvertDataframe:
 
         assert np.isclose(result["VAL"].iloc[0], expected)
         assert not np.isclose(result["VAL"].iloc[0], approx_with_insitu_t)
+
+    @staticmethod
+    def _saturation_frame(**extra):
+        data = {"VAL": [80.0], "UNITS_ID": [10], "salinity": [35.0], "temperature": [10.0], "LATITUDE": [45.0], "LONGITUDE": [-30.0]}
+        data.update({k: [v] for k, v in extra.items()})
+        return pd.DataFrame(data)
+
+    # Without LEV_DBAR, pressure is derived from depth (LEV_M, positive down) and latitude
+    def test_percent_pressure_from_depth(self):
+        uc = _make_converter()
+        from_depth = uc.convert_dataframe(self._saturation_frame(LEV_M=1000.0), "P_OXYGEN")
+        pressure = float(gsw.p_from_z(-1000.0, 45.0))
+        from_pressure = uc.convert_dataframe(self._saturation_frame(LEV_DBAR=pressure), "P_OXYGEN")
+        # Depth- and pressure-based conversions are similar
+        assert np.isclose(from_depth["VAL"].iloc[0], from_pressure["VAL"].iloc[0])
+
+    # An explicit LEV_DBAR is selected over LEV_M
+    def test_percent_lev_dbar_takes_precedence_over_depth(self):
+        uc = _make_converter()
+        both = uc.convert_dataframe(self._saturation_frame(LEV_DBAR=2000.0, LEV_M=10.0), "P_OXYGEN")
+        only_pressure = uc.convert_dataframe(self._saturation_frame(LEV_DBAR=2000.0), "P_OXYGEN")
+        assert np.isclose(both["VAL"].iloc[0], only_pressure["VAL"].iloc[0])
+
+    # NaN LEV_DBAR rows are filled from LEV_M
+    def test_percent_nan_pressure_filled_from_depth(self):
+        uc = _make_converter()
+        pressure = float(gsw.p_from_z(-1000.0, 45.0))
+        df = pd.concat([self._saturation_frame(LEV_DBAR=np.nan, LEV_M=1000.0),
+                        self._saturation_frame(LEV_DBAR=pressure, LEV_M=1000.0)], ignore_index=True)
+        result = uc.convert_dataframe(df, "P_OXYGEN")
+        assert np.isclose(result["VAL"].iloc[0], result["VAL"].iloc[1])
+
+    # Neither pressure nor depth: In-situ T approximation with a warning
+    def test_percent_without_pressure_or_depth_warns(self, caplog):
+        uc = _make_converter()
+        with caplog.at_level(logging.WARNING):
+            result = uc.convert_dataframe(self._saturation_frame(), "P_OXYGEN")
+        assert "using in-situ temperature as an approximation" in caplog.text
+        expected = 80.0 * float(gsw.O2sol_SP_pt(35.0, 10.0)) / 100
+        assert np.isclose(result["VAL"].iloc[0], expected)
+
+    # A physically impossible negative depth does not crash gsw, the row is treated as not-convertible
+    def test_percent_negative_depth_row_is_unconvertible(self):
+        uc = _make_converter()
+        df = pd.concat([self._saturation_frame(LEV_M=100.0),
+                        self._saturation_frame(LEV_M=-50.0)], ignore_index=True)
+        result = uc.convert_dataframe(df, "P_OXYGEN")
+        assert list(result.index) == [0]
 
     # Default on_missing="drop": A row needing T/S but missing it is dropped (logged)
     def test_percent_without_ts_dropped(self, caplog):
@@ -240,6 +370,118 @@ class TestConvertDataframe:
         df = pd.DataFrame({"VAL": [1.0], "UNITS_ID": [3]})
         with pytest.raises(ValueError, match="on_missing"):
             uc.convert_dataframe(df, "P_OXYGEN", on_missing="bogus")
+
+
+class TestParameterRestrictions:
+    """Conversions listed in allowed_parameters are only applied to those parameters."""
+
+    # Every restricted pair is a registered conversion (guards against typos in the registry)
+    def test_restricted_pairs_are_registered(self):
+        formulas = ConversionFormulas()
+        assert set(formulas.allowed_parameters) <= set(formulas.conversions)
+
+    # Checks for is_allowed
+    def test_is_allowed(self):
+        formulas = ConversionFormulas()
+        assert formulas.is_allowed(5, 3, "P_ALKALINITY")  # listed param
+        assert formulas.is_allowed(5, 3, "p_alkalinity")  # case-insensitive
+        assert not formulas.is_allowed(5, 3, "P_NITRATE")  # restricted pair (only for alkalinity)
+        assert formulas.is_allowed(12, 19, "P_ANYTHING")  # unrestricted pair
+
+    # on_missing="drop" (default) drops and logs entries of a parameter that a conversion was not written for
+    def test_disallowed_parameter_dropped(self, caplog):
+        uc = _make_converter(table="P_NITRATE")
+        df = pd.DataFrame({"VAL": [1.0, 2.0], "UNITS_ID": [21, 3]})
+        with caplog.at_level(logging.WARNING):
+            result = uc.convert_dataframe(df, "P_NITRATE")
+        assert list(result["VAL"]) == [2.0]
+        assert "not implemented for P_NITRATE" in caplog.text
+
+    # on_missing="keep" retains the rows with their original value and unit
+    def test_disallowed_parameter_kept(self):
+        uc = _make_converter(table="P_NITRATE")
+        df = pd.DataFrame({"VAL": [1.0], "UNITS_ID": [21]})
+        result = uc.convert_dataframe(df, "P_NITRATE", on_missing="keep")
+        assert result["VAL"].iloc[0] == 1.0
+        assert result["UNITS_ID"].iloc[0] == 21
+
+    # on_missing="raise" raises
+    def test_disallowed_parameter_raises(self):
+        uc = _make_converter(table="P_NITRATE")
+        df = pd.DataFrame({"VAL": [1.0], "UNITS_ID": [21]})
+        with pytest.raises(ValueError, match="no conversion"):
+            uc.convert_dataframe(df, "P_NITRATE", on_missing="raise")
+
+    # A mass concentration of a parameter without molar mass follows on_missing policy
+    def test_unknown_molar_mass_parameter_follows_on_missing(self):
+        uc = _make_converter(table="P_UNKNOWN_PARAM")
+        df = pd.DataFrame({"VAL": [1.0, 2.0], "UNITS_ID": [4, 3]})
+        assert list(uc.convert_dataframe(df, "P_UNKNOWN_PARAM")["VAL"]) == [2.0]
+        with pytest.raises(ValueError, match="no conversion"):
+            uc.convert_dataframe(df, "P_UNKNOWN_PARAM", on_missing="raise")
+
+
+class TestRequiredInputs:
+    """UnitsConverter.required_inputs tells load_comfort which co-located T/S to join."""
+
+    @staticmethod
+    def _converter():
+        # Dummy converters
+        tables = {"P_OXYGEN": 3, "P_CHLOROPHYLL": 14, "P_AMMONIUM": 14, "P_DIC": 3, "P_NITRATE": 3, "P_AOU": 3, "P_SALINITY": 2}
+        default_units = pd.DataFrame({"NAME_TABLE": list(tables), "UNITS_ID_DEFAULT": list(tables.values())})
+        units = pd.DataFrame({"ID": list(range(30)), "NAME_SHORT": [str(i) for i in range(30)]})
+        return UnitsConverter(connection=None, default_units=default_units, units=units)
+
+    # Oxygen % saturation always needs T and S (independent of density setting)
+    @pytest.mark.parametrize("use_density", [False, True])
+    def test_oxygen_needs_temperature_and_salinity(self, use_density):
+        assert self._converter().required_inputs("P_OXYGEN", use_density=use_density) == (True, True)
+
+    # Chlorophyll uses real_dens, which requires T and S (only with use_density)
+    def test_chlorophyll(self):
+        uc = self._converter()
+        assert uc.required_inputs("P_CHLOROPHYLL", use_density=False) == (False, False)
+        assert uc.required_inputs("P_CHLOROPHYLL", use_density=True) == (True, True)
+
+    # lab_dens parameters only need salinity (only with use_density)
+    @pytest.mark.parametrize("table", ["P_AMMONIUM", "P_DIC", "P_NITRATE"])
+    def test_lab_density_parameters(self, table):
+        uc = self._converter()
+        assert uc.required_inputs(table, False) == (False, False)
+        assert uc.required_inputs(table, True) == (False, True)
+
+    # No conversion into the default unit (or no default unit) needs nothing
+    @pytest.mark.parametrize("table", ["P_AOU", "P_SALINITY", "P_NOT_REGISTERED"])
+    @pytest.mark.parametrize("use_density", [False, True])
+    def test_parameters_without_conversion(self, table, use_density):
+        assert self._converter().required_inputs(table, use_density) == (False, False)
+
+    # The declared inputs match what the formulas really use:
+    # - With all inputs the computed density is used
+    # - Without a needed column the constant is used
+    # - Without an unneeded column nothing changes
+    @pytest.mark.parametrize("source,target,table", [
+        (5, 3, "P_ALKALINITY"), (7, 3, "P_DIC"), (4, 3, "P_NITRATE"),
+        (4, 14, "P_AMMONIUM"), (4, 14, "P_CHLOROPHYLL"), (21, 3, "P_OXYGEN"),
+    ])
+    def test_declared_inputs_match_formulas(self, source, target, table):
+        uc = _make_converter(default_unit=target, table=table)
+        full = pd.DataFrame({"VAL": [2.0], "UNITS_ID": [source], "salinity": [35.0], "temperature": [10.0],
+                             "LATITUDE": [45.0], "LONGITUDE": [-30.0]})
+        def convert(df, use_density):
+            # Conversion returning only first row
+            return float(uc.convert_dataframe(df, table, use_density=use_density)["VAL"].iloc[0])
+
+        # Conversion results with/without density differ (-> computed density is used)
+        constant = convert(full, use_density=False)
+        computed = convert(full, use_density=True)
+        assert not np.isclose(computed, constant)
+
+        # Conversion without T/S
+        declared = uc.formulas.t_s_inputs_needed(source, target, table, True)  # infer if T and/or S are needed
+        for column in ("temperature", "salinity"):
+            without = convert(full.drop(columns=column), use_density=True)  # no T/S conversion
+            assert np.isclose(without, constant if column in declared else computed)  # close to conversion without density (if T/S was required)
 
 
 class TestDefaultUnitName:

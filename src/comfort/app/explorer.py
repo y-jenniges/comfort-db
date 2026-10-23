@@ -42,15 +42,12 @@ try:
 except ImportError:
     load_dotenv = None
 
-from ..database.information import (
-    does_table_exist,
-    get_names_of_all_parameter_tables,
-)
+from ..database.information import get_names_of_all_parameter_tables
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
 
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # Database path, set by create_app()
 _db_path: str | None = None
@@ -621,7 +618,7 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
                     df = uc.convert_dataframe(df, f"P_{param}")
                     converted = True
                 except (ValueError, Exception) as e:
-                    _log.warning("Unit conversion skipped: %s", e)
+                    logger.warning("Unit conversion skipped: %s", e)
 
             # Station/cruise hover labels
             if "ST_NUMBER_ORIGIN" in df.columns:
@@ -636,7 +633,7 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
 
             conn.close()
         except Exception as e:
-            _log.exception("Scatter query failed")
+            logger.exception("Scatter query failed")
             return no_update, no_update, *no_slider, str(e), True
 
         if df.empty:
@@ -961,7 +958,7 @@ def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global,
         )
         conn.close()
     except Exception as e:
-        _log.exception("Grid query failed")
+        logger.exception("Grid query failed")
         return no_update, no_update, str(e), True
 
     if df.empty:
@@ -1193,7 +1190,6 @@ def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
     if _csv_cache["df"] is None or not param_col:
         raise PreventUpdate
 
-    depths = _csv_cache.get("depths", [])
     times = _csv_cache.get("times", [])
 
     # Resolve time slider index range to actual time values

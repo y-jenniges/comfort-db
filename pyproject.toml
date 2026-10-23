@@ -88,10 +88,6 @@ Documentation = "https://comfort-db.readthedocs.io/en/latest/"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# Include SQL scripts in the build
-[tool.setuptools.package-data]
-"comfort.database" = ["sql_scripts/*.sql"]
-
 # Test suite settings
 [tool.pytest.ini_options]
 testpaths = ["test"]  # test dir
