@@ -50,7 +50,7 @@ def plot_annual_coverage(
     ax, standalone = _get_or_create_ax(ax)
 
     # Iterate over parameter dfs
-    for name, df in dfs.items():
+    for parameter, df in dfs.items():
         # Per-year counts
         counts = pd.to_datetime(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
 
@@ -59,7 +59,7 @@ def plot_annual_coverage(
             counts = counts / counts.max()
 
         # Plot
-        label = name.capitalize() if name.isupper() else name
+        label = parameter.capitalize() if parameter.isupper() else parameter
         ax.plot(counts.index, counts.values, label=label, marker=".", markersize=3)
 
     # Labels and format

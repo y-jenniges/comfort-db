@@ -27,6 +27,7 @@ import pandas as pd
 
 from .profile_analysis import _empty_profile_frame, _resolve_profile_col, _profile_key_dict
 from .util.columns import find_col
+from .util.types import DensityQuantity, TemperatureTarget, check_choice
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def convert_salinity(sp: float | np.ndarray | pd.Series,
 def convert_temperature(t_insitu: float | np.ndarray | pd.Series,
                         sa: float | np.ndarray | pd.Series,
                         pressure: float | np.ndarray | pd.Series,
-                        to: str = "CT") -> pd.Series:
+                        to: TemperatureTarget = "CT") -> pd.Series:
     """Convert in-situ temperature to a TEOS-10 temperature variable.
 
     Args:
@@ -125,6 +126,8 @@ def convert_temperature(t_insitu: float | np.ndarray | pd.Series,
     Raises:
         ValueError: If ``to`` is not ``'CT'`` or ``'pt0'``.
     """
+    check_choice(to, TemperatureTarget, "to")
+
     # Prepare variables
     t = _to1d(t_insitu)
     sa_ = _to1d(sa)
@@ -133,15 +136,13 @@ def convert_temperature(t_insitu: float | np.ndarray | pd.Series,
     # Convert
     if to == "CT":
         return pd.Series(gsw.CT_from_t(sa_, t, p))
-    if to == "pt0":
-        return pd.Series(gsw.pt0_from_t(sa_, t, p))
-    raise ValueError(f"Unknown target {to!r}; choose 'CT' or 'pt0'")
+    return pd.Series(gsw.pt0_from_t(sa_, t, p))
 
 
 def compute_density(sa: float | np.ndarray | pd.Series,
                     ct: float | np.ndarray | pd.Series,
                     pressure: float | np.ndarray | pd.Series | None = None,
-                    quantity: str = "sigma0") -> pd.Series:
+                    quantity: DensityQuantity = "sigma0") -> pd.Series:
     """Compute seawater density or potential density anomaly (TEOS-10).
 
     Args:
@@ -160,6 +161,8 @@ def compute_density(sa: float | np.ndarray | pd.Series,
         ValueError: If ``quantity`` is unknown or pressure is missing
             for ``'rho'``.
     """
+    check_choice(quantity, DensityQuantity, "quantity")
+
     # Prepare variables
     sa_ = _to1d(sa)
     ct_ = _to1d(ct)
@@ -173,13 +176,9 @@ def compute_density(sa: float | np.ndarray | pd.Series,
         return pd.Series(gsw.sigma2(sa_, ct_))
 
     # Compute density from pressure
-    if quantity == "rho":
-        if pressure is None:
-            raise ValueError("pressure is required for quantity='rho'")
-        return pd.Series(gsw.rho(sa_, ct_, _to1d(pressure)))
-    raise ValueError(
-        f"Unknown quantity {quantity!r}; choose 'sigma0', 'sigma1', 'sigma2' or 'rho'"
-    )
+    if pressure is None:
+        raise ValueError("pressure is required for quantity='rho'")
+    return pd.Series(gsw.rho(sa_, ct_, _to1d(pressure)))
 
 
 def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,

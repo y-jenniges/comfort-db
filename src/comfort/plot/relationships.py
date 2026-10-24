@@ -21,6 +21,7 @@ from ..database.information import param_label, param_table_name
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
 from ..util.columns import find_col
+from ..util.types import JointKind, SalinityType, ScatterKind, TemperatureType, check_choice
 from ._helpers import _finish, _get_or_create_ax, _pretty_label, _save_fig
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ def plot_correlation(
     *,
     colour_col: str | None = None,
     cmap: str = "viridis",
-    kind: str = "scatter",
+    kind: ScatterKind = "scatter",
     gridsize: int = 40,
     regression: bool = True,
     annotate_r2: bool = True,
@@ -88,6 +89,8 @@ def plot_correlation(
 
     if x_col is None or y_col is None:
         raise ValueError("x_col and y_col are required")
+
+    check_choice(kind, ScatterKind, "kind")
 
     # Resolve column names (insensitive to casing)
     x_col = find_col(df, x_col)
@@ -163,7 +166,7 @@ def plot_joint(
     x_col: str | None = None,
     y_col: str | None = None,
     *,
-    kind: str = "hist",
+    kind: JointKind = "hist",
     conn: sqlite3.Connection | None = None,
     parameters: tuple[str, str] | None = None,
     quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
@@ -194,6 +197,8 @@ def plot_joint(
 
     if x_col is None or y_col is None:
         raise ValueError("x_col and y_col are required")
+
+    check_choice(kind, JointKind, "kind")
 
     # Resolve column names (insensitive to casing)
     x_col = find_col(df, x_col)
@@ -262,15 +267,15 @@ def plot_ts_diagram(
     temperature_col: str,
     salinity_col: str,
     *,
-    temperature_type: str = "CT",
-    salinity_type: str = "SA",
+    temperature_type: TemperatureType = "CT",
+    salinity_type: SalinityType = "SA",
     colour_col: str | None = None,
     depth_col: str = "LEV_M",
     cmap: str = "viridis_r",
     colourbar_label: str | None = None,
     density_contours: bool = True,
     contour_levels: int | list[float] | None = None,
-    kind: str = "scatter",
+    kind: ScatterKind = "scatter",
     gridsize: int = 40,
     marker_size: float = 9,
     alpha: float = 0.6,
@@ -325,6 +330,10 @@ def plot_ts_diagram(
     Returns:
         The matplotlib Axes, or ``None`` when the data is empty.
     """
+    check_choice(kind, ScatterKind, "kind")
+    check_choice(temperature_type, TemperatureType, "temperature_type")
+    check_choice(salinity_type, SalinityType, "salinity_type")
+
     # Resolve column names (insensitive to casing)
     temperature_col = find_col(df, temperature_col)
     salinity_col = find_col(df, salinity_col)

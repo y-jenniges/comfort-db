@@ -17,6 +17,7 @@ import pandas as pd
 import seaborn as sns
 
 from ..util.columns import find_col
+from ..util.types import BoxKind, check_choice
 from ._helpers import _finish, _get_or_create_ax, _resolve_data, _save_fig
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ def boxplot(
     df: pd.DataFrame | None = None,
     value_col: str = "VAL",
     *,
-    kind: str = "box",
+    kind: BoxKind = "box",
     title: str | None = None,
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
@@ -60,6 +61,7 @@ def boxplot(
     Returns:
         The matplotlib Axes.
     """
+    check_choice(kind, BoxKind, "kind")
     df = _resolve_data(df, conn, parameter, quality_flags)
 
     # Resolve column names (insensitive to casing)

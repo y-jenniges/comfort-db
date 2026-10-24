@@ -68,12 +68,12 @@ DEPTH_INTERVALS = np.array([0, 50, 100, 200, 300, 400, 500, 1000, 1500, 2000, 30
 GRID_DEG = 1
 
 
-def _save_path(output_dir: str, name: str) -> str | None:
+def _save_path(output_dir: str, filename: str) -> str | None:
     """Build a save path, or return None if no output directory is set."""
     if not output_dir:
         return None
     os.makedirs(output_dir, exist_ok=True)
-    return os.path.join(output_dir, name)
+    return os.path.join(output_dir, filename)
 
 
 def main():
@@ -97,7 +97,7 @@ def main():
             lon_min=LON_MIN, lon_max=LON_MAX,
             lat_min=LAT_MIN, lat_max=LAT_MAX,
             depth_max=DEPTH_MAX,
-            convert_units=True, use_density=True, as_xarray=False,
+            convert_units=True, use_density=True, output="dict",
         )
         for param in PARAMETERS:
             log.info("  %-15s %10d rows", param, len(raw[param]))
@@ -234,10 +234,10 @@ def main():
             ("P_TEMPERATURE", "P_OXYGEN"),
             ("P_NITRATE", "P_PHOSPHATE"),
         ]:
-            name = f"corr_{x_col.replace('P_', '')}_{y_col.replace('P_', '')}"
+            plot_name = f"corr_{x_col.replace('P_', '')}_{y_col.replace('P_', '')}"
             plot_correlation(
                 df_wide, x_col=x_col, y_col=y_col, colour_col="LEV_M",
-                save_as=_save_path(output_dir, f"{name}.png"),
+                save_as=_save_path(output_dir, f"{plot_name}.png"),
             )
             plt.close()
 

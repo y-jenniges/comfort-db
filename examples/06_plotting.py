@@ -54,7 +54,7 @@ if __name__ == "__main__":
             conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"],
             quality_flags=comfort.QC_GOOD,
             lon_min=-30, lon_max=0, lat_min=45, lat_max=65,
-            as_xarray=False, convert_units=True
+            output="dict", convert_units=True
         )
         # Check oxygen default unit (for plotting)
         oxygen_unit = UnitsConverter.from_connection(conn).default_unit_name("P_OXYGEN")
@@ -72,9 +72,9 @@ if __name__ == "__main__":
     df_t, df_s, df_o = averaged["TEMPERATURE"], averaged["SALINITY"], averaged["OXYGEN"]
 
     # Print profile stats
-    for name, df in [("TEMPERATURE", df_t), ("SALINITY", df_s), ("OXYGEN", df_o)]:
+    for parameter, df in [("TEMPERATURE", df_t), ("SALINITY", df_s), ("OXYGEN", df_o)]:
         n_prof = df[["ID", "PROFILE_NUMBER"]].drop_duplicates().shape[0]
-        print(f"  {name}: {len(df)} rows, {n_prof} profiles")
+        print(f"  {parameter}: {len(df)} rows, {n_prof} profiles")
     print()
 
     # Merge T + S and T + O for multi-parameter plots

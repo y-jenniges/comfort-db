@@ -30,6 +30,7 @@ from .database.information import get_names_of_all_parameter_tables, param_label
 from .geo import region_bbox, water_mass_masks
 from .qc import QCFilter, build_where_clause, qc_conditions
 from .util.sqlite_utils import validate_identifier
+from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
     Returns:
         list[str]: Parameter names, e.g. ``['NITRATE', 'OXYGEN', ...]``.
     """
-    return [param_label(name) for name in get_names_of_all_parameter_tables(conn)]
+    return [param_label(table_name) for table_name in get_names_of_all_parameter_tables(conn)]
 
 
 def read_parameter(conn: sqlite3.Connection, parameter: str, *,
@@ -479,12 +480,12 @@ def load_comfort(
         region_name_col: str = "name",
         target_depths: np.ndarray | list[float] | None = None,
         max_gap: float | None = None,
-        interp_method: str = "pchip",
-        as_xarray: bool = True,
+        interp_method: InterpMethod = "pchip",
+        output: LoadOutput = "xarray",
         convert_units: bool = False,
         use_density: bool = False,
-        on_missing: str = "drop",
-        density_fallback: str = "constant",
+        on_missing: OnMissing = "drop",
+        density_fallback: DensityFallback = "constant",
         limit: int | None = None,
 ) -> xr.Dataset | dict[str, pd.DataFrame]:
     """Load COMFORT data into a filtered xarray Dataset or dict of DataFrames.
@@ -530,8 +531,8 @@ def load_comfort(
             :func:`~comfort.profile_analysis.interpolate_depth_levels`:
             ``"pchip"`` (default) or ``"linear"``. Ignored when
             *target_depths* is ``None``.
-        as_xarray (bool): ``True`` returns ``xr.Dataset``, ``False`` returns
-            ``dict[parameter, pandas.DataFrame]``.
+        output (str): ``"xarray"`` (default) returns an ``xr.Dataset``, ``"dict"``
+            returns ``dict[parameter, pandas.DataFrame]``.
         convert_units (bool): When ``True``, convert each parameter's values
             to its default unit using :class:`comfort.units.UnitsConverter`.
         use_density (bool): When ``True`` and ``convert_units=True``, use
@@ -554,11 +555,17 @@ def load_comfort(
         xarray.Dataset or dict[str, pandas.DataFrame].
         For the dict path each DataFrame has the measurement column named
         after the parameter (e.g. ``"NITRATE"``), not ``"VAL"``.
-        For the scattered xarray path (``as_xarray=True,
+        For the scattered xarray path (``output="xarray",
         target_depths=None``), each parameter's coordinates are prefixed
         with its name (e.g. ``NITRATE_depth``, ``NITRATE_latitude``) since
         different parameters have independent observation dimensions.
     """
+    # Fail early on unknown options
+    check_choice(output, LoadOutput, "output")
+    check_choice(interp_method, InterpMethod, "interp_method")
+    check_choice(on_missing, OnMissing, "on_missing")
+    check_choice(density_fallback, DensityFallback, "density_fallback")
+
     # Collect geo/temporal filter arguments (the region bounding box is ANDed with the explicit bounds in SQL)
     geo_kwargs = dict(
         lon_min=lon_min, lon_max=lon_max,
@@ -616,14 +623,14 @@ def load_comfort(
     if not dfs:
         # No data was found
         logger.warning("load_comfort: No data found for the given filters")
-        if as_xarray:
+        if output == "xarray":
             import xarray as xr
             return xr.Dataset()
         return {}
 
     # Return each profile at its native measured depths (if no target_depths given)
     if target_depths is None:
-        if not as_xarray:
+        if output == "dict":
             return dfs
         return _build_scattered_dataset(dfs, lookups=lookups, param_unit_ids=_param_unit_ids)
 
@@ -633,7 +640,7 @@ def load_comfort(
         param: interpolate_depth_levels(df, depths, value_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
         for param, df in dfs.items()
     }
-    if not as_xarray:
+    if output == "dict":
         # Return dfs
         return interp_dfs
 

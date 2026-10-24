@@ -43,7 +43,7 @@ if __name__ == "__main__":
             conn, parameters=["TEMPERATURE", "SALINITY"],
             quality_flags=comfort.QC_GOOD,
             lon_min=-30, lon_max=-20, lat_min=45, lat_max=55,
-            as_xarray=False,
+            output="dict",
         )
 
     # Average duplicates and merge T + S on (station, profile, depth)

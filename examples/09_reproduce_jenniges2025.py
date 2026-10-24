@@ -102,7 +102,7 @@ def main():
             lon_min=LON_MIN, lon_max=LON_MAX,
             lat_min=LAT_MIN, lat_max=LAT_MAX,
             depth_max=DEPTH_MAX,
-            convert_units=True, use_density=True, as_xarray=False,
+            convert_units=True, use_density=True, output="dict",
         )
         for param in PARAMETERS:
             log.info("  %-15s %10d rows", param, len(raw[param]))

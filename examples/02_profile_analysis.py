@@ -41,7 +41,7 @@ if __name__ == "__main__":
             conn, parameters=["TEMPERATURE", "SALINITY"],
             quality_flags=comfort.QC_GOOD,
             lon_min=-30, lon_max=0, lat_min=45, lat_max=65,
-            as_xarray=False,
+            output="dict",
         )
 
     # Average duplicates

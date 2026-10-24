@@ -443,7 +443,7 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     for _, row in df.iterrows():
         # Containment test
         pt = Point(row[lon_col], row[lat_col])
-        match = next((name for name, poly in named_regions if poly.intersects(pt)), None)
+        match = next((region_name for region_name, poly in named_regions if poly.intersects(pt)), None)
         labels.append(match)
 
     # Assemble final df
@@ -534,7 +534,7 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
     named_regions = _parse_regions(regions, region_name_col)
 
     # Filter for the requested regions
-    selected = {name: poly for name, poly in named_regions if name in names}
+    selected = {region_name: poly for region_name, poly in named_regions if region_name in names}
 
     # Raise if a region name was not found
     missing = set(names) - set(selected)
@@ -546,7 +546,7 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
 
 def _check_lonlat(named_regions):
     """Raise ValueError if any region coordinate is outside lon/lat range."""
-    for name, poly in named_regions:
+    for region_name, poly in named_regions:
         # Skip empt polygons
         if poly.is_empty:
             continue
@@ -557,7 +557,7 @@ def _check_lonlat(named_regions):
         # Check if bounds are valid
         if lon_min < -180 or lon_max > 360 or lat_min < -90 or lat_max > 90:
             raise ValueError(
-                f"Region {name!r} has coordinates outside lon/lat range (bounds "
+                f"Region {region_name!r} has coordinates outside lon/lat range (bounds "
                 f"{poly.bounds}); regions must be in degrees. For a GeoDataFrame with an "
                 "unknown CRS, set it first with gdf.set_crs(...)."
             )
@@ -585,9 +585,9 @@ def _parse_regions(regions, region_name_col):
     # Regions as dict
     if isinstance(regions, dict):
         result = []
-        for name, geom in regions.items():
+        for region_name, geom in regions.items():
             poly = geom if hasattr(geom, "contains") else Polygon(geom)
-            result.append((name, poly))
+            result.append((region_name, poly))
         return _check_lonlat(result)
 
     # Regions as CSV

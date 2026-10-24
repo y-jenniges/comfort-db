@@ -288,10 +288,10 @@ class TestFindSpatiotemporalDuplicates:
 
 class TestParamNames:
     # Case and a P_ prefix do not matter
-    @pytest.mark.parametrize("name", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate", " Nitrate "])
-    def test_spellings(self, name):
-        assert param_label(name) == "NITRATE"
-        assert param_table_name(name) == "P_NITRATE"
+    @pytest.mark.parametrize("spelling", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate", " Nitrate "])
+    def test_spellings(self, spelling):
+        assert param_label(spelling) == "NITRATE"
+        assert param_table_name(spelling) == "P_NITRATE"
 
     # Only a leading prefix is stripped
     def test_inner_p_is_kept(self):
@@ -299,7 +299,7 @@ class TestParamNames:
         assert param_label("p_ph") == "PH"
 
     # All spellings count the same samples
-    @pytest.mark.parametrize("name", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
-    def test_count_functions_accept_all_spellings(self, comfort_conn, name):
-        assert list(count_samples_per_parameter(comfort_conn, [name])["parameter"]) == ["NITRATE"]
-        assert count_samples_over_time(comfort_conn, name)["COUNT"].sum() == 3
+    @pytest.mark.parametrize("spelling", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
+    def test_count_functions_accept_all_spellings(self, comfort_conn, spelling):
+        assert list(count_samples_per_parameter(comfort_conn, [spelling])["parameter"]) == ["NITRATE"]
+        assert count_samples_over_time(comfort_conn, spelling)["COUNT"].sum() == 3

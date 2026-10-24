@@ -30,6 +30,7 @@ from dateutil.relativedelta import relativedelta
 
 from .util import sqlite_utils
 from .util.columns import find_col, resolve_param_columns
+from .util.types import Aggregation, GridMode, check_choice
 from .util.sqlite_utils import validate_identifier
 from .database.information import (
     does_table_exist, get_names_of_all_parameter_tables, get_table_as_df, param_table_name,
@@ -72,13 +73,10 @@ class Grid:
     ``mode``, ``dtime``) are given. Leave all of them as None for a purely spatial grid.
     """
 
-    # Time modes
-    _VALID_MODES = ["Y", "M", "D", "YM", "YD", "MD"]
-
     def __init__(self, *, lon_min=-180, lon_max=180, dlon=1, lat_min=-90, lat_max=90, dlat=1,
                  bathymetry_grid_path=None,
                  z_min=None, z_max=None, dz=None, z_array=None,
-                 time_min=None, time_max=None, mode=None, dtime=None, selection=None,
+                 time_min=None, time_max=None, mode: GridMode | None = None, dtime=None, selection=None,
                  lon_variable="lon", lat_variable="lat", depth_variable="elevation",
                  grid_id=None):
         """
@@ -136,7 +134,7 @@ class Grid:
         """Consistency checks for time input."""
         # Time parameters are all-or-nothing
         time_params = {"time_min": self.time_min, "time_max": self.time_max, "mode": self.mode, "dtime": self.dtime}
-        missing = [name for name, val in time_params.items() if val is None]
+        missing = [param for param, val in time_params.items() if val is None]
         if len(missing) == len(time_params):
             # No time axis, so a time selection has nothing to select from
             if self.selection is not None:
@@ -153,8 +151,7 @@ class Grid:
             raise ValueError("dtime must be >= 1")
 
         # Valid modes
-        if self.mode not in self._VALID_MODES:
-            raise ValueError(f"mode must be one of {self._VALID_MODES}")
+        check_choice(self.mode, GridMode, "mode")
 
         # Type of selection object
         if self.selection is not None and not isinstance(self.selection, (np.ndarray, list)):
@@ -236,9 +233,9 @@ class Grid:
         }
 
         # Check if all params are specified
-        for name, val in required.items():
+        for param, val in required.items():
             if val is None:
-                raise ValueError(f"Grid parameter {name!r} must not be None")
+                raise ValueError(f"Grid parameter {param!r} must not be None")
 
         # Check min/max values for longitude and latitude
         if not (-180 <= self.lon_min <= 180) or not (-180 <= self.lon_max <= 180):
@@ -379,7 +376,7 @@ class Grid:
         df = pd.DataFrame(cur.fetchall(), columns=np.array([x[0] for x in cur.description]))
         return df if self.has_time else df.drop(columns="DATEANDTIME")
 
-    def bin_space(self, df: pd.DataFrame, value_col: str | None = None, agg: None | str | list[str]=None) -> pd.DataFrame:
+    def bin_space(self, df: pd.DataFrame, value_col: str | None = None, agg: Aggregation | None = None) -> pd.DataFrame:
         """Bin LONGITUDE/LATITUDE/LEV_M in *df* onto this grid's cell centres.
 
         Usable for data already in memory (e.g. after
@@ -416,7 +413,7 @@ class Grid:
         grouped[value_col] = grouped[value_col].astype(float)
         return grouped
 
-    def map_dataframes(self, dfs: dict[str, pd.DataFrame], agg="mean",
+    def map_dataframes(self, dfs: dict[str, pd.DataFrame], agg: Aggregation = "mean",
                        bin_fn=None, dropping_land_cells: bool = True) -> pd.DataFrame:
         """Turn a dict of per-parameter DataFrames into one wide grid table.
 
@@ -455,10 +452,10 @@ class Grid:
                       if c in df_wide.columns]
 
         # Successively merge each binned parameter onto the grid
-        for name, df in dfs.items():
-            # Rename the value column to P_<name> (casing and P_ prefix of the column do not matter)
-            col = param_table_name(name)
-            df = df.rename(columns={resolve_param_columns(df, name)[0]: col})
+        for parameter, df in dfs.items():
+            # Rename the value column to P_<parameter> (casing and P_ prefix of the column do not matter)
+            col = param_table_name(parameter)
+            df = df.rename(columns={resolve_param_columns(df, parameter)[0]: col})
             # Binning
             binned = bin_fn(df, col)
             # Left-merge on grid
@@ -540,7 +537,7 @@ class Grid:
 
         return df
 
-    def bin_time(self, df: pd.DataFrame, value_col: str, agg="mean") -> pd.DataFrame:
+    def bin_time(self, df: pd.DataFrame, value_col: str, agg: Aggregation = "mean") -> pd.DataFrame:
         """Bin DATEANDTIME in *df* onto this grid's time steps and aggregate *value_col*.
 
         LATITUDE/LONGITUDE/LEV_M must already be snapped to grid cell centres (e.g. by calling ``bin_space`` first).
@@ -571,7 +568,7 @@ class Grid:
         grouped["DATEANDTIME"] = grouped["DATEANDTIME"].astype(str)
         return grouped
 
-    def bin(self, df: pd.DataFrame, value_col: str, agg: str | list[str] ="mean") -> pd.DataFrame:
+    def bin(self, df: pd.DataFrame, value_col: str, agg: Aggregation = "mean") -> pd.DataFrame:
         """Bin *df* onto this grid's spatial cells and time steps, aggregating
         *value_col* per cell. Usable for data already in memory (e.g. after ``load_comfort``).
 
@@ -834,9 +831,9 @@ class GridManager:
             self.connection.execute(f"DELETE FROM {self.grid_info_table} WHERE grid_id=?;", (grid_id,))
 
             # Drop all mapped parameter tables
-            for name in to_drop:
-                validate_identifier(name)
-                self.connection.execute(f"DROP TABLE {name};")
+            for table_name in to_drop:
+                validate_identifier(table_name)
+                self.connection.execute(f"DROP TABLE {table_name};")
             self.connection.commit()
         except Exception:
             self.connection.rollback()

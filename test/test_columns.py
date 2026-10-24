@@ -11,9 +11,9 @@ class TestFindCol:
         assert find_col(pd.DataFrame({"VAL": [1]}), "VAL") == "VAL"
 
     # Another casing finds the column under its own spelling
-    @pytest.mark.parametrize("name", ["val", "Val", "vAl"])
-    def test_other_casing(self, name):
-        assert find_col(pd.DataFrame({"VAL": [1]}), name) == "VAL"
+    @pytest.mark.parametrize("spelling", ["val", "Val", "vAl"])
+    def test_other_casing(self, spelling):
+        assert find_col(pd.DataFrame({"VAL": [1]}), spelling) == "VAL"
 
     # An exact match wins over a case-variant of the same name
     def test_exact_wins_over_variant(self):
@@ -50,13 +50,13 @@ class TestResolveParamColumns:
     df = pd.DataFrame({"P_NITRATE": [1.0], "OXYGEN": [2.0]})
 
     # Any spelling finds the P_* column or the bare column
-    @pytest.mark.parametrize("name", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
-    def test_spellings_find_prefixed_column(self, name):
-        assert resolve_param_columns(self.df, name) == ["P_NITRATE"]
+    @pytest.mark.parametrize("spelling", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
+    def test_spellings_find_prefixed_column(self, spelling):
+        assert resolve_param_columns(self.df, spelling) == ["P_NITRATE"]
 
-    @pytest.mark.parametrize("name", ["OXYGEN", "oxygen", "P_OXYGEN", "p_oxygen"])
-    def test_spellings_find_bare_column(self, name):
-        assert resolve_param_columns(self.df, [name]) == ["OXYGEN"]
+    @pytest.mark.parametrize("spelling", ["OXYGEN", "oxygen", "P_OXYGEN", "p_oxygen"])
+    def test_spellings_find_bare_column(self, spelling):
+        assert resolve_param_columns(self.df, [spelling]) == ["OXYGEN"]
 
     # The order of the request is kept
     def test_order(self):

@@ -52,7 +52,7 @@ if __name__ == "__main__":
             lon_min=-80, lon_max=0,
             lat_min=20, lat_max=65,
             depth_max=100,
-            as_xarray=False,
+            output="dict",
             convert_units=True,
         )
     df = dfs["NITRATE"]
@@ -167,7 +167,7 @@ if __name__ == "__main__":
                 parameters=["NITRATE"],
                 quality_flags=comfort.QC_GOOD,
                 region=select_regions(basins_path, basin_name),
-                as_xarray=False,
+                output="dict",
             )
         print(f"{basin_name}: {len(basin_dfs['NITRATE'])} NITRATE rows")
 

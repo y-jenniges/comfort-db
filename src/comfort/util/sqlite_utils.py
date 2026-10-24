@@ -30,16 +30,16 @@ def vacuum(conn: sqlite3.Connection) -> None:
         logger.warning("VACUUM failed: %s", e)
 
 
-def validate_identifier(name: str) -> None:
-    """Raise ValueError if *name* is not a safe SQL identifier.
+def validate_identifier(identifier: str) -> None:
+    """Raise ValueError if *identifier* is not a safe SQL identifier.
 
     Accepts only ASCII letters, digits, and underscores (must start with
     a letter or underscore). Use this on any externally-supplied table or
     column name before interpolating it into a SQL string.
     """
-    if not isinstance(name, str) or not _IDENTIFIER_RE.match(name):
+    if not isinstance(identifier, str) or not _IDENTIFIER_RE.match(identifier):
         raise ValueError(
-            f"Invalid SQL identifier: {name!r}. "
+            f"Invalid SQL identifier: {identifier!r}. "
             "Only letters, digits, and underscores are allowed."
         )
 

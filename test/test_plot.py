@@ -170,7 +170,7 @@ class TestPlotTSDiagram:
     # TEOS-10 variables (SA/CT) draw isopycnal contours
     def test_with_density_contours(self, demo_conn):
         dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY"],
-                                   as_xarray=False)
+                                   output="dict")
         df = dfs["TEMPERATURE"].rename(columns={"TEMPERATURE": "T"})
         df["S"] = dfs["SALINITY"]["SALINITY"].values
         ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="CT", salinity_type="SA")
@@ -180,7 +180,7 @@ class TestPlotTSDiagram:
     # density_contours=False skips the isopycnal overlay
     def test_without_contours(self, demo_conn):
         dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY"],
-                                   as_xarray=False)
+                                   output="dict")
         df = dfs["TEMPERATURE"].rename(columns={"TEMPERATURE": "T"})
         df["S"] = dfs["SALINITY"]["SALINITY"].values
         ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", density_contours=False)
@@ -292,7 +292,7 @@ class TestDistributions:
 
     # compare_stats draws comparative boxplots across a grouping column
     def test_compare_stats(self, demo_conn):
-        dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"], as_xarray=False)
+        dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"], output="dict")
         df = dfs["TEMPERATURE"][["PROFILE_NUMBER", "LEV_M"]].copy()
         df["TEMPERATURE"] = dfs["TEMPERATURE"]["TEMPERATURE"].values
         df["SALINITY"] = dfs["SALINITY"]["SALINITY"].values

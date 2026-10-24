@@ -38,8 +38,8 @@ def remove_tables_like(conn: sqlite3.Connection, like_pattern: str, escape_char:
 
     # Connect to db and drop the tables
     cur = conn.cursor()
-    for name in table_names:
-        query = f"DROP {table_type} {name};"
+    for table_name in table_names:
+        query = f"DROP {table_type} {table_name};"
         logger.info(f"remove_tables_like: {query}")
         cur.execute(query)
 

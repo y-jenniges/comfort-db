@@ -17,8 +17,8 @@ MODULES = [
 @pytest.mark.parametrize("module_name", MODULES)
 def test_all_names_exist(module_name):
     module = importlib.import_module(module_name)
-    for name in module.__all__:
-        assert hasattr(module, name), f"{module_name}.{name}"
+    for exported in module.__all__:
+        assert hasattr(module, exported), f"{module_name}.{exported}"
 
 
 # Star import works

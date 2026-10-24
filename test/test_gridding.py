@@ -602,12 +602,12 @@ class TestNoTimeMapTables:
 
 class TestMapTablesSpellings:
     # Bare, lower-case and prefixed parameter names map the same table
-    @pytest.mark.parametrize("name", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
-    def test_spellings(self, name):
+    @pytest.mark.parametrize("spelling", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
+    def test_spellings(self, spelling):
         grid = _make_no_time_grid_stub()
         grid.grid_id = 997
         conn = TestNoTimeMapTables._conn()
-        assert grid.map_tables(conn, parameters=[name]) == ["P_NITRATE_997"]
+        assert grid.map_tables(conn, parameters=[spelling]) == ["P_NITRATE_997"]
 
 
 class TestMapDataframes:

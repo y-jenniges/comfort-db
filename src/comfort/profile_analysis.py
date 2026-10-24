@@ -17,6 +17,7 @@ import pandas as pd
 from numpy.typing import ArrayLike
 
 from .util.columns import find_col
+from .util.types import InterpMethod, check_choice
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ def average_duplicate_records_per_profile(
 
     Args:
         raw (dict[str, pandas.DataFrame]): Per-parameter DataFrames, as
-            returned by ``load_comfort(as_xarray=False)``.
+            returned by ``load_comfort(output="dict")``.
         depth_col (str): Column with depth. Default ``"LEV_M"``.
         profile_col (str or list<str>): Column(s) identifying a profile.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both are present
@@ -445,7 +446,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
                              depth_col: str = "LEV_M",
                              profile_col: str | list[str] | None = None,
                              max_gap: float | None = None,
-                             method: str = "pchip",
+                             method: InterpMethod = "pchip",
                              ) -> pd.DataFrame:
     """Interpolate profiles onto standardised depth levels. Only depth
     levels within the measured range are returned. Profiles with <2 valid
@@ -472,8 +473,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
     Raises:
         ValueError: If ``method`` is not ``'pchip'`` or ``'linear'``.
     """
-    if method not in ("pchip", "linear"):
-        raise ValueError(f"Unknown method {method!r}; choose 'pchip' or 'linear'")
+    check_choice(method, InterpMethod, "method")
 
     profile_col = _resolve_profile_col(df, profile_col)
     value_col = _detect_value_col(df, value_col)

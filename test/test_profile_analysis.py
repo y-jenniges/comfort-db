@@ -397,7 +397,7 @@ class TestInterpolateDepthLevels:
     def test_invalid_method_raises(self):
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1],
                            "LEV_DBAR": [0.0, 100.0], "VAL": [1.0, 2.0]})
-        with pytest.raises(ValueError, match="Unknown method"):
+        with pytest.raises(ValueError, match="method must be"):
             interpolate_depth_levels(df, target_depths=[50], method="bogus")
 
     # Target depths outside the profile's measured range are dropped, not extrapolated

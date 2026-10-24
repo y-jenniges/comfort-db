@@ -74,7 +74,7 @@ if __name__ == "__main__":
     # Likely a bug in COMFORT
     print("\n=== Salinity-like oxygen check ===")
     data = comfort.load_comfort(db_path, parameters=["OXYGEN"], quality_flags=QC_GOOD,
-                                convert_units=True, as_xarray=False, limit=100_000)
+                                convert_units=True, output="dict", limit=100_000)
     df_oxygen = data.get("OXYGEN")
     if df_oxygen is not None and "salinity" in df_oxygen.columns:
         suspect = flag_salinity_like_oxygen(df_oxygen)

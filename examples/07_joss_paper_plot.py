@@ -47,7 +47,7 @@ def main():
         raw = comfort.load_comfort(
             conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"],
             quality_flags=comfort.QC_GOOD,
-            convert_units=True, use_density=True, as_xarray=False,
+            convert_units=True, use_density=True, output="dict",
         )
         for param, df_param in raw.items():
             log.info("  %-12s %10d rows", param, len(df_param))

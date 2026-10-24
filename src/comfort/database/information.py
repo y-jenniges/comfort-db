@@ -26,37 +26,38 @@ import pandas as pd
 
 from ..qc import build_where_clause
 from ..util.sqlite_utils import validate_identifier
+from ..util.types import TimeMode, check_choice
 
 logger = logging.getLogger(__name__)
 
 
-def param_label(name: str) -> str:
+def param_label(parameter: str) -> str:
     """Return the canonical parameter name: Upper case, without ``P_`` prefix.
 
     ``'nitrate'``, ``'NITRATE'``, ``'p_nitrate'`` and ``'P_NITRATE'`` all give ``'NITRATE'``.
     Use it for dictionary keys, column names and plot labels.
 
     Args:
-        name (str): Parameter name or ``P_*`` table name, any casing.
+        parameter (str): Parameter name or ``P_*`` table name, any casing.
     Returns:
         str: Canonical parameter name.
     """
-    name = name.strip().upper()
-    return name[2:] if name.startswith("P_") else name
+    label = parameter.strip().upper()
+    return label[2:] if label.startswith("P_") else label
 
 
-def param_table_name(name: str) -> str:
+def param_table_name(parameter: str) -> str:
     """Return the ``P_*`` table name of a parameter.
 
     ``'nitrate'``, ``'NITRATE'``, ``'p_nitrate'`` and ``'P_NITRATE'``  all give ``'P_NITRATE'``.
     See :func:`param_label` for the inverse.
 
     Args:
-        name (str): Parameter name or ``P_*`` table name, any casing.
+        parameter (str): Parameter name or ``P_*`` table name, any casing.
     Returns:
         str: Table name.
     """
-    return f"P_{param_label(name)}"
+    return f"P_{param_label(parameter)}"
 
 
 def does_table_exist(conn: sqlite3.Connection, table_name: str, table_type: str = "table") -> bool:
@@ -241,7 +242,7 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
     return column_minimum, column_maximum
 
 
-def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mode: str = "year",
+def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mode: TimeMode = "year",
                             quality_flags: list | None = None) -> pd.DataFrame:
     """Count the number of samples of a parameter per year or per month.
     Counting is done in SQL and rows without a valid date are ignored.
@@ -258,9 +259,8 @@ def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mo
         pandas.DataFrame: Columns ``[YEAR|MONTH, COUNT]``.
     """
     # Select the SQL date format
+    check_choice(time_mode, TimeMode, "time_mode")
     formats = {"year": "%Y", "month": "%m"}
-    if time_mode not in formats:
-        raise ValueError(f"time_mode must be 'year' or 'month', got {time_mode!r}")
     column = time_mode.upper()
 
     # Validate identifier and build quality filter
@@ -306,9 +306,9 @@ def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] 
 
     # Count samples per parameter via SQL COUNT(*)
     df_count = pd.DataFrame({"parameter": parameters, "count": 0})
-    for i, name in enumerate(parameters):
+    for i, parameter in enumerate(parameters):
         df_count.loc[i, "count"] = get_num_samples(
-            conn, param_table_name(name), table_type="table", quality_flags=quality_flags,
+            conn, param_table_name(parameter), table_type="table", quality_flags=quality_flags,
         )
     return df_count
 
