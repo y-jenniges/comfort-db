@@ -71,10 +71,17 @@ class Grid:
 
     The grid has a time axis if the time parameters (``time_min``, ``time_max``,
     ``mode``, ``dtime``) are given. Leave all of them as None for a purely spatial grid.
+
+    ``mode`` selects how the time axis is built, in steps of ``dtime``:
+
+    - ``'Y'``, ``'YM'``, ``'YD'``: Consecutive years, months or days starting at ``time_min``.
+    - ``'M'``: Month of the year (01-12), pooling all years.
+    - ``'D'``: Day of the month (01-31), pooling all months and years.
+    - ``'MD'``: Month and day (MM-DD) of the leap year 2000, pooling all years.
     """
 
-    def __init__(self, *, lon_min=-180, lon_max=180, dlon=1, lat_min=-90, lat_max=90, dlat=1,
-                 bathymetry_grid_path=None,
+    def __init__(self, *, bathymetry_grid_path, lon_min=-180, lon_max=180, dlon=1,
+                 lat_min=-90, lat_max=90, dlat=1,
                  z_min=None, z_max=None, dz=None, z_array=None,
                  time_min=None, time_max=None, mode: GridMode | None = None, dtime=None, selection=None,
                  lon_variable="lon", lat_variable="lat", depth_variable="elevation",
@@ -87,7 +94,7 @@ class Grid:
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
             z_array (array-like): Explicit depth nodes [m]. Mutually exclusive with dz.
             time_min, time_max (str): Date strings bounding the time dimension.
-            mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD'.
+            mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
             dtime (int): Number of time units per cell.
                 time_min, time_max, mode and dtime must be given together, or all be
                 None for a grid without time axis.
@@ -211,11 +218,8 @@ class Grid:
             )
 
         # Check if filepath is valid
-        if not os.path.isfile(bathymetry_grid_path):
-            raise FileNotFoundError(
-                f"Bathymetry file not found: {bathymetry_grid_path}. "
-                "Pass bathymetry_grid_path to the constructor."
-            )
+        if bathymetry_grid_path is None or not os.path.isfile(bathymetry_grid_path):
+            raise FileNotFoundError(f"Bathymetry file not found: {bathymetry_grid_path}")
 
         # Load bathymetry dataset
         with xr.open_dataset(bathymetry_grid_path) as ds:
@@ -894,10 +898,9 @@ class GridManager:
             depth_variable=depth_variable, grid_id=grid_id,
         )
 
-    def create_grid(self, *, lon_min, lon_max, dlon, lat_min, lat_max, dlat,
+    def create_grid(self, *, bathymetry_grid_path, lon_min, lon_max, dlon, lat_min, lat_max, dlat,
                     z_min=None, z_max=None, dz=None, z_array=None,
                     time_min=None, time_max=None, mode=None, dtime=None, selection=None,
-                    bathymetry_grid_path=None,
                     lon_variable="lon", lat_variable="lat",
                     depth_variable="elevation") -> Grid:
         """Create a new Grid (or load an existing one with the same parameters).
