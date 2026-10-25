@@ -313,13 +313,23 @@ class TestSubsetRegion:
         r = subset_region(self._df(), lat_min=15.0, depth_max=200.0)
         assert list(r["LATITUDE"]) == [20.0]
 
-    # A filter on a column absent from df warns and is skipped, not a crash
-    def test_missing_column_warns(self, caplog):
-        df = self._df().drop(columns="LATITUDE")
-        with caplog.at_level(logging.WARNING):
-            r = subset_region(df, lat_min=15.0)
-        assert len(r) == 3  # filter skipped, all rows returned
-        assert "LATITUDE" in caplog.text
+    # A filter on a column absent from df raises instead of returning unfiltered data
+    @pytest.mark.parametrize("column, kwargs", [
+        ("LATITUDE", {"lat_min": 15.0}),
+        ("LONGITUDE", {"lon_max": 12.0}),
+        ("LEV_M", {"depth_max": 200.0}),
+        ("DATEANDTIME", {"date_min": "2005-01-01"}),
+    ])
+    def test_missing_column_raises(self, column, kwargs):
+        df = self._df().drop(columns=column)
+        with pytest.raises(KeyError, match=column):
+            subset_region(df, **kwargs)
+
+    # Column names are looked up insensitive to casing
+    def test_column_names_case_insensitive(self):
+        df = self._df().rename(columns=str.lower)
+        r = subset_region(df, lat_min=15.0, lat_max=25.0, depth_max=200.0, date_min="2001-01-01")
+        assert list(r["latitude"]) == [20.0]
 
     # The returned DataFrame is independent of the input
     def test_returns_copy(self):
@@ -341,15 +351,6 @@ class TestSubsetRegion:
         region = {"box": [(0, 0), (20, 0), (20, 40), (0, 40)]}
         r = subset_region(self._df(), lat_min=25.0, region=region)
         assert list(r["LATITUDE"]) == [30.0]
-
-    # A region requested with LATITUDE/LONGITUDE absent warns and is skipped, not a crash
-    def test_region_missing_columns_warns(self, caplog):
-        region = {"box": [(8, 15), (12, 15), (12, 25), (8, 25)]}
-        df = self._df().drop(columns=["LATITUDE", "LONGITUDE"])
-        with caplog.at_level(logging.WARNING):
-            r = subset_region(df, region=region)
-        assert len(r) == 3
-        assert "Region filter requested" in caplog.text
 
     # A region crossing the antimeridian (e.g. a Pacific basin stored as two parts
     # near +-180) keeps points on both sides of the dateline, not just one

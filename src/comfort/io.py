@@ -29,6 +29,7 @@ from .profile_analysis import interpolate_depth_levels
 from .database.information import get_names_of_all_parameter_tables, param_label, param_table_name
 from .geo import region_bbox, water_mass_masks
 from .qc import QCFilter, build_where_clause, qc_conditions
+from .util.columns import find_col
 from .util.sqlite_utils import validate_identifier
 from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice
 
@@ -39,11 +40,6 @@ def _refine_to_region(df, region, region_name_col):
     """Drop rows outside the exact region polygon(s), e.g. after SQL-level bounding box filtering."""
     # Check if region and df have data
     if region is None or df.empty:
-        return df
-
-    # Check if latitude and longitude columns are given
-    if "LATITUDE" not in df.columns or "LONGITUDE" not in df.columns:
-        logger.warning("Region filter requested but LATITUDE/LONGITUDE columns not found - filter skipped.")
         return df
 
     # Filter for exact regions
@@ -406,9 +402,7 @@ def subset_region(df: pd.DataFrame, *,
                   region_name_col: str = "name") -> pd.DataFrame:
     """Filter a DataFrame to a geographic, depth and/or time region.
 
-    Logs a warning when a requested bound cannot be applied because the
-    corresponding column is absent. Recognised columns: LONGITUDE, LATITUDE,
-    LEV_M, DATEANDTIME.
+    Columns are looked up insensitive to casing: LONGITUDE, LATITUDE, LEV_M, DATEANDTIME.
 
     Args:
         df (pandas.DataFrame): Extended parameter or station DataFrame.
@@ -426,42 +420,36 @@ def subset_region(df: pd.DataFrame, *,
         region_name_col (str): Region name column for *region*.
     Returns:
         pandas.DataFrame: Filtered copy.
+    Raises:
+        KeyError: If a requested bound or *region* needs a column that *df* does not have.
     """
-    # Apply a single bound, skip with warning if column absent
-    def _apply(mask, col, bound_name, bound_val, op):
-        if bound_val is None:
-            return mask
-        if col not in df.columns:
-            logger.warning(
-                "subset_region: %r requested but column %r not found - filter skipped",
-                bound_name, col,
-            )
-            return mask
-        return mask & op(df[col], bound_val)
-
-    import operator as op
-
-    # Spatial bounds
+    # Spatial and depth bounds, a missing column raises
     mask = pd.Series(True, index=df.index)
-    mask = _apply(mask, "LONGITUDE", "lon_min", lon_min, op.ge)
-    mask = _apply(mask, "LONGITUDE", "lon_max", lon_max, op.le)
-    mask = _apply(mask, "LATITUDE", "lat_min", lat_min, op.ge)
-    mask = _apply(mask, "LATITUDE", "lat_max", lat_max, op.le)
-    mask = _apply(mask, "LEV_M", "depth_min", depth_min, op.ge)
-    mask = _apply(mask, "LEV_M", "depth_max", depth_max, op.le)
+    for col, lower, upper in (("LONGITUDE", lon_min, lon_max),
+                              ("LATITUDE", lat_min, lat_max),
+                              ("LEV_M", depth_min, depth_max)):
+        if lower is None and upper is None:
+            # No bounds
+            continue
+
+        # Get the required column
+        values = df[find_col(df, col)]
+        if lower is not None:
+            # Apply lower threshold
+            mask &= values >= lower
+        if upper is not None:
+            # Apply upper threshold
+            mask &= values <= upper
 
     # Date range filter
     if date_min is not None or date_max is not None:
-        if "DATEANDTIME" not in df.columns:
-            logger.warning(
-                "subset_region: date filter requested but column 'DATEANDTIME' not found - filter skipped"
-            )
-        else:
-            dates = pd.to_datetime(df["DATEANDTIME"])
-            if date_min is not None:
-                mask &= dates >= pd.Timestamp(date_min)
-            if date_max is not None:
-                mask &= dates <= pd.Timestamp(date_max)
+        dates = pd.to_datetime(df[find_col(df, "DATEANDTIME")])
+        if date_min is not None:
+            # Apply lower threshold
+            mask &= dates >= pd.Timestamp(date_min)
+        if date_max is not None:
+            # Apply upper threshold
+            mask &= dates <= pd.Timestamp(date_max)
 
     # Exact polygon refine (in addition to the explicit bounds above)
     return _refine_to_region(df[mask].copy(), region, region_name_col)
