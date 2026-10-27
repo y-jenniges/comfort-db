@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     import sqlite3
     import matplotlib.axes
     import matplotlib.figure
-    from ..qc import QCFilter
+    from ..qc import QualityFlags
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def boxplot(
     title: str | None = None,
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
     dpi: int = 300,
@@ -88,7 +88,7 @@ def plot_histogram(
     kind: str = "hist",
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
     dpi: int = 300,
@@ -133,7 +133,7 @@ def plot_monthly_histogram(
     date_col: str = "DATEANDTIME",
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     save_as: str | None = None,
     dpi: int = 300,
 ) -> matplotlib.figure.Figure:

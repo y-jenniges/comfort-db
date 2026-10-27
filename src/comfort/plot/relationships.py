@@ -27,7 +27,7 @@ from ._helpers import _finish, _get_or_create_ax, _pretty_label, _save_fig
 if TYPE_CHECKING:
     import sqlite3
     import matplotlib.axes
-    from ..qc import QCFilter
+    from ..qc import QualityFlags
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def plot_correlation(
     ylabel: str | None = None,
     conn: sqlite3.Connection | None = None,
     parameters: tuple[str, str] | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
     dpi: int = 300,
@@ -169,7 +169,7 @@ def plot_joint(
     kind: JointKind = "hist",
     conn: sqlite3.Connection | None = None,
     parameters: tuple[str, str] | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     save_as: str | None = None,
     dpi: int = 300,
 ) -> sns.JointGrid | None:

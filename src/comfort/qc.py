@@ -5,6 +5,7 @@ __all__ = [
     "QC_ALL",
     "QC_GOOD",
     "QCFilter",
+    "QualityFlags",
     "apply_qc_flags",
     "build_where_clause",
     "flag_salinity_like_oxygen",
@@ -32,6 +33,9 @@ _OP_MAP = {
     "!=": op.ne,
 }
 QCFilter = namedtuple("QCFilter", ["column", "condition"])
+
+# Type of the ``quality_flags`` arguments: QCFilter list or (column, condition) tuples
+QualityFlags = list[QCFilter] | list[tuple[str, str]]
 
 # Accept all records regardless of quality flags.
 QC_ALL = []
@@ -69,7 +73,7 @@ def _parse_flag(column: str, condition: str) -> tuple[str, str, str]:
     return column, match.group(1), match.group(2)
 
 
-def qc_conditions(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
+def qc_conditions(quality_flags: QualityFlags | None,
                   table_alias: str | None = None) -> list[str]:
     """Return the SQL conditions for the given quality flags.
 
@@ -99,7 +103,7 @@ def qc_conditions(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
     return conditions
 
 
-def build_where_clause(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
+def build_where_clause(quality_flags: QualityFlags | None,
                        table_alias: str | None = None,
                        keyword: str = "WHERE") -> str:
     """Return a SQL clause for the given quality flags.
@@ -118,7 +122,7 @@ def build_where_clause(quality_flags: list[QCFilter] | list[tuple[str, str]] | N
 
 
 def apply_qc_flags(df: pd.DataFrame,
-                   quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None) -> pd.DataFrame:
+                   quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Filter a DataFrame by quality flags.
 
     Same filtering as the SQL-level ``quality_flags`` on
@@ -126,8 +130,8 @@ def apply_qc_flags(df: pd.DataFrame,
 
     Args:
         df (pandas.DataFrame): DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Quality flag
-            filters, e.g. :data:`QC_GOOD`. ``None`` or ``[]`` returns df unchanged.
+        quality_flags (QualityFlags): Quality flag filters, e.g. :data:`QC_GOOD`.
+          ``None`` or ``[]`` returns df unchanged.
     Returns:
         pandas.DataFrame: Filtered copy.
     Raises:

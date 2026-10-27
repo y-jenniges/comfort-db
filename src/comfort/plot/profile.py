@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     import sqlite3
     import matplotlib.axes
     from numpy.typing import ArrayLike
-    from ..qc import QCFilter
+    from ..qc import QualityFlags
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def plot_profile(
         show_points: bool = True,
         conn: sqlite3.Connection | None = None,
         parameter: str | None = None,
-        quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+        quality_flags: QualityFlags | None = None,
         ax: matplotlib.axes.Axes | None = None,
         save_as: str | None = None,
         dpi: int = 300,
@@ -153,7 +153,7 @@ def plot_section(
         depth_bins: int | ArrayLike = 40,
         conn: sqlite3.Connection | None = None,
         parameter: str | None = None,
-        quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+        quality_flags: QualityFlags | None = None,
         ax: matplotlib.axes.Axes | None = None,
         save_as: str | None = None,
         dpi: int = 300,

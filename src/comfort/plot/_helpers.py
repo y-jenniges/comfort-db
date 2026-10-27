@@ -10,7 +10,7 @@ from ..util.optional import import_optional
 if TYPE_CHECKING:
     import sqlite3
     import pandas as pd
-    from ..qc import QCFilter
+    from ..qc import QualityFlags
 
 
 # Human-readable labels for raw column names shown in legends/colorbars
@@ -71,7 +71,7 @@ def _resolve_data(
     df: pd.DataFrame | None,
     conn: sqlite3.Connection | None,
     parameter: str | None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     profiles: list[int] | None = None,
 ) -> pd.DataFrame:
     """Return *df* if provided, otherwise load from the database.

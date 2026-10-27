@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 from .profile_analysis import interpolate_depth_levels
 from .database.information import get_names_of_all_parameter_tables, param_label, param_table_name
 from .geo import region_bbox, water_mass_masks
-from .qc import QCFilter, build_where_clause, qc_conditions
+from .qc import QualityFlags, build_where_clause, qc_conditions
 from .util.columns import find_col
 from .util.optional import import_optional
 from .util.sqlite_utils import validate_identifier
@@ -142,7 +142,7 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
 
 
 def read_parameter(conn: sqlite3.Connection, parameter: str, *,
-                   quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+                   quality_flags: QualityFlags | None = None,
                    profiles: list[int] | None = None,
                    lon_min: float | None = None, lon_max: float | None = None,
                    lat_min: float | None = None, lat_max: float | None = None,
@@ -160,8 +160,7 @@ def read_parameter(conn: sqlite3.Connection, parameter: str, *,
     Args:
         conn (sqlite3.Connection): Connection to the database.
         parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): QC filters,
-            e.g. ``QC_GOOD``.
+        quality_flags (QualityFlags): QC filters, e.g. ``QC_GOOD``.
         profiles (list[int]): Profile numbers to load. ``None`` loads all.
         lon_min (float): Minimum longitude [degrees E].
         lon_max (float): Maximum longitude [degrees E].
@@ -213,7 +212,7 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
 
 def describe_variables(conn: sqlite3.Connection,
                        parameters: list[str] | None = None,
-                       quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None) -> pd.DataFrame:
+                       quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Summarise available parameters: sample counts, depth range, value range,
     units, instruments and platforms.
 
@@ -460,7 +459,7 @@ def load_comfort(
         db_path_or_conn: str | Path | sqlite3.Connection,
         parameters: list[str] | None = None,
         *,
-        quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+        quality_flags: QualityFlags | None = None,
         lon_min: float | None = None, lon_max: float | None = None,
         lat_min: float | None = None, lat_max: float | None = None,
         depth_min: float | None = None, depth_max: float | None = None,

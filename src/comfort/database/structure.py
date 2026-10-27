@@ -13,7 +13,7 @@ import logging
 import sqlite3
 
 from .information import does_table_exist, get_names_of_all_parameter_tables, param_label, param_table_name
-from ..qc import build_where_clause
+from ..qc import QualityFlags, build_where_clause
 from ..util.sqlite_utils import validate_identifier
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def remove_tables_like(conn: sqlite3.Connection, like_pattern: str, escape_char:
 
 
 def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[str],
-                                    quality_flags: list | None = None,
+                                    quality_flags: QualityFlags | None = None,
                                     columns: list[str] | None = None,
                                     table_type: str = "view") -> None:
     """Create a UNION ALL table/view combining multiple parameters.
@@ -57,7 +57,7 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
     Args:
         conn (sqlite3.Connection): Connection to the database.
         parameters (list[str]): Parameter names to combine.
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Quality flag filters.
+        quality_flags (QualityFlags): Quality flag filters.
         columns (list[str]): Columns to include. Defaults to the standard COMFORT parameter columns.
         table_type (str): 'view' or 'table'. Default is 'view'.
     """

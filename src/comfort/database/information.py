@@ -24,7 +24,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
-from ..qc import build_where_clause
+from ..qc import QualityFlags, build_where_clause
 from ..util.sqlite_utils import validate_identifier
 from ..util.types import TimeMode, check_choice
 
@@ -107,14 +107,14 @@ def get_min_max_dates(conn: sqlite3.Connection, table_name: str = "e_combined",
 
 
 def get_num_samples(conn: sqlite3.Connection, table_name: str, table_type: str = "table",
-                    quality_flags: list | None = None) -> int:
+                    quality_flags: QualityFlags | None = None) -> int:
     """Get the number of samples in the given table.
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
         table_name (str): Table or view name.
         table_type (str): 'table' or 'view'. Default is 'table'.
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+        quality_flags (QualityFlags): Optional quality flag filters.
     Returns:
         int: Number of samples, or 0 if the table does not exist.
     """
@@ -243,7 +243,7 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
 
 
 def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mode: TimeMode = "year",
-                            quality_flags: list | None = None) -> pd.DataFrame:
+                            quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Count the number of samples of a parameter per year or per month.
     Counting is done in SQL and rows without a valid date are ignored.
 
@@ -254,7 +254,7 @@ def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mo
         parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         time_mode (str): ``'year'`` (every year between first and last, empty years
             counted as 0) or ``'month'`` (1 to 12).
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+        quality_flags (QualityFlags): Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[YEAR|MONTH, COUNT]``.
     """
@@ -287,7 +287,7 @@ def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mo
 
 
 def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] | None = None,
-                                *, quality_flags: list | None = None) -> pd.DataFrame:
+                                *, quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Count the total number of samples per parameter.
 
     Plot the result with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``).
@@ -295,7 +295,7 @@ def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] 
     Args:
         conn (sqlite3.Connection): Connection to the database.
         parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix. ``None`` means all.
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+        quality_flags (QualityFlags): Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[parameter, count]``.
     """
@@ -314,7 +314,7 @@ def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] 
 
 
 def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
-                           quality_flags: list | None = None) -> pd.DataFrame:
+                           quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Count the proportion of negative values per parameter.
 
     Plot the proportions with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``)
@@ -323,7 +323,7 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
     Args:
         conn (sqlite3.Connection): Connection to the database.
         parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters
+        quality_flags (QualityFlags): Optional quality flag filters
             (applied to the negative count only).
     Returns:
         pandas.DataFrame: Columns ``[parameter, number of samples, number of negative samples,
@@ -355,7 +355,7 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
 
 
 def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[str], *,
-                                   quality_flags: list | None = None
+                                   quality_flags: QualityFlags | None = None
                                    ) -> tuple[pd.DataFrame, dict[str, dict[str, pd.DataFrame]]]:
     """Find spatio-temporal duplicates (same station and depth) per parameter.
 
@@ -364,7 +364,7 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
     Args:
         conn (sqlite3.Connection): Connection to the database.
         parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Optional quality flag filters.
+        quality_flags (QualityFlags): Optional quality flag filters.
     Returns:
         tuple: ``(summary, details)``. *summary* is a DataFrame with columns ``[parameter,
         number of samples, number of row duplicates, number of time loc duplicates,
