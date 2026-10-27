@@ -17,6 +17,7 @@ import pandas as pd
 import seaborn as sns
 
 from ..util.columns import find_col
+from ..util.optional import import_optional
 from ..util.types import BoxKind, check_choice
 from ._helpers import _finish, _get_or_create_ax, _resolve_data, _save_fig
 
@@ -238,14 +239,8 @@ def compare_stats(
 
     # Scale to [0, 1] for cross-parameter comparability
     if scale:
-        try:
-            from sklearn.preprocessing import MinMaxScaler
-        except ImportError:
-            raise ImportError(
-                "scikit-learn is required for compare_stats(scale=True). "
-                'Install it with: pip install "comfort-db[scale]"'
-            )
-        scaler = MinMaxScaler().fit(temp[value_cols])
+        preprocessing = import_optional("sklearn.preprocessing", "scale", "compare_stats(scale=True)")
+        scaler = preprocessing.MinMaxScaler().fit(temp[value_cols])
         scaled = pd.DataFrame(
             scaler.transform(temp[value_cols]),
             columns=value_cols, index=temp.index,

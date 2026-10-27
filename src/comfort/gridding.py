@@ -30,6 +30,7 @@ from dateutil.relativedelta import relativedelta
 
 from .util import sqlite_utils
 from .util.columns import find_col, resolve_param_columns
+from .util.optional import import_optional
 from .util.types import Aggregation, GridMode, check_choice
 from .util.sqlite_utils import validate_identifier
 from .database.information import (
@@ -208,14 +209,7 @@ class Grid:
     def _open_bathymetry(self, bathymetry_grid_path: str, lon_variable: str,
                          lat_variable: str, depth_variable: str):
         """Open, normalise and load a bathymetry NetCDF file into memory, then close it."""
-        # Check xarray import
-        try:
-            import xarray as xr
-        except ImportError:
-            raise ImportError(
-                "xarray is required for gridding; "
-                "install it with: pip install \"comfort-db[grid]\""
-            )
+        xr = import_optional("xarray", "grid", "gridding")
 
         # Check if filepath is valid
         if bathymetry_grid_path is None or not os.path.isfile(bathymetry_grid_path):
@@ -289,13 +283,8 @@ class Grid:
 
     def _water_mask(self, ds, lon, lat):
         """Return a xarray DataArray that is True where there is water (depth > 0)."""
-        try:
-            import xarray as xr
-        except ImportError:
-            raise ImportError(
-                "xarray is required for gridding; "
-                "install it with: pip install \"comfort-db[grid]\""
-            )
+        xr = import_optional("xarray", "grid", "gridding")
+
         # Wrap depth levels into xarray
         z_arr = self._make_z_arr()
         z = xr.DataArray(z_arr, dims="LEV_M", coords={"LEV_M": z_arr}, name="LEV_M")
@@ -479,7 +468,7 @@ class Grid:
         https://github.com/willirath/geomar-open-hacky-hour-2021-04/blob/main/2022-06-23/etopo05_to_grid.ipynb
         grid must be nc file, format: latitude, longitude, depth
         """
-        import xarray as xr
+        xr = import_optional("xarray", "grid", "gridding")
 
         # Load bathymetry
         ds = self._open_bathymetry(self.bathymetry_grid_path, lon_variable, lat_variable, depth_variable)

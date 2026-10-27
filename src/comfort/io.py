@@ -30,6 +30,7 @@ from .database.information import get_names_of_all_parameter_tables, param_label
 from .geo import region_bbox, water_mass_masks
 from .qc import QCFilter, build_where_clause, qc_conditions
 from .util.columns import find_col
+from .util.optional import import_optional
 from .util.sqlite_utils import validate_identifier
 from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice
 
@@ -553,6 +554,10 @@ def load_comfort(
     check_choice(interp_method, InterpMethod, "interp_method")
     check_choice(on_missing, OnMissing, "on_missing")
     check_choice(density_fallback, DensityFallback, "density_fallback")
+
+    # Fail before loading any data if xarray is needed but missing
+    if output == "xarray":
+        import_optional("xarray", "grid", 'load_comfort(output="xarray")')
 
     # Collect geo/temporal filter arguments (the region bounding box is ANDed with the explicit bounds in SQL)
     geo_kwargs = dict(

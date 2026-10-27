@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from .util.optional import import_optional
 from .util.sqlite_utils import validate_identifier
 
 if TYPE_CHECKING:
@@ -29,16 +30,10 @@ class ParamScaler:
     """
 
     def __init__(self, scaler_class: type[Any] | None = None, **scaler_kwargs):
-        try:
-            from sklearn.preprocessing import MinMaxScaler
-        except ImportError:
-            raise ImportError(
-                "scikit-learn is required for scaling; "
-                "install it with: pip install \"comfort-db[scale]\""
-            )
+        preprocessing = import_optional("sklearn.preprocessing", "scale", "scaling")
 
         # Set up scalers per parameter
-        self.scaler_class = scaler_class or MinMaxScaler
+        self.scaler_class = scaler_class or preprocessing.MinMaxScaler
         self.scaler_kwargs = scaler_kwargs
         self.scalers: dict = {}
 

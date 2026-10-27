@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from .util.columns import find_col, resolve_param_columns
+from .util.optional import import_optional
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -171,13 +172,7 @@ def _get_coast_points(resolution, coastline_geom):
 
     if coastline_geom is None:
         # Load cartopy coastlines
-        try:
-            import cartopy.io.shapereader as shpreader
-        except ImportError:
-            raise ImportError(
-                "cartopy is required for distance_to_coast; "
-                "install it with: pip install cartopy"
-            )
+        shpreader = import_optional("cartopy.io.shapereader", "geo", "distance_to_coast")
         path = shpreader.natural_earth(
             resolution=resolution, category="physical", name="coastline"
         )
@@ -236,14 +231,7 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     Returns:
         geopandas.GeoDataFrame: Standardised province boundaries.
     """
-    # Check if geopandas is installed
-    try:
-        import geopandas as gpd
-    except ImportError:
-        raise ImportError(
-            "geopandas is required for load_longhurst; "
-            "install it with: pip install \"comfort-db[geo]\""
-        )
+    gpd = import_optional("geopandas", "geo", "load_longhurst")
 
     # Read shapefile
     gdf = gpd.read_file(path)
@@ -286,14 +274,7 @@ def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.Geo
     Returns:
         geopandas.GeoDataFrame: Basin boundaries with columns ``basin_name`` and ``geometry``.
     """
-    # Check if geopandas is installed
-    try:
-        import geopandas as gpd
-    except ImportError:
-        raise ImportError(
-            "geopandas is required for load_basins. "
-            "Install it with: pip install \"comfort-db[geo]\""
-        )
+    gpd = import_optional("geopandas", "geo", "load_basins")
 
     # Read shapefile
     gdf = gpd.read_file(path)
@@ -326,14 +307,7 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
         pandas.DataFrame: Columns ``LONGITUDE``, ``LATITUDE``, ``label``
         (and ``YEAR`` if *biome_var* is ``"TimeVaryingBiomes"``).
     """
-    # Check if xarray is installed
-    try:
-        import xarray as xr
-    except ImportError:
-        raise ImportError(
-            "xarray is required for load_biomes; "
-            "install it with: pip install \"comfort-db[grid]\""
-        )
+    xr = import_optional("xarray", "grid", "load_biomes")
 
     # Read NetCDF file
     ds = xr.open_dataset(path)
@@ -436,7 +410,7 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
         pass
 
     # Fallback: pure shapely containment test
-    from shapely.geometry import Point
+    Point = import_optional("shapely.geometry", "geo", "water_mass_masks").Point
 
     # Iterate over observations
     labels = []
@@ -580,7 +554,7 @@ def _to_lonlat(geo):
 
 def _parse_regions(regions, region_name_col):
     """Return a list of ``(name, shapely.Polygon)`` tuples from any input format."""
-    from shapely.geometry import Polygon
+    Polygon = import_optional("shapely.geometry", "geo", "regions").Polygon
 
     # Regions as dict
     if isinstance(regions, dict):
@@ -593,7 +567,7 @@ def _parse_regions(regions, region_name_col):
     # Regions as CSV
     path = Path(regions) if isinstance(regions, (str, Path)) else None
     if path is not None and path.suffix.lower() == ".csv":
-        from shapely import wkt
+        wkt = import_optional("shapely.wkt", "geo", "regions")
         csv_df = pd.read_csv(path)
         name_col = find_col(csv_df, region_name_col)
         return _check_lonlat([
@@ -603,13 +577,7 @@ def _parse_regions(regions, region_name_col):
 
     # Regions as shapefile
     if path is not None and path.suffix.lower() == ".shp":
-        try:
-            import geopandas as gpd
-        except ImportError:
-            raise ImportError(
-                "geopandas is required to read shapefiles; "
-                "install it with: pip install \"comfort-db[geo]\""
-            )
+        gpd = import_optional("geopandas", "geo", "reading shapefile regions")
         gdf = _to_lonlat(gpd.read_file(path))
         name_col = find_col(gdf, region_name_col)
         return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]

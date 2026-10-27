@@ -24,18 +24,18 @@ import base64
 import io
 import numpy as np
 import pandas as pd
+
+from ..util.optional import import_optional
+
+# Fail with install instructions if the dash extra is missing
+for _module in ("dash", "dash_bootstrap_components", "plotly"):
+    import_optional(_module, "dash", "the COMFORT app")
+
+import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
-
-try:
-    import dash_bootstrap_components as dbc
-except ImportError:
-    raise ImportError(
-        "dash-bootstrap-components is required for the COMFORT app; "
-        "install it with: pip install \"comfort-db[dash]\""
-    )
 
 try:
     from dotenv import load_dotenv

@@ -5,6 +5,8 @@ import os
 from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 
+from ..util.optional import import_optional
+
 if TYPE_CHECKING:
     import sqlite3
     import pandas as pd
@@ -61,15 +63,8 @@ def _finish(ax, standalone: bool, save_as: str | None, dpi: int = 300):
 
 def _require_cartopy():
     """Raise ``ImportError`` with install instructions if cartopy is missing."""
-    try:
-        import cartopy.crs as ccrs
-        import cartopy.feature as cfeature
-    except ImportError:
-        raise ImportError(
-            "cartopy is required for map plots. "
-            'Install it with: pip install "comfort-db[geo]"'
-        )
-    return ccrs, cfeature
+    return (import_optional("cartopy.crs", "geo", "map plots"),
+            import_optional("cartopy.feature", "geo", "map plots"))
 
 
 def _resolve_data(
