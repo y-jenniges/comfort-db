@@ -64,8 +64,8 @@ def main():
             GRID_DEG, GRID_DEG, len(DEPTH_INTERVALS) - 1, DTIME,
         )
         grid = gm.create_grid(
-            lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             lon_min=LON_MIN, lon_max=LON_MAX, dlon=GRID_DEG,
+            lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             z_array=DEPTH_INTERVALS,
             time_min=f"{START_YEAR}-01-01", time_max=f"{END_YEAR}-12-31",
             mode="Y", dtime=DTIME,
@@ -77,7 +77,7 @@ def main():
         # Step 2: Bin each raw P_* table onto the grid                         #
         # -------------------------------------------------------------------- #
         log.info("Step 2: Mapping parameter tables onto the grid (mean/median/std/count)...")
-        mapped = grid.map_tables(gm.connection, param_tables=PARAMETERS, replace_existing=True)
+        mapped = grid.map_tables(gm.connection, parameters=PARAMETERS, replace_existing=True)
         for table in mapped:
             log.info("  %s", table)
 
@@ -94,7 +94,7 @@ def main():
             gm.connection.execute(f"DROP TABLE {old_name}")
             log.info("  Dropped stale wide table: %s", old_name)
 
-        wide_name = create_wide_table_online(gm.connection, grid.grid_id, param_tables=PARAMETERS)
+        wide_name = create_wide_table_online(gm.connection, grid.grid_id, parameters=PARAMETERS)
         gm.connection.commit()
         log.info("  Created wide table: %s", wide_name)
 

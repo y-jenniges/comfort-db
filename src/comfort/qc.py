@@ -1,6 +1,17 @@
 """Quality-flag presets, SQL clause builders and DataFrame QC filters."""
 from __future__ import annotations
 
+__all__ = [
+    "QC_ALL",
+    "QC_GOOD",
+    "QCFilter",
+    "QualityFlags",
+    "apply_qc_flags",
+    "build_where_clause",
+    "flag_salinity_like_oxygen",
+    "qc_conditions",
+]
+
 import pandas as pd
 import logging
 import operator as op
@@ -8,6 +19,7 @@ import re
 from collections import namedtuple
 
 from .util import validate_identifier
+from .util.columns import find_col
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +33,9 @@ _OP_MAP = {
     "!=": op.ne,
 }
 QCFilter = namedtuple("QCFilter", ["column", "condition"])
+
+# Type of the ``quality_flags`` arguments: QCFilter list or (column, condition) tuples
+QualityFlags = list[QCFilter] | list[tuple[str, str]]
 
 # Accept all records regardless of quality flags.
 QC_ALL = []
@@ -58,7 +73,7 @@ def _parse_flag(column: str, condition: str) -> tuple[str, str, str]:
     return column, match.group(1), match.group(2)
 
 
-def qc_conditions(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
+def qc_conditions(quality_flags: QualityFlags | None,
                   table_alias: str | None = None) -> list[str]:
     """Return the SQL conditions for the given quality flags.
 
@@ -88,7 +103,7 @@ def qc_conditions(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
     return conditions
 
 
-def build_where_clause(quality_flags: list[QCFilter] | list[tuple[str, str]] | None,
+def build_where_clause(quality_flags: QualityFlags | None,
                        table_alias: str | None = None,
                        keyword: str = "WHERE") -> str:
     """Return a SQL clause for the given quality flags.
@@ -107,7 +122,7 @@ def build_where_clause(quality_flags: list[QCFilter] | list[tuple[str, str]] | N
 
 
 def apply_qc_flags(df: pd.DataFrame,
-                   quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None) -> pd.DataFrame:
+                   quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Filter a DataFrame by quality flags.
 
     Same filtering as the SQL-level ``quality_flags`` on
@@ -115,10 +130,12 @@ def apply_qc_flags(df: pd.DataFrame,
 
     Args:
         df (pandas.DataFrame): DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): Quality flag
-            filters, e.g. :data:`QC_GOOD`. ``None`` or ``[]`` returns df unchanged.
+        quality_flags (QualityFlags): Quality flag filters, e.g. :data:`QC_GOOD`.
+          ``None`` or ``[]`` returns df unchanged.
     Returns:
         pandas.DataFrame: Filtered copy.
+    Raises:
+        KeyError: If a flag column is not in *df* (insensitive to casing).
     """
     # Return plain df if no qc flags were provided
     if not quality_flags:
@@ -130,9 +147,8 @@ def apply_qc_flags(df: pd.DataFrame,
         # Parse and validate the quality flag
         column, operator, number = _parse_flag(column, condition)
 
-        # A missing flag column would silently leave the data unfiltered
-        if column not in df.columns:
-            raise ValueError(f"apply_qc_flags: column {column!r} not in DataFrame")
+        # A missing flag column would silently leave the data unfiltered (raises)
+        column = find_col(df, column)
 
         mask &= _OP_MAP[operator](df[column], float(number))
 
@@ -157,33 +173,18 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     Returns:
         pandas.Series: Bool mask aligned with df (True = suspect row).
     Raises:
-        ValueError: If the oxygen or salinity column cannot be found, or if *tol* is negative.
+        KeyError: If the oxygen or salinity column cannot be found (insensitive to casing).
+        ValueError: If *tol* is negative.
     """
     if tol < 0:
         # Tolerance must be positive (or zero)
         raise ValueError(f"flag_salinity_like_oxygen: tol must be >= 0, got {tol}")
 
-    # Resolve column names case-insensitively
-    def _find(name):
-        for col in df.columns:
-            if col.lower() == name.lower():
-                return col
-        return None
-
     # Find the oxygen column
-    oxy = _find(oxygen_col)
-    if oxy is None:
-        raise ValueError(f"flag_salinity_like_oxygen: column {oxygen_col!r} not found")
+    oxy = find_col(df, oxygen_col)
 
     # Auto-detect the salinity column when not given explicitly
-    if salinity_col is None:
-        sal = _find("SALINITY")
-        if sal is None:
-            raise ValueError("flag_salinity_like_oxygen: No SALINITY column found")
-    else:
-        sal = _find(salinity_col)
-        if sal is None:
-            raise ValueError(f"flag_salinity_like_oxygen: Column {salinity_col!r} not found")
+    sal = find_col(df, "SALINITY" if salinity_col is None else salinity_col)
 
     # Suspect rows: Oxygen equals the salinity value
     mask = (df[oxy] - df[sal]).abs() <= tol

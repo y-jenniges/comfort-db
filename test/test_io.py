@@ -313,13 +313,23 @@ class TestSubsetRegion:
         r = subset_region(self._df(), lat_min=15.0, depth_max=200.0)
         assert list(r["LATITUDE"]) == [20.0]
 
-    # A filter on a column absent from df warns and is skipped, not a crash
-    def test_missing_column_warns(self, caplog):
-        df = self._df().drop(columns="LATITUDE")
-        with caplog.at_level(logging.WARNING):
-            r = subset_region(df, lat_min=15.0)
-        assert len(r) == 3  # filter skipped, all rows returned
-        assert "LATITUDE" in caplog.text
+    # A filter on a column absent from df raises instead of returning unfiltered data
+    @pytest.mark.parametrize("column, kwargs", [
+        ("LATITUDE", {"lat_min": 15.0}),
+        ("LONGITUDE", {"lon_max": 12.0}),
+        ("LEV_M", {"depth_max": 200.0}),
+        ("DATEANDTIME", {"date_min": "2005-01-01"}),
+    ])
+    def test_missing_column_raises(self, column, kwargs):
+        df = self._df().drop(columns=column)
+        with pytest.raises(KeyError, match=column):
+            subset_region(df, **kwargs)
+
+    # Column names are looked up insensitive to casing
+    def test_column_names_case_insensitive(self):
+        df = self._df().rename(columns=str.lower)
+        r = subset_region(df, lat_min=15.0, lat_max=25.0, depth_max=200.0, date_min="2001-01-01")
+        assert list(r["latitude"]) == [20.0]
 
     # The returned DataFrame is independent of the input
     def test_returns_copy(self):
@@ -341,15 +351,6 @@ class TestSubsetRegion:
         region = {"box": [(0, 0), (20, 0), (20, 40), (0, 40)]}
         r = subset_region(self._df(), lat_min=25.0, region=region)
         assert list(r["LATITUDE"]) == [30.0]
-
-    # A region requested with LATITUDE/LONGITUDE absent warns and is skipped, not a crash
-    def test_region_missing_columns_warns(self, caplog):
-        region = {"box": [(8, 15), (12, 15), (12, 25), (8, 25)]}
-        df = self._df().drop(columns=["LATITUDE", "LONGITUDE"])
-        with caplog.at_level(logging.WARNING):
-            r = subset_region(df, region=region)
-        assert len(r) == 3
-        assert "Region filter requested" in caplog.text
 
     # A region crossing the antimeridian (e.g. a Pacific basin stored as two parts
     # near +-180) keeps points on both sides of the dateline, not just one
@@ -386,51 +387,57 @@ class TestSubsetRegion:
 
 
 class TestLoadComfort:
-    # as_xarray=False returns a dict keyed by parameter name
+    # An unknown output or policy option raises before any data is loaded
+    @pytest.mark.parametrize("option", ["output", "on_missing", "density_fallback", "interp_method"])
+    def test_invalid_option_raises(self, comfort_db, option):
+        with pytest.raises(ValueError, match=f"{option} must be one of"):
+            load_comfort(comfort_db, **{option: "bogus"})
+
+    # output="dict" returns a dict keyed by parameter name
     def test_as_dict_returns_dict(self, comfort_db):
-        result = load_comfort(comfort_db, as_xarray=False)
+        result = load_comfort(comfort_db, output="dict")
         assert isinstance(result, dict)
         assert "NITRATE" in result
 
     # Each dict entry is a DataFrame
     def test_dict_values_are_dataframes(self, comfort_db):
-        result = load_comfort(comfort_db, as_xarray=False)
+        result = load_comfort(comfort_db, output="dict")
         assert isinstance(result["NITRATE"], pd.DataFrame)
 
     # Station geo columns are joined in dict mode
     def test_dict_contains_geo_columns(self, comfort_db):
-        result = load_comfort(comfort_db, as_xarray=False)
+        result = load_comfort(comfort_db, output="dict")
         assert {"LATITUDE", "LONGITUDE", "DATEANDTIME"}.issubset(result["NITRATE"].columns)
 
     # The generic VAL column is renamed to the parameter's own name
     def test_dict_val_renamed_to_param(self, comfort_db):
-        result = load_comfort(comfort_db, as_xarray=False)
+        result = load_comfort(comfort_db, output="dict")
         assert "NITRATE" in result["NITRATE"].columns
         assert "VAL" not in result["NITRATE"].columns
 
     # target_depths=None (default) keeps each profile's native measured depths
     def test_dict_no_target_depths_keeps_native_depths(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False)
+        result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict")
         assert set(result["NITRATE"]["LEV_M"].unique()) == {0.0, 100.0, 200.0}
 
     # Passing target_depths maps dict output onto it instead
     def test_dict_target_depths_regularises_depths(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, target_depths=[0, 50, 100, 150, 200])
+        result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", target_depths=[0, 50, 100, 150, 200])
         assert set(result["NITRATE"]["LEV_M"].unique()) == {0.0, 50.0, 100.0, 150.0, 200.0}
 
     # max_gap/interp_method are forwarded to the interpolation when target_depths is given
     def test_dict_target_depths_respects_max_gap(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, target_depths=[50], max_gap=50)
+        result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", target_depths=[50], max_gap=50)
         assert result["NITRATE"].empty
 
     # parameters argument restricts the dict to the requested subset
     def test_parameter_filter(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False)
+        result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict")
         assert list(result.keys()) == ["NITRATE"]
 
     # lat_min restricts the returned data to the matching station's rows
     def test_spatial_filter(self, comfort_db):
-        result = load_comfort(comfort_db, lat_min=50.0, as_xarray=False)
+        result = load_comfort(comfort_db, lat_min=50.0, output="dict")
         # Only station 2's profile (lat=55) should survive
         assert result["NITRATE"]["PROFILE_NUMBER"].nunique() == 1
         assert result["NITRATE"]["LATITUDE"].iloc[0] == 55.0
@@ -439,23 +446,23 @@ class TestLoadComfort:
     @needs_shapely
     def test_region_filter(self, comfort_db):
         region = {"box": [(-25, 50), (-15, 50), (-15, 60), (-25, 60)]}
-        result = load_comfort(comfort_db, region=region, as_xarray=False)
+        result = load_comfort(comfort_db, region=region, output="dict")
         # Only station 2's profile (lat=55) should survive
         assert result["NITRATE"]["PROFILE_NUMBER"].nunique() == 1
         assert result["NITRATE"]["LATITUDE"].iloc[0] == 55.0
 
     # depth_max restricts the returned data to rows within the depth bound
     def test_depth_filter(self, comfort_db):
-        result = load_comfort(comfort_db, depth_max=50.0, as_xarray=False)
+        result = load_comfort(comfort_db, depth_max=50.0, output="dict")
         assert (result["NITRATE"]["LEV_M"] <= 50.0).all()
 
     # date_min restricts the returned data to rows within the date bound
     def test_date_filter(self, comfort_db):
-        result = load_comfort(comfort_db, date_min="2003-01-01", as_xarray=False)
+        result = load_comfort(comfort_db, date_min="2003-01-01", output="dict")
         # Only station 2's profile (2005) survives
         assert result["NITRATE"]["PROFILE_NUMBER"].nunique() == 1
 
-    # Default as_xarray=True returns an xarray Dataset
+    # Default output="xarray" returns an xarray Dataset
     def test_xarray_returns_dataset(self, comfort_db):
         xr = pytest.importorskip("xarray")
         result = load_comfort(comfort_db, target_depths=[0, 50, 100, 150, 200])
@@ -529,13 +536,13 @@ class TestLoadComfort:
     # max_gap/interp_method, i.e. interpolation is not applied when target_depths is None (default)
     def test_max_gap_ignored_without_target_depths(self, comfort_db):
         pytest.importorskip("xarray")
-        result = load_comfort(comfort_db, parameters=["NITRATE"], max_gap=0, interp_method="bogus")
+        result = load_comfort(comfort_db, parameters=["NITRATE"], max_gap=0)
         assert not np.isnan(result["NITRATE"].values).any()
 
     # An unknown interp_method raises
     def test_interp_method_invalid_raises(self, comfort_db):
         pytest.importorskip("xarray")
-        with pytest.raises(ValueError, match="Unknown method"):
+        with pytest.raises(ValueError, match="method must be"):
             load_comfort(comfort_db, parameters=["NITRATE"],
                         target_depths=[50], interp_method="bogus")
 
@@ -755,13 +762,14 @@ class TestReadParameter:
         conditions, params = [], []
         _append_geo_conditions(
             conditions, params, "s.", "s.", "p.", "s.",
-            None, None, -180.0, 0.0, None, None, None, None,
-            region_box=(-10.0, 10.0, 170.0, -170.0),
+            lon_min=-180.0, lon_max=0.0, lat_min=None, lat_max=None,
+            depth_min=None, depth_max=None, date_min=None, date_max=None,
+            region_box=(170.0, -170.0, -10.0, 10.0),
         )
         assert "s.LONGITUDE >= ?" in conditions
         assert "s.LONGITUDE <= ?" in conditions
         assert "(s.LONGITUDE >= ? OR s.LONGITUDE <= ?)" in conditions
-        assert params == [-180.0, 0.0, -10.0, 10.0, 170.0, -170.0]
+        assert params == [-180.0, 0.0, 170.0, -170.0, -10.0, 10.0]
 
     # extra_station_cols pulls additional station columns (e.g. CRUISE_ID)
     def test_extra_station_cols(self, comfort_db):
@@ -859,17 +867,17 @@ class TestReadWithGeoSharedQuery:
 class TestLoadComfortLimit:
     # limit argument caps the number of rows returned
     def test_limit_restricts_rows(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, limit=2)
+        result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", limit=2)
         assert len(result["NITRATE"]) <= 2
 
     # limit=None (default) returns every matching row
     def test_limit_none_returns_all(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, limit=None)
+        result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", limit=None)
         assert len(result["NITRATE"]) == 6
 
     # limit returns the first rows in table order, on both readers (load_comfort, read_parameter)
     def test_limit_returns_first_rows_in_table_order(self, comfort_db):
-        loaded = load_comfort(comfort_db, parameters=["NITRATE"], as_xarray=False, limit=4)["NITRATE"]
+        loaded = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", limit=4)["NITRATE"]
         conn = sqlite3.connect(comfort_db)
         read = read_parameter(conn, "NITRATE", limit=4)
         conn.close()
@@ -949,16 +957,24 @@ class TestLoadComfortUnitConversion:
         conn.commit()
         conn.close()
 
-        result = load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, as_xarray=False)
+        result = load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, output="dict")
         df = result["OXYGEN"].sort_values("LEV_M")
         assert len(df) == 2
         assert (df["UNITS_ID"] == 3).all()
+
+    # Unit conversion works for any spelling of the parameter (the molar-mass lookup was case-sensitive)
+    @pytest.mark.parametrize("spelling", ["OXYGEN", "oxygen", "P_OXYGEN", "p_oxygen"])
+    def test_convert_units_accepts_all_spellings(self, oxygen_db, spelling):
+        db_path = oxygen_db(with_ts_tables=True)
+        result = load_comfort(db_path, parameters=[spelling], convert_units=True, output="dict")
+        assert list(result) == ["OXYGEN"]
+        assert (result["OXYGEN"]["UNITS_ID"] == 3).all()
 
     # Default on_missing="drop": A row needing T/S but missing it is dropped, logged
     def test_unconvertible_rows_dropped_with_warning(self, oxygen_db, caplog):
         db_path = oxygen_db(with_ts_tables=False)
         with caplog.at_level(logging.WARNING):
-            result = load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, as_xarray=False)
+            result = load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, output="dict")
         df = result["OXYGEN"]
         assert len(df) == 1
         assert df["OXYGEN"].iloc[0] == 200.0
@@ -967,7 +983,7 @@ class TestLoadComfortUnitConversion:
     # on_missing="keep" keeps the unconverted row instead of dropping it
     def test_unconvertible_rows_kept_on_request(self, oxygen_db):
         db_path = oxygen_db(with_ts_tables=False)
-        result = load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, on_missing="keep", as_xarray=False)
+        result = load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, on_missing="keep", output="dict")
         df = result["OXYGEN"].sort_values("LEV_M")
         assert len(df) == 2
         assert df["OXYGEN"].iloc[0] == 80.0
@@ -977,7 +993,7 @@ class TestLoadComfortUnitConversion:
     def test_unconvertible_rows_raise_on_request(self, oxygen_db):
         db_path = oxygen_db(with_ts_tables=False)
         with pytest.raises(ValueError, match="could not be converted"):
-            load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, on_missing="raise", as_xarray=False)
+            load_comfort(db_path, parameters=["OXYGEN"], convert_units=True, on_missing="raise", output="dict")
 
     # The xarray "units" attr reflects the post-conversion unit, not the mixed source units
     def test_xarray_units_attr_reflects_converted_unit(self, tmp_path):
@@ -1037,8 +1053,8 @@ class TestLoadComfortUnitConversion:
         conn.commit()
         conn.close()
 
-        with_density = load_comfort(db_path, parameters=["DIC"], convert_units=True, use_density=True, as_xarray=False)
-        constant_density = load_comfort(db_path, parameters=["DIC"], convert_units=True, use_density=False, as_xarray=False)
+        with_density = load_comfort(db_path, parameters=["DIC"], convert_units=True, use_density=True, output="dict")
+        constant_density = load_comfort(db_path, parameters=["DIC"], convert_units=True, use_density=False, output="dict")
         assert not np.isclose(with_density["DIC"]["DIC"].iloc[0], constant_density["DIC"]["DIC"].iloc[0])
 
     # A PQF2<=2 salinity duplicate must not enter the joined salinity average
@@ -1080,7 +1096,7 @@ class TestLoadComfortUnitConversion:
         conn.close()
 
         result = load_comfort(db_path, parameters=["SALINITY"], convert_units=True,
-                              use_density=True, as_xarray=False)
+                              use_density=True, output="dict")
         df = result["SALINITY"]
         assert "salinity" not in df.columns
         assert "temperature" not in df.columns
@@ -1093,17 +1109,17 @@ class TestLoadComfortErrorHandling:
     # An unknown parameter raises before anything is loaded
     def test_unknown_parameter_raises(self, comfort_db):
         with pytest.raises(ValueError, match="Unknown parameters.*DOESNOTEXIST"):
-            load_comfort(comfort_db, parameters=["NITRATE", "DOESNOTEXIST"], as_xarray=False)
+            load_comfort(comfort_db, parameters=["NITRATE", "DOESNOTEXIST"], output="dict")
 
     # Parameter names are matched case-insensitively
     def test_parameter_check_is_case_insensitive(self, comfort_db):
-        result = load_comfort(comfort_db, parameters=["nitrate"], as_xarray=False)
+        result = load_comfort(comfort_db, parameters=["nitrate"], output="dict")
         assert len(result) == 1
 
     # convert_units=True without UNITS/DATABASE_TABLES raises instead of silently skipping conversion
     def test_convert_units_without_lookup_tables_raises(self, comfort_db):
         with pytest.raises(ValueError):
-            load_comfort(comfort_db, parameters=["NITRATE"], convert_units=True, as_xarray=False)
+            load_comfort(comfort_db, parameters=["NITRATE"], convert_units=True, output="dict")
 
 
 @needs_xarray
@@ -1156,3 +1172,41 @@ class TestEmptySummaries:
         normal = info(comfort_db)
         assert empty.empty
         assert list(empty.columns) == list(normal.columns)
+
+
+class TestParameterSpellings:
+    """SALINITY, salinity, P_SALINITY and p_salinity are the same parameter everywhere."""
+    names = ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"]
+
+    # load_comfort returns the canonical key whatever was passed
+    @pytest.mark.parametrize("spelling", names)
+    def test_load_comfort_key_and_values(self, comfort_db, spelling):
+        expected = load_comfort(comfort_db, parameters=["NITRATE"], output="dict")["NITRATE"]
+        result = load_comfort(comfort_db, parameters=[spelling], output="dict")
+        assert list(result) == ["NITRATE"]
+        pd.testing.assert_frame_equal(result["NITRATE"], expected)
+
+    # Several spellings of one parameter are loaded once
+    def test_load_comfort_deduplicates(self, comfort_db):
+        result = load_comfort(comfort_db, parameters=["NITRATE", "nitrate", "P_NITRATE"], output="dict")
+        assert list(result) == ["NITRATE"]
+
+    # An unknown parameter is reported in canonical spelling
+    def test_load_comfort_unknown(self, comfort_db):
+        with pytest.raises(ValueError, match="BOGUS"):
+            load_comfort(comfort_db, parameters=["p_bogus"], output="dict")
+
+    @pytest.mark.parametrize("spelling", names)
+    def test_read_parameter(self, comfort_db, spelling):
+        conn = sqlite3.connect(comfort_db)
+        expected = read_parameter(conn, "NITRATE")
+        result = read_parameter(conn, spelling)
+        conn.close()
+        pd.testing.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize("spelling", names)
+    def test_describe_variables(self, comfort_db, spelling):
+        conn = sqlite3.connect(comfort_db)
+        result = describe_variables(conn, parameters=[spelling])
+        conn.close()
+        assert list(result["parameter"]) == ["NITRATE"]

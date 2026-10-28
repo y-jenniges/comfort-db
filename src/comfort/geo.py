@@ -1,12 +1,29 @@
 """Geospatial utility functions for COMFORT data."""
 from __future__ import annotations
 
+__all__ = [
+    "along_track_distance",
+    "classify_from_grid",
+    "distance_to_coast",
+    "load_basins",
+    "load_biomes",
+    "load_jenniges_provinces",
+    "load_longhurst",
+    "region_bbox",
+    "select_regions",
+    "water_mass_masks",
+    "water_mass_statistics",
+]
+
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 import gsw
 import numpy as np
 import pandas as pd
+
+from .util.columns import find_col, resolve_param_columns
+from .util.optional import import_optional
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -18,8 +35,8 @@ logger = logging.getLogger(__name__)
 _EARTH_RADIUS_KM = 6371.0
 
 
-def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
-                      lon_col: str = "LONGITUDE", resolution: str = "110m",
+def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
+                      lat_col: str = "LATITUDE", resolution: str = "110m",
                       coastline_geom: object = None) -> pd.Series:
     """Approximates the distance of each observation to the nearest coastline.
 
@@ -31,9 +48,9 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     out-of-range coordinates get NaN.
 
     Args:
-        df (pandas.DataFrame): DataFrame with latitude and longitude columns.
-        lat_col (str): Latitude column [°N].
+        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
         lon_col (str): Longitude column [°E].
+        lat_col (str): Latitude column [°N].
         resolution (str): Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
             Ignored when ``coastline_geom`` is provided.
         coastline_geom: Pre-loaded coastline as a shapely geometry, list
@@ -41,6 +58,10 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     Returns:
         pandas.Series: Distance to nearest coastline [km], same index as df.
     """
+    # Resolve column names (insensitive to casing)
+    lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
+
     from scipy.spatial import cKDTree
 
     # Load coastline vertices
@@ -49,12 +70,12 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
         logger.error("distance_to_coast: no coastline points could be loaded")
         return pd.Series(np.nan, index=df.index)
 
-    # Get observes lat/lon
-    obs_lat = df[lat_col].values.astype(float)
+    # Get observed lon/lat
     obs_lon = df[lon_col].values.astype(float)
+    obs_lat = df[lat_col].values.astype(float)
 
     # Rows with unusable coordinates stay NaN
-    valid = (np.isfinite(obs_lat) & np.isfinite(obs_lon) & (np.abs(obs_lat) <= 90) & (np.abs(obs_lon) <= 180))
+    valid = (np.isfinite(obs_lon) & np.isfinite(obs_lat) & (np.abs(obs_lon) <= 180) & (np.abs(obs_lat) <= 90))
     if not valid.all():
         # Log count of invalid coordinates
         logger.warning("distance_to_coast: %d of %d rows have missing or invalid "
@@ -63,8 +84,8 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     result = np.full(len(df), np.nan)
     if valid.any():
         # Build the k-d tree on unit sphere coordinates
-        tree = cKDTree(_to_unit_sphere(coast_pts[:, 1], coast_pts[:, 0]))
-        euclidean_dist, _ = tree.query(_to_unit_sphere(obs_lat[valid], obs_lon[valid]), k=1)
+        tree = cKDTree(_to_unit_sphere(coast_pts[:, 0], coast_pts[:, 1]))
+        euclidean_dist, _ = tree.query(_to_unit_sphere(obs_lon[valid], obs_lat[valid]), k=1)
 
         # Euclidean length on the unit sphere back to arc length (clip to prevent float overshoot)
         result[valid] = 2 * _EARTH_RADIUS_KM * np.arcsin(np.clip(euclidean_dist / 2, 0.0, 1.0))
@@ -72,17 +93,17 @@ def distance_to_coast(df: pd.DataFrame, lat_col: str = "LATITUDE",
     return pd.Series(result, index=df.index)
 
 
-def _to_unit_sphere(lat_deg, lon_deg) -> np.ndarray:
+def _to_unit_sphere(lon_deg, lat_deg) -> np.ndarray:
     """Return an (N, 3) array of unit-sphere xyz coordinates."""
-    lat_r = np.radians(lat_deg)
     lon_r = np.radians(lon_deg)
+    lat_r = np.radians(lat_deg)
     return np.column_stack([np.cos(lat_r) * np.cos(lon_r),
                             np.cos(lat_r) * np.sin(lon_r),
                             np.sin(lat_r)])
 
 
-def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
-                         lon_col: str = "LONGITUDE", order_col: str | None = None,
+def along_track_distance(df: pd.DataFrame, lon_col: str = "LONGITUDE",
+                         lat_col: str = "LATITUDE", order_col: str | None = None,
                          station_col: str | list[str] | None = None) -> pd.Series:
     """Cumulative great-circle distance along a track [km].
 
@@ -90,30 +111,36 @@ def along_track_distance(df: pd.DataFrame, lat_col: str = "LATITUDE",
     ``gsw.distance`` between consecutive stations.
 
     Args:
-        df (pandas.DataFrame): DataFrame with latitude/longitude columns.
-        lat_col (str): Latitude column [°N].
+        df (pandas.DataFrame): DataFrame with longitude/latitude columns.
         lon_col (str): Longitude column [°E].
+        lat_col (str): Latitude column [°N].
         order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``).
             Defaults to first-appearance order.
         station_col (str or list[str]): Column(s) identifying a station
             (e.g. ``"ID"``). Defaults to ``None``, i.e. stations at identical
-            ``(lat_col, lon_col)`` are treated as one.
+            ``(lon_col, lat_col)`` are treated as one.
     Returns:
         pandas.Series: Cumulative distance [km] from the first station,
         same index as df.
     """
+    # Resolve column names (insensitive to casing)
+    lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
+    order_col = find_col(df, order_col)
+    station_col = find_col(df, station_col)
+
     # Label each row with its station
     if station_col is None:
-        # Use lat/lon as station key
-        key = [lat_col, lon_col]
+        # Use lon/lat as station key
+        key = [lon_col, lat_col]
     else:
         # Use passed station column(s) as station key
         key = [station_col] if isinstance(station_col, str) else list(station_col)
     station_id = df.groupby(key, sort=False, dropna=False).ngroup().values  # give each station a unique int key
 
     # Reduce to one row per station, ordered along the track
-    per_row = pd.DataFrame({"lat": df[lat_col].values, "lon": df[lon_col].values, "station": station_id})
-    agg = {"lat": "first", "lon": "first"}
+    per_row = pd.DataFrame({"lon": df[lon_col].values, "lat": df[lat_col].values, "station": station_id})
+    agg = {"lon": "first", "lat": "first"}
     if order_col is not None:
         # Add column to order by to per_row and define aggregation
         per_row["order"] = df[order_col].values
@@ -145,13 +172,7 @@ def _get_coast_points(resolution, coastline_geom):
 
     if coastline_geom is None:
         # Load cartopy coastlines
-        try:
-            import cartopy.io.shapereader as shpreader
-        except ImportError:
-            raise ImportError(
-                "cartopy is required for distance_to_coast; "
-                "install it with: pip install cartopy"
-            )
+        shpreader = import_optional("cartopy.io.shapereader", "geo", "distance_to_coast")
         path = shpreader.natural_earth(
             resolution=resolution, category="physical", name="coastline"
         )
@@ -194,7 +215,7 @@ def _extract_coords(geom, coords):
 
 
 def load_longhurst(path: str | Path, code_col: str | None = None,
-                   name_col: str | None = None) -> gpd.GeoDataFrame:
+                   region_name_col: str | None = None) -> gpd.GeoDataFrame:
     """Load Longhurst province boundaries from a shapefile.
 
     Returns a GeoDataFrame with columns ``province_code``,
@@ -206,18 +227,11 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     Args:
         path (str or Path): Path to the Longhurst ``.shp`` file.
         code_col (str): Province code column. Auto-detected when ``None``.
-        name_col (str): Province description column. Auto-detected when ``None``.
+        region_name_col (str): Province description column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Standardised province boundaries.
     """
-    # Check if geopandas is installed
-    try:
-        import geopandas as gpd
-    except ImportError:
-        raise ImportError(
-            "geopandas is required for load_longhurst; "
-            "install it with: pip install \"comfort-db[geo]\""
-        )
+    gpd = import_optional("geopandas", "geo", "load_longhurst")
 
     # Read shapefile
     gdf = gpd.read_file(path)
@@ -228,22 +242,26 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     # Define province code and name columns
     if code_col is None:
         code_col = next((c for c in _CODE_CANDIDATES if c in gdf.columns), None)
-    if name_col is None:
-        name_col = next((c for c in _NAME_CANDIDATES if c in gdf.columns), None)
+    if region_name_col is None:
+        region_name_col = next((c for c in _NAME_CANDIDATES if c in gdf.columns), None)
 
     # Ensure that a code and name columns were found
-    if code_col is None or name_col is None:
+    if code_col is None or region_name_col is None:
         raise ValueError(
             f"Could not detect code/name columns in {list(gdf.columns)}. "
-            "Pass code_col and name_col explicitly."
+            "Pass code_col and region_name_col explicitly."
         )
 
-    return gdf[[code_col, name_col, "geometry"]].rename(
-        columns={code_col: "province_code", name_col: "province_name"}
+    # Resolve column names (insensitive to casing)
+    code_col = find_col(gdf, code_col)
+    region_name_col = find_col(gdf, region_name_col)
+
+    return gdf[[code_col, region_name_col, "geometry"]].rename(
+        columns={code_col: "province_code", region_name_col: "province_name"}
     )
 
 
-def load_basins(path: str | Path, name_col: str | None = None) -> gpd.GeoDataFrame:
+def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.GeoDataFrame:
     """Load "Global Oceans and Seas" basin boundaries from a shapefile
     (Flanders Marine Institute (2021). Global Oceans and Seas, version 1.
     Available online at https://www.marineregions.org/. https://doi.org/10.14284/542).
@@ -252,30 +270,24 @@ def load_basins(path: str | Path, name_col: str | None = None) -> gpd.GeoDataFra
 
     Args:
         path (str or Path): Path to the basins ``.shp`` file.
-        name_col (str): Basin name column. Auto-detected when ``None``.
+        region_name_col (str): Basin name column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Basin boundaries with columns ``basin_name`` and ``geometry``.
     """
-    # Check if geopandas is installed
-    try:
-        import geopandas as gpd
-    except ImportError:
-        raise ImportError(
-            "geopandas is required for load_basins. "
-            "Install it with: pip install \"comfort-db[geo]\""
-        )
+    gpd = import_optional("geopandas", "geo", "load_basins")
 
     # Read shapefile
     gdf = gpd.read_file(path)
 
     # Define basin name column (case-insensitive match)
-    if name_col is None:
+    if region_name_col is None:
         cols_lower = {c.lower(): c for c in gdf.columns}
-        name_col = cols_lower.get("name")
-    if name_col is None:
-        raise ValueError(f"Could not detect name column in {list(gdf.columns)}. Pass name_col explicitly.")
+        region_name_col = cols_lower.get("name")
+    if region_name_col is None:
+        raise ValueError(f"Could not detect name column in {list(gdf.columns)}. Pass region_name_col explicitly.")
+    region_name_col = find_col(gdf, region_name_col)
 
-    return gdf[[name_col, "geometry"]].rename(columns={name_col: "basin_name"})
+    return gdf[[region_name_col, "geometry"]].rename(columns={region_name_col: "basin_name"})
 
 
 def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
@@ -292,17 +304,10 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
         biome_var (str): Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
             ``"TimeVaryingBiomes"``).
     Returns:
-        pandas.DataFrame: Columns ``LATITUDE``, ``LONGITUDE``, ``label``
+        pandas.DataFrame: Columns ``LONGITUDE``, ``LATITUDE``, ``label``
         (and ``YEAR`` if *biome_var* is ``"TimeVaryingBiomes"``).
     """
-    # Check if xarray is installed
-    try:
-        import xarray as xr
-    except ImportError:
-        raise ImportError(
-            "xarray is required for load_biomes; "
-            "install it with: pip install \"comfort-db[grid]\""
-        )
+    xr = import_optional("xarray", "grid", "load_biomes")
 
     # Read NetCDF file
     ds = xr.open_dataset(path)
@@ -323,16 +328,16 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     df = da.to_dataframe(name="label").reset_index()  # to df
     df = df.rename(columns={"lat": "LATITUDE", "lon": "LONGITUDE"})  # rename to library convention
     df = df.dropna(subset=["label"])  # drop land/no-biome cells
-    out_cols = ["LATITUDE", "LONGITUDE", "label"]
+    out_cols = ["LONGITUDE", "LATITUDE", "label"]
     if time_dim is not None:
         # Add time dimension if present
         df = df.rename(columns={time_dim: time_dim.upper()})
-        out_cols = ["LATITUDE", "LONGITUDE", time_dim.upper(), "label"]
+        out_cols = ["LONGITUDE", "LATITUDE", time_dim.upper(), "label"]
     return df[out_cols].reset_index(drop=True)
 
 
 def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataFrame,
-                     lat_col: str = "LATITUDE", lon_col: str = "LONGITUDE",
+                     lon_col: str = "LONGITUDE", lat_col: str = "LATITUDE",
                      region_name_col: str = "name",
                      output_col: str = "region") -> pd.DataFrame:
     """Assign each observation to a 2d geographic region.
@@ -352,16 +357,20 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``.
 
     Args:
-        df (pandas.DataFrame): DataFrame with latitude and longitude columns.
+        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
         regions: Region definitions in any format listed above.
-        lat_col (str): Latitude column [°N].
         lon_col (str): Longitude column [°E].
+        lat_col (str): Latitude column [°N].
         region_name_col (str): Region name column in GeoDataFrame / CSV.
             Ignored for dict input. Default ``"name"``.
         output_col (str): Name of the new column. Default ``"region"``.
     Returns:
         pandas.DataFrame: Copy of df with an added ``output_col`` column.
     """
+    # Resolve column names (insensitive to casing)
+    lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
+
     # Get regions and their polygons
     named_regions = _parse_regions(regions, region_name_col)
 
@@ -401,14 +410,14 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
         pass
 
     # Fallback: pure shapely containment test
-    from shapely.geometry import Point
+    Point = import_optional("shapely.geometry", "geo", "water_mass_masks").Point
 
     # Iterate over observations
     labels = []
     for _, row in df.iterrows():
         # Containment test
         pt = Point(row[lon_col], row[lat_col])
-        match = next((name for name, poly in named_regions if poly.intersects(pt)), None)
+        match = next((region_name for region_name, poly in named_regions if poly.intersects(pt)), None)
         labels.append(match)
 
     # Assemble final df
@@ -417,27 +426,26 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     return result
 
 
-def water_mass_statistics(df: pd.DataFrame, param_cols: list[str] | str,
+def water_mass_statistics(df: pd.DataFrame, parameters: list[str] | str,
                           region_col: str = "region") -> pd.DataFrame:
     """Compute per-region descriptive statistics for one or more parameters.
 
     Args:
         df (pandas.DataFrame): DataFrame with region assignments
             (from :func:`water_mass_masks`) and parameter columns.
-        param_cols (list[str]): Parameter columns to aggregate.
+        parameters (list[str] or str): Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
         region_col (str): Region column. Default ``"region"``.
     Returns:
         pandas.DataFrame: MultiIndex columns ``(parameter, statistic)``
             with count, mean, std, min, max. Rows are regions.
     """
-    if isinstance(param_cols, str):
-        param_cols = [param_cols]
-    return df.groupby(region_col)[param_cols].agg(["count", "mean", "std", "min", "max"])
+    parameters = resolve_param_columns(df, parameters)
+    return df.groupby(region_col)[parameters].agg(["count", "mean", "std", "min", "max"])
 
 
 def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
                 region_name_col: str = "name") -> tuple[float, float, float, float]:
-    """Return the lat/lon bounding box of one or more regions.
+    """Return the lon/lat bounding box of one or more regions.
 
     Intended to derive a bounding box for a cheap SQL query before an exact polygon refined region search,
     see ``region=`` on :func:`comfort.io.load_comfort`/:func:`~comfort.io.read_parameter`/:func:`~comfort.io.subset_region`.
@@ -449,7 +457,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
         regions: Region definition(s), same formats as water_mass_masks.
         region_name_col (str): Region name column. See water_mass_masks.
     Returns:
-        tuple[float, float, float, float]: ``(lat_min, lat_max, lon_min, lon_max)``.
+        tuple[float, float, float, float]: ``(lon_min, lon_max, lat_min, lat_max)``.
     """
     # Get a dict of (region_name, polygon)
     named_regions = _parse_regions(regions, region_name_col)
@@ -476,7 +484,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
         lon_min = s_min if s_min <= 180 else s_min - 360  # project back to [-180, 180]
         lon_max = s_max if s_max <= 180 else s_max - 360
 
-    return min(all_lats), max(all_lats), lon_min, lon_max
+    return lon_min, lon_max, min(all_lats), max(all_lats)
 
 
 def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
@@ -500,7 +508,7 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
     named_regions = _parse_regions(regions, region_name_col)
 
     # Filter for the requested regions
-    selected = {name: poly for name, poly in named_regions if name in names}
+    selected = {region_name: poly for region_name, poly in named_regions if region_name in names}
 
     # Raise if a region name was not found
     missing = set(names) - set(selected)
@@ -510,16 +518,9 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
     return selected
 
 
-def _resolve_name_col(columns, region_name_col):
-    """Return region_name_col, raising an error if it is not in columns."""
-    if region_name_col not in columns:
-        raise ValueError(f"Could not find region name column {region_name_col!r} in {list(columns)}.")
-    return region_name_col
-
-
 def _check_lonlat(named_regions):
     """Raise ValueError if any region coordinate is outside lon/lat range."""
-    for name, poly in named_regions:
+    for region_name, poly in named_regions:
         # Skip empt polygons
         if poly.is_empty:
             continue
@@ -530,7 +531,7 @@ def _check_lonlat(named_regions):
         # Check if bounds are valid
         if lon_min < -180 or lon_max > 360 or lat_min < -90 or lat_max > 90:
             raise ValueError(
-                f"Region {name!r} has coordinates outside lon/lat range (bounds "
+                f"Region {region_name!r} has coordinates outside lon/lat range (bounds "
                 f"{poly.bounds}); regions must be in degrees. For a GeoDataFrame with an "
                 "unknown CRS, set it first with gdf.set_crs(...)."
             )
@@ -553,22 +554,22 @@ def _to_lonlat(geo):
 
 def _parse_regions(regions, region_name_col):
     """Return a list of ``(name, shapely.Polygon)`` tuples from any input format."""
-    from shapely.geometry import Polygon
+    Polygon = import_optional("shapely.geometry", "geo", "regions").Polygon
 
     # Regions as dict
     if isinstance(regions, dict):
         result = []
-        for name, geom in regions.items():
+        for region_name, geom in regions.items():
             poly = geom if hasattr(geom, "contains") else Polygon(geom)
-            result.append((name, poly))
+            result.append((region_name, poly))
         return _check_lonlat(result)
 
     # Regions as CSV
     path = Path(regions) if isinstance(regions, (str, Path)) else None
     if path is not None and path.suffix.lower() == ".csv":
-        from shapely import wkt
+        wkt = import_optional("shapely.wkt", "geo", "regions")
         csv_df = pd.read_csv(path)
-        name_col = _resolve_name_col(csv_df.columns, region_name_col)
+        name_col = find_col(csv_df, region_name_col)
         return _check_lonlat([
             (row[name_col], wkt.loads(row["geometry"]))
             for _, row in csv_df.iterrows()
@@ -576,15 +577,9 @@ def _parse_regions(regions, region_name_col):
 
     # Regions as shapefile
     if path is not None and path.suffix.lower() == ".shp":
-        try:
-            import geopandas as gpd
-        except ImportError:
-            raise ImportError(
-                "geopandas is required to read shapefiles; "
-                "install it with: pip install \"comfort-db[geo]\""
-            )
+        gpd = import_optional("geopandas", "geo", "reading shapefile regions")
         gdf = _to_lonlat(gpd.read_file(path))
-        name_col = _resolve_name_col(gdf.columns, region_name_col)
+        name_col = find_col(gdf, region_name_col)
         return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]
 
     # Regions as gpd
@@ -594,7 +589,7 @@ def _parse_regions(regions, region_name_col):
             return list(_to_lonlat(regions).items())
         if isinstance(regions, gpd.GeoDataFrame):
             gdf = _to_lonlat(regions)
-            name_col = _resolve_name_col(gdf.columns, region_name_col)
+            name_col = find_col(gdf, region_name_col)
             return [(row[name_col], row.geometry) for _, row in gdf.iterrows()]
     except ImportError:
         pass
@@ -608,7 +603,7 @@ def _parse_regions(regions, region_name_col):
 def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.DataFrame:
     """Load Jenniges biogeochemical provinces from a cluster CSV file.
 
-    The CSV must have columns ``LATITUDE``, ``LONGITUDE``,
+    The CSV must have columns ``LONGITUDE``, ``LATITUDE``,
     ``LEV_M`` and ``label``. The standard file is ``cluster_set.csv``
     from `Zenodo record 15201767 <https://zenodo.org/records/15201767>`_.
 
@@ -643,9 +638,9 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
 
 
 def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
-                       lat_col: str = "LATITUDE", lon_col: str = "LONGITUDE",
-                       grid_lat_col: str = "LATITUDE",
+                       lon_col: str = "LONGITUDE", lat_col: str = "LATITUDE",
                        grid_lon_col: str = "LONGITUDE",
+                       grid_lat_col: str = "LATITUDE",
                        label_col: str = "label",
                        output_col: str = "label",
                        time_col: str | None = None,
@@ -660,13 +655,13 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
     only in that time step.
 
     Args:
-        df (pandas.DataFrame): Observation DataFrame with lat/lon columns.
+        df (pandas.DataFrame): Observation DataFrame with lon/lat columns.
         grid_df (pandas.DataFrame): Labelled grid (e.g. from
             :func:`load_jenniges_provinces` or :func:`load_biomes`).
-        lat_col (str): Latitude column in *df*.
         lon_col (str): Longitude column in *df*.
-        grid_lat_col (str): Latitude column in *grid_df*.
+        lat_col (str): Latitude column in *df*.
         grid_lon_col (str): Longitude column in *grid_df*.
+        grid_lat_col (str): Latitude column in *grid_df*.
         label_col (str): Label column in *grid_df*.
         output_col (str): Name of the new column added to the result.
         time_col (str): Time column in *df* (e.g. year) to match against
@@ -676,6 +671,14 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
     Returns:
         pandas.DataFrame: Copy of *df* with an added *output_col* column.
     """
+    # Resolve column names (insensitive to casing)
+    lon_col = find_col(df, lon_col)
+    lat_col = find_col(df, lat_col)
+    time_col = find_col(df, time_col)
+    grid_lon_col = find_col(grid_df, grid_lon_col)
+    grid_lat_col = find_col(grid_df, grid_lat_col)
+    label_col = find_col(grid_df, label_col)
+
     result = df.copy()
 
     # Spatial nearest neighbours (if no time_col is given)
@@ -690,7 +693,7 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
         return result
 
     # Temporal nearest neighbours
-    grid_time_col = grid_time_col or time_col
+    grid_time_col = find_col(grid_df, grid_time_col or time_col)
     grid_times = np.sort(grid_df[grid_time_col].unique().astype(float))  # all sorted grid times
     obs_times = df[time_col].values.astype(float)  # all observation times
     nearest_times = grid_times[np.abs(obs_times[:, None] - grid_times[None, :]).argmin(axis=1)]
@@ -729,6 +732,6 @@ def _nearest_labels(obs_lon, obs_lat, grid_lon, grid_lat, grid_labels):
     # Construct neighbourhood graph
     tree = cKDTree(grid_coords)
 
-    # Retrun the one nearest neighbour for each observation
+    # Return the one nearest neighbour for each observation
     _, idxs = tree.query(obs_coords, k=1)
     return grid_labels[idxs]

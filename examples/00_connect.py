@@ -51,11 +51,11 @@ dfs = comfort.load_comfort(
     quality_flags=QC_GOOD,
     lat_min=30, lat_max=70,
     date_min="2000-01-01",
-    as_xarray=False,
+    output="dict",
 )
-for name, df in dfs.items():
+for parameter, df in dfs.items():
     print(
-        f"{name}: {len(df)} rows, profiles {df['PROFILE_NUMBER'].nunique()}, "
+        f"{parameter}: {len(df)} rows, profiles {df['PROFILE_NUMBER'].nunique()}, "
         f"n instruments {df['INSTRUMENT_ID'].nunique()}")
 print()
 
@@ -66,7 +66,7 @@ ds = comfort.load_comfort(
     parameters=["NITRATE"],
     quality_flags=QC_GOOD,
     target_depths=[0, 50, 100, 200, 500, 1000],
-    as_xarray=True,
+    output="xarray",
 )
 print("--- xarray Dataset ---")
 print(ds, "\n")
@@ -77,8 +77,8 @@ if BATHYMETRY_PATH:
 
     # Create grid with 5-year time steps
     grid = Grid(
-        lat_min=30, lat_max=70, dlat=5,
         lon_min=-80, lon_max=0, dlon=5,
+        lat_min=30, lat_max=70, dlat=5,
         bathymetry_grid_path=BATHYMETRY_PATH,
         z_array=[0, 100, 500, 1000],
         time_min="2000-01-01", time_max="2020-12-31",

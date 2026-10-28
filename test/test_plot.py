@@ -16,24 +16,21 @@ from matplotlib.collections import QuadMesh
 from matplotlib.contour import QuadContourSet
 
 import comfort
+from comfort.database import (
+    count_samples_over_time,
+    find_spatiotemporal_duplicates,
+)
 from comfort.plot import (
     boxplot,
     compare_stats,
-    count_and_plot_negative_samples,
-    count_and_plot_samples_over_time,
-    count_and_plot_samples_per_parameter,
-    count_negative_samples,
-    count_samples_over_time,
-    count_samples_over_time_from_db,
-    count_samples_per_parameter,
-    detect_and_plot_spatiotemporal_duplicates,
     plot_annual_coverage,
     plot_correlation,
     plot_counts_bar,
     plot_depth_coverage,
+    plot_duplicates,
     plot_histogram,
     plot_joint,
-    plot_lat_lon_range,
+    plot_lon_lat_range,
     plot_missing_value_info,
     plot_missing_value_info_map_joint,
     plot_missing_value_info_map_over_depth,
@@ -110,6 +107,13 @@ class TestPlotProfile:
         assert ax is not None
         plt.close()
 
+    # xlabel / ylabel override the value and depth axis labels
+    def test_axis_labels(self, demo_conn):
+        ax = plot_profile(conn=demo_conn, parameter="TEMPERATURE", profiles=[0], xlabel="T [C]", ylabel="Z [m]")
+        assert ax.get_xlabel() == "T [C]"
+        assert ax.get_ylabel() == "Z [m]"
+        plt.close()
+
     # A profiles filter matching nothing returns None instead of an empty plot
     def test_empty_returns_none(self, demo_conn):
         df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
@@ -128,6 +132,15 @@ class TestPlotProfile:
         df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
         ax = plot_profile(df, profiles=[0], show_points=False)
         assert ax.lines[0].get_marker() == "None"
+        plt.close()
+
+    # xlabel / ylabel label the along-track and depth axes, colourbar_label the colourbar
+    def test_section_labels(self, demo_conn):
+        ax = plot_section(conn=demo_conn, parameter="OXYGEN", xlabel="Latitude", ylabel="Z [m]",
+                          colourbar_label="O2")
+        assert ax.get_xlabel() == "Latitude"
+        assert ax.get_ylabel() == "Z [m]"
+        assert ax.figure.axes[-1].get_ylabel() == "O2"
         plt.close()
 
     # Section plot works when loading straight from the database
@@ -157,33 +170,33 @@ class TestPlotTSDiagram:
     # TEOS-10 variables (SA/CT) draw isopycnal contours
     def test_with_density_contours(self, demo_conn):
         dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY"],
-                                   as_xarray=False)
+                                   output="dict")
         df = dfs["TEMPERATURE"].rename(columns={"TEMPERATURE": "T"})
         df["S"] = dfs["SALINITY"]["SALINITY"].values
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S", temp_type="CT", sal_type="SA")
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="CT", salinity_type="SA")
         assert any(isinstance(c, QuadContourSet) for c in ax.collections)
         plt.close()
 
     # density_contours=False skips the isopycnal overlay
     def test_without_contours(self, demo_conn):
         dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY"],
-                                   as_xarray=False)
+                                   output="dict")
         df = dfs["TEMPERATURE"].rename(columns={"TEMPERATURE": "T"})
         df["S"] = dfs["SALINITY"]["SALINITY"].values
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S", density_contours=False)
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", density_contours=False)
         assert not any(isinstance(c, QuadContourSet) for c in ax.collections)
         plt.close()
 
     # An empty input DataFrame returns None instead of an empty plot
     def test_empty_returns_none(self):
         df = pd.DataFrame({"T": [], "S": [], "LEV_M": []})
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S")
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S")
         assert ax is None
 
     def test_axis_labels_teos10(self):
         """Default SA/CT types produce proper TEOS-10 axis labels."""
         df = pd.DataFrame({"CT": [10.0, 12.0], "SA": [35.0, 35.5], "LEV_M": [10, 20]})
-        ax = plot_ts_diagram(df, temp_col="CT", sal_col="SA", temp_type="CT", sal_type="SA",
+        ax = plot_ts_diagram(df, temperature_col="CT", salinity_col="SA", temperature_type="CT", salinity_type="SA",
                              density_contours=False)
         assert r"$S_A$" in ax.get_xlabel()
         assert "g kg" in ax.get_xlabel()
@@ -194,7 +207,7 @@ class TestPlotTSDiagram:
     def test_axis_labels_practical(self):
         """SP/t types produce appropriate fallback labels."""
         df = pd.DataFrame({"T": [10.0, 12.0], "S": [35.0, 35.5], "LEV_M": [10, 20]})
-        ax = plot_ts_diagram(df, temp_col="T", sal_col="S", temp_type="t", sal_type="SP",
+        ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="t", salinity_type="SP",
                              density_contours=False)
         assert r"$S_P$" in ax.get_xlabel()
         assert r"$T$" in ax.get_ylabel()
@@ -205,7 +218,7 @@ class TestPlotTSDiagram:
         import logging
         df = pd.DataFrame({"T": [10.0, 12.0], "S": [35.0, 35.5], "LEV_M": [10, 20]})
         with caplog.at_level(logging.WARNING, logger="comfort.plot.relationships"):
-            ax = plot_ts_diagram(df, temp_col="T", sal_col="S", temp_type="t", sal_type="SP",
+            ax = plot_ts_diagram(df, temperature_col="T", salinity_col="S", temperature_type="t", salinity_type="SP",
                                  density_contours=True)
         assert ax is not None
         assert any("inaccurate" in r.message for r in caplog.records)
@@ -226,6 +239,20 @@ class TestPlotCorrelation:
     def test_from_database(self, demo_conn):
         ax = plot_correlation(conn=demo_conn, parameters=("TEMPERATURE", "OXYGEN"))
         assert ax is not None
+        plt.close()
+
+    # Parameters in any spelling find their tables
+    @pytest.mark.parametrize("pair", [("temperature", "P_OXYGEN"), ("p_temperature", "oxygen")])
+    def test_from_database_spellings(self, demo_conn, pair):
+        ax = plot_correlation(conn=demo_conn, parameters=pair)
+        assert ax is not None
+        plt.close()
+
+    # plot_joint takes parameters in any spelling too
+    @pytest.mark.parametrize("pair", [("temperature", "P_SALINITY"), ("p_temperature", "salinity")])
+    def test_joint_from_database_spellings(self, demo_conn, pair):
+        g = plot_joint(conn=demo_conn, parameters=pair, kind="scatter")
+        assert g is not None
         plt.close()
 
     # plot_joint wraps seaborn's JointGrid for the same database-mode input
@@ -265,7 +292,7 @@ class TestDistributions:
 
     # compare_stats draws comparative boxplots across a grouping column
     def test_compare_stats(self, demo_conn):
-        dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"], as_xarray=False)
+        dfs = comfort.load_comfort(demo_conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"], output="dict")
         df = dfs["TEMPERATURE"][["PROFILE_NUMBER", "LEV_M"]].copy()
         df["TEMPERATURE"] = dfs["TEMPERATURE"]["TEMPERATURE"].values
         df["SALINITY"] = dfs["SALINITY"]["SALINITY"].values
@@ -281,18 +308,9 @@ class TestDistributions:
 #--- Counting --------------------------------------------------------#
 
 class TestCounting:
-    # Yearly binning of an already-loaded DataFrame
-    def test_count_samples_over_time_year(self, demo_conn):
-        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
-        counts = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
-        assert "YEAR" in counts.columns
-        assert "COUNT" in counts.columns
-        assert counts["COUNT"].sum() == len(df)
-
     # The counts DataFrame renders as a bar chart, one bar per row
     def test_plot_counts_bar(self, demo_conn):
-        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
-        counts = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
+        counts = count_samples_over_time(demo_conn, "TEMPERATURE", time_mode="year")
         ax = plot_counts_bar(counts)
         assert len(ax.patches) == len(counts)
         plt.close()
@@ -331,6 +349,19 @@ class TestPlotAnnualCoverage:
 #--- Depth coverage --------------------------------------------------#
 
 class TestPlotDepthCoverage:
+    # Parameter names in any spelling find the P_* columns of a wide table
+    def test_parameter_spellings(self):
+        df_wide = pd.DataFrame({"LEV_M": [0, 50], "P_TEMPERATURE": [1.0, 2.0], "P_SALINITY": [35.0, np.nan]})
+        ax = plot_depth_coverage(df_wide, ["temperature", "p_salinity"])
+        assert len(ax.lines) == 2
+        plt.close()
+
+    # A parameter without a column is an error
+    def test_unknown_parameter_raises(self):
+        df_wide = pd.DataFrame({"LEV_M": [0, 50], "P_TEMPERATURE": [1.0, 2.0]})
+        with pytest.raises(KeyError, match="OXYGEN"):
+            plot_depth_coverage(df_wide, ["OXYGEN"])
+
     # One line per parameter column, y-axis inverted (deeper = lower)
     def test_basic(self):
         df_wide = pd.DataFrame({
@@ -367,77 +398,20 @@ class TestDualModeErrors:
             plot_histogram(conn=demo_conn)
 
 
-class TestComputeOnlyCountFunctions:
-    # Default yearly binning straight from the database
-    def test_count_samples_over_time_from_db(self, demo_conn):
-        result = count_samples_over_time_from_db(demo_conn, "TEMPERATURE")
-        assert "YEAR" in result.columns
-        assert "COUNT" in result.columns
-        assert result["COUNT"].sum() > 0
-
-    # time_mode="month" switches the binning granularity
-    def test_count_samples_over_time_from_db_month(self, demo_conn):
-        result = count_samples_over_time_from_db(demo_conn, "TEMPERATURE", time_mode="month")
-        assert "MONTH" in result.columns
-
-    # Counts are reported per requested parameter
-    def test_count_samples_per_parameter(self, demo_conn):
-        result = count_samples_per_parameter(demo_conn, ["TEMPERATURE", "SALINITY"])
-        assert len(result) == 2
-        assert set(result["parameter"]) == {"TEMPERATURE", "SALINITY"}
-        assert (result["count"] > 0).all()
-
-    # parameters=None discovers and counts every parameter table
-    def test_count_samples_per_parameter_default_all(self, demo_conn):
-        result = count_samples_per_parameter(demo_conn)
-        assert len(result) == 3  # TEMPERATURE, SALINITY, OXYGEN
-
-    # Proportion of negative samples per parameter
-    def test_count_negative_samples(self, demo_conn):
-        result = count_negative_samples(demo_conn, ["TEMPERATURE", "OXYGEN"])
-        assert "parameter" in result.columns
-        assert "proportion of negative samples" in result.columns
-        assert len(result) == 2
-
-
-class TestCountAndPlotWrappers:
-    # The plot+compute wrapper returns the same data as the compute-only function
-    def test_count_and_plot_samples_over_time(self, demo_conn):
-        result = count_and_plot_samples_over_time(demo_conn, "TEMPERATURE")
-        expected = count_samples_over_time_from_db(demo_conn, "TEMPERATURE")
-        pd.testing.assert_frame_equal(result, expected)
-        plt.close()
-
-    # Same data claim as above, for the per-parameter counter
-    def test_count_and_plot_samples_per_parameter(self, demo_conn):
-        result = count_and_plot_samples_per_parameter(demo_conn, ["TEMPERATURE", "SALINITY"])
-        expected = count_samples_per_parameter(demo_conn, ["TEMPERATURE", "SALINITY"])
-        pd.testing.assert_frame_equal(result, expected)
-        plt.close()
-
-    # Same data claim as above, for the negative-sample counter
-    def test_count_and_plot_negative_samples(self, demo_conn):
-        result = count_and_plot_negative_samples(demo_conn, ["TEMPERATURE", "OXYGEN"])
-        expected = count_negative_samples(demo_conn, ["TEMPERATURE", "OXYGEN"])
-        pd.testing.assert_frame_equal(result, expected)
-        plt.close()
-
-    # No duplicated (ID, LEV_M, DATEANDTIME) triples in the clean fixture
-    def test_detect_and_plot_spatiotemporal_duplicates_none_found(self, demo_conn):
-        result = detect_and_plot_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
-        assert result.empty
-
-    # A duplicated (ID, LEV_M, DATEANDTIME) triple is reported as one summary row
-    def test_detect_and_plot_spatiotemporal_duplicates_found(self, demo_conn):
-        # Duplicate the (ID=0, LEV_M=0.0) sample so a time/location duplicate exists
-        demo_conn.execute(
-            "INSERT INTO P_TEMPERATURE VALUES (0,0.0,0.0,19.0,1,3,0,7,0,1,1,1)"
-        )
+class TestPlotDuplicates:
+    # The plot draws the summary chart from the finder output
+    def test_plot_duplicates(self, demo_conn):
+        demo_conn.execute("INSERT INTO P_TEMPERATURE VALUES (0,0.0,0.0,19.0,1,3,0,7,0,1,1,1)")
         demo_conn.commit()
-        result = detect_and_plot_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
-        assert len(result) == 1
-        assert result.iloc[0]["number of time loc duplicates"] == 1
-        plt.close()
+        summary, details = find_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
+        ax = plot_duplicates(summary, details)
+        assert ax is not None
+        plt.close("all")
+
+    # Without duplicates there is nothing to plot
+    def test_plot_duplicates_empty(self, demo_conn):
+        summary, details = find_spatiotemporal_duplicates(demo_conn, ["TEMPERATURE"])
+        assert plot_duplicates(summary, details) is None
 
 
 #--- Missing-value bar chart -----------------------------------------#
@@ -486,7 +460,7 @@ class TestPlotSpatialDistribution:
 class TestPlotLatLonRange:
     # Draws the bounding-box outline (4 edges) on a world map
     def test_draws_bounding_box(self):
-        ax = plot_lat_lon_range(30, 60, -40, 0)
+        ax = plot_lon_lat_range(-40, 0, 30, 60)
         assert len(ax.lines) == 4
         plt.close()
 
@@ -526,32 +500,34 @@ class TestPlotMissingValueInfoMapJoint:
         plt.close()
 
 
-class TestEmptyCoverageResults:
-    """Coverage helpers on empty input return their documented columns."""
+class TestColumnCasing:
+    """Column arguments in another casing are found by the plot functions."""
 
-    # An empty df has no year range -> Nothing to count
-    def test_count_samples_over_time_year_empty(self):
-        df = pd.DataFrame({"DATEANDTIME": pd.Series(dtype="datetime64[ns]")})
-        result = count_samples_over_time(df, "DATEANDTIME", time_mode="year")
-        assert result.empty
-        assert list(result.columns) == ["YEAR", "COUNT"]
+    def test_plot_correlation_other_casing(self):
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0], "Y": [2.0, 4.0, 7.0], "C": [1.0, 2.0, 3.0]})
+        ax = plot_correlation(df, "x", "y", colour_col="c")
+        assert ax is not None
+        plt.close()
 
-    # No parameters requested: Empty df with the documented columns
-    def test_count_negative_samples_no_parameters(self, demo_conn):
-        result = count_negative_samples(demo_conn, [])
-        assert result.empty
-        assert list(result.columns) == [
-            "parameter", "number of samples", "number of negative samples", "proportion of negative samples",
-        ]
+    def test_plot_joint_other_casing(self):
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0], "Y": [2.0, 4.0, 7.0]})
+        assert plot_joint(df, "x", "y", kind="scatter") is not None
+        plt.close()
 
-    # No duplicates found: Empty summary with defined columns
-    def test_duplicates_summary_empty(self):
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE P_X (ID INTEGER, LEV_M REAL, VAL REAL)")
-        result = detect_and_plot_spatiotemporal_duplicates(conn, ["X"])
-        conn.close()
-        assert result.empty
-        assert list(result.columns) == [
-            "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
-            "proportion of row duplicates", "proportion of time loc duplicates",
-        ]
+    def test_plot_profile_other_casing(self, demo_conn):
+        df = comfort.io.read_parameter(demo_conn, "TEMPERATURE")
+        ax = plot_profile(df, value_col="val", depth_col="lev_m", profiles=[0])
+        assert ax is not None
+        plt.close()
+
+    def test_plot_ts_diagram_other_casing(self):
+        df = pd.DataFrame({"CT": [5.0, 6.0, 7.0], "SA": [35.0, 35.1, 35.2]})
+        ax = plot_ts_diagram(df, "ct", "sa", density_contours=False)
+        assert ax is not None
+        plt.close()
+
+    # A missing column raises KeyError
+    def test_plot_correlation_missing_column_raises(self):
+        df = pd.DataFrame({"X": [1.0], "Y": [2.0]})
+        with pytest.raises(KeyError, match="Available columns"):
+            plot_correlation(df, "x", "z")

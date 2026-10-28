@@ -4,6 +4,19 @@ Adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
 """
 from __future__ import annotations
 
+__all__ = [
+    "Grid",
+    "GridManager",
+    "average_duplicate_locations",
+    "create_wide_table_online",
+    "drop_land_cells",
+    "get_missing_value_info_offline",
+    "get_missing_value_info_offline_per_param",
+    "get_missing_value_info_per_param",
+    "load_wide_table",
+    "seasonal_mean",
+]
+
 import json
 import logging
 import os
@@ -16,20 +29,15 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from .util import sqlite_utils
+from .util.columns import find_col, resolve_param_columns
+from .util.optional import import_optional
+from .util.types import Aggregation, GridMode, check_choice
 from .util.sqlite_utils import validate_identifier
-from .database.information import does_table_exist, get_table_as_df, get_names_of_all_parameter_tables
+from .database.information import (
+    does_table_exist, get_names_of_all_parameter_tables, get_table_as_df, param_table_name,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _param_table_name(name: str) -> str:
-    """Normalise a parameter name to its P_* table name.
-
-    Matches the ``f"P_{param_name.upper()}"`` convention used by
-    ``io.read_parameter``/``load_comfort``, so callers can pass either
-    ``"NITRATE"`` or ``"P_NITRATE"``.
-    """
-    return name if name.upper().startswith("P_") else f"P_{name.upper()}"
 
 
 _last_id = 0  # init grid id
@@ -64,32 +72,36 @@ class Grid:
 
     The grid has a time axis if the time parameters (``time_min``, ``time_max``,
     ``mode``, ``dtime``) are given. Leave all of them as None for a purely spatial grid.
+
+    ``mode`` selects how the time axis is built, in steps of ``dtime``:
+
+    - ``'Y'``, ``'YM'``, ``'YD'``: Consecutive years, months or days starting at ``time_min``.
+    - ``'M'``: Month of the year (01-12), pooling all years.
+    - ``'D'``: Day of the month (01-31), pooling all months and years.
+    - ``'MD'``: Month and day (MM-DD) of the leap year 2000, pooling all years.
     """
 
-    # Time modes
-    _VALID_MODES = ["Y", "M", "D", "YM", "YD", "MD"]
-
-    def __init__(self, lat_min=-90, lat_max=90, dlat=1, lon_min=-180, lon_max=180, dlon=1,
-                 bathymetry_grid_path=None,
+    def __init__(self, *, bathymetry_grid_path, lon_min=-180, lon_max=180, dlon=1,
+                 lat_min=-90, lat_max=90, dlat=1,
                  z_min=None, z_max=None, dz=None, z_array=None,
-                 time_min=None, time_max=None, mode=None, dtime=None, selection=None,
-                 lat_variable="lat", lon_variable="lon", depth_variable="elevation",
+                 time_min=None, time_max=None, mode: GridMode | None = None, dtime=None, selection=None,
+                 lon_variable="lon", lat_variable="lat", depth_variable="elevation",
                  grid_id=None):
         """
         Args:
-            lat_min, lat_max, dlat: Latitude range and step [°].
             lon_min, lon_max, dlon: Longitude range and step [°].
+            lat_min, lat_max, dlat: Latitude range and step [°].
             bathymetry_grid_path (str): Path to a bathymetry NetCDF file. Required.
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
             z_array (array-like): Explicit depth nodes [m]. Mutually exclusive with dz.
             time_min, time_max (str): Date strings bounding the time dimension.
-            mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD'.
+            mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
             dtime (int): Number of time units per cell.
                 time_min, time_max, mode and dtime must be given together, or all be
                 None for a grid without time axis.
             selection (array-like): Boolean mask to sub-select the time array.
                 Requires a time axis.
-            lat_variable, lon_variable, depth_variable: Variable names in the NetCDF file.
+            lon_variable, lat_variable, depth_variable: Variable names in the NetCDF file.
             grid_id: Existing ID to use instead of generating a new one.
         """
         # Grid specs
@@ -97,12 +109,12 @@ class Grid:
         self.grid_name = f"grid_{self.grid_id}"
 
         # Init grid params
-        self.lat_min = lat_min
-        self.lat_max = lat_max
-        self.dlat = dlat
         self.lon_min = lon_min
         self.lon_max = lon_max
         self.dlon = dlon
+        self.lat_min = lat_min
+        self.lat_max = lat_max
+        self.dlat = dlat
         self.z_array = np.sort(np.array(z_array)) if z_array is not None else None
         self.z_min = z_min if z_array is None else self.z_array.min()
         self.z_max = z_max if z_array is None else self.z_array.max()
@@ -119,7 +131,7 @@ class Grid:
 
         # Create grid
         self.time_array = self._create_time_array() if self.has_time else None
-        self.grid = self._create_grid(lat_variable, lon_variable, depth_variable)
+        self.grid = self._create_grid(lon_variable, lat_variable, depth_variable)
 
     @property
     def has_time(self) -> bool:
@@ -130,7 +142,7 @@ class Grid:
         """Consistency checks for time input."""
         # Time parameters are all-or-nothing
         time_params = {"time_min": self.time_min, "time_max": self.time_max, "mode": self.mode, "dtime": self.dtime}
-        missing = [name for name, val in time_params.items() if val is None]
+        missing = [param for param, val in time_params.items() if val is None]
         if len(missing) == len(time_params):
             # No time axis, so a time selection has nothing to select from
             if self.selection is not None:
@@ -147,8 +159,7 @@ class Grid:
             raise ValueError("dtime must be >= 1")
 
         # Valid modes
-        if self.mode not in self._VALID_MODES:
-            raise ValueError(f"mode must be one of {self._VALID_MODES}")
+        check_choice(self.mode, GridMode, "mode")
 
         # Type of selection object
         if self.selection is not None and not isinstance(self.selection, (np.ndarray, list)):
@@ -195,28 +206,18 @@ class Grid:
 
         return time_array
 
-    def _open_bathymetry(self, bathymetry_grid_path: str, lat_variable: str,
-                         lon_variable: str, depth_variable: str):
+    def _open_bathymetry(self, bathymetry_grid_path: str, lon_variable: str,
+                         lat_variable: str, depth_variable: str):
         """Open, normalise and load a bathymetry NetCDF file into memory, then close it."""
-        # Check xarray import
-        try:
-            import xarray as xr
-        except ImportError:
-            raise ImportError(
-                "xarray is required for gridding; "
-                "install it with: pip install \"comfort-db[grid]\""
-            )
+        xr = import_optional("xarray", "grid", "gridding")
 
         # Check if filepath is valid
-        if not os.path.isfile(bathymetry_grid_path):
-            raise FileNotFoundError(
-                f"Bathymetry file not found: {bathymetry_grid_path}. "
-                "Pass bathymetry_grid_path to the constructor."
-            )
+        if bathymetry_grid_path is None or not os.path.isfile(bathymetry_grid_path):
+            raise FileNotFoundError(f"Bathymetry file not found: {bathymetry_grid_path}")
 
         # Load bathymetry dataset
         with xr.open_dataset(bathymetry_grid_path) as ds:
-            ds = ds.rename({lat_variable: "LATITUDE", lon_variable: "LONGITUDE", depth_variable: "LEV_M"})
+            ds = ds.rename({lon_variable: "LONGITUDE", lat_variable: "LATITUDE", depth_variable: "LEV_M"})
             ds["LEV_M"] = ds["LEV_M"] * -1  # Positive z points downward (COMFORT convention)
             ds.load()
         return ds
@@ -224,37 +225,37 @@ class Grid:
     def _check_spatial_input(self) -> None:
         """Validate spatial grid parameters; raise ValueError on invalid input."""
         required = {
-            "lat_min": self.lat_min, "lat_max": self.lat_max, "dlat": self.dlat,
             "lon_min": self.lon_min, "lon_max": self.lon_max, "dlon": self.dlon,
+            "lat_min": self.lat_min, "lat_max": self.lat_max, "dlat": self.dlat,
             "z_min": self.z_min, "z_max": self.z_max,
         }
 
         # Check if all params are specified
-        for name, val in required.items():
+        for param, val in required.items():
             if val is None:
-                raise ValueError(f"Grid parameter {name!r} must not be None")
+                raise ValueError(f"Grid parameter {param!r} must not be None")
 
-        # Check min/max values for latitude and longitude
-        if not (-90 <= self.lat_min <= 90) or not (-90 <= self.lat_max <= 90):
-            raise ValueError("lat_min and lat_max must be in [-90, 90]")
+        # Check min/max values for longitude and latitude
         if not (-180 <= self.lon_min <= 180) or not (-180 <= self.lon_max <= 180):
             raise ValueError("lon_min and lon_max must be in [-180, 180]")
+        if not (-90 <= self.lat_min <= 90) or not (-90 <= self.lat_max <= 90):
+            raise ValueError("lat_min and lat_max must be in [-90, 90]")
 
         # Check min/max values for depth
         if not (0 <= self.z_min <= 12000) or not (0 <= self.z_max <= 12000):
             raise ValueError("z_min and z_max must be in [0, 12000]")
 
         # The ranges must be non-empty (np.arange would silently return an empty grid otherwise)
-        if not self.lat_min < self.lat_max:
-            raise ValueError("lat_min must be smaller than lat_max")
         if not self.lon_min < self.lon_max:
             raise ValueError("lon_min must be smaller than lon_max")
+        if not self.lat_min < self.lat_max:
+            raise ValueError("lat_min must be smaller than lat_max")
         if not self.z_min < self.z_max:
             raise ValueError("z_min must be smaller than z_max")
 
         # Steps must be positive
-        if self.dlat <= 0 or self.dlon <= 0:
-            raise ValueError("dlat and dlon must be > 0")
+        if self.dlon <= 0 or self.dlat <= 0:
+            raise ValueError("dlon and dlat must be > 0")
 
         # Check depth (specified as z_array)
         if self.z_array is None:
@@ -264,10 +265,10 @@ class Grid:
                 raise ValueError("dz must be > 0")
 
             # For a regular grid, we need complete grid cells
-            if not _is_multiple(self.lat_max - self.lat_min, self.dlat):
-                raise ValueError("Latitude range must be evenly divisible by dlat")
             if not _is_multiple(self.lon_max - self.lon_min, self.dlon):
                 raise ValueError("Longitude range must be evenly divisible by dlon")
+            if not _is_multiple(self.lat_max - self.lat_min, self.dlat):
+                raise ValueError("Latitude range must be evenly divisible by dlat")
             if not _is_multiple(self.z_max - self.z_min, self.dz):
                 raise ValueError("Depth range must be evenly divisible by dz")
         else:
@@ -280,38 +281,33 @@ class Grid:
             return np.arange(self.z_min, self.z_max, self.dz)
         return self.z_array[:-1]
 
-    def _water_mask(self, ds, lat, lon):
+    def _water_mask(self, ds, lon, lat):
         """Return a xarray DataArray that is True where there is water (depth > 0)."""
-        try:
-            import xarray as xr
-        except ImportError:
-            raise ImportError(
-                "xarray is required for gridding; "
-                "install it with: pip install \"comfort-db[grid]\""
-            )
+        xr = import_optional("xarray", "grid", "gridding")
+
         # Wrap depth levels into xarray
         z_arr = self._make_z_arr()
         z = xr.DataArray(z_arr, dims="LEV_M", coords={"LEV_M": z_arr}, name="LEV_M")
 
         # Assign
         z_at_grid = ds.LEV_M.sel(LONGITUDE=lon, LATITUDE=lat, method="nearest")
-        z_at_grid.coords["LATITUDE"] = lat
         z_at_grid.coords["LONGITUDE"] = lon
+        z_at_grid.coords["LATITUDE"] = lat
         return (z <= z_at_grid).rename("water")
 
-    def _map_lat_lon_depth(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Bin LATITUDE, LONGITUDE and LEV_M columns in df to grid cell centres."""
-        # Map latitude values into grid cells (labels = cell centres)
-        lat_bins = np.arange(self.lat_min, self.lat_max + self.dlat, self.dlat, dtype=float)
-        lat_bins[-1] += 0.001 * (1 if lat_bins[-1] >= 0 else -1)
-        df["LATITUDE"] = pd.cut(df["LATITUDE"], bins=lat_bins, right=False,
-                                labels=lat_bins[:-1] + self.dlat / 2)
-
-        # Map longitude values
+    def _map_lon_lat_depth(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Bin LONGITUDE, LATITUDE and LEV_M columns in df to grid cell centres."""
+        # Map longitude values into grid cells (labels = cell centres)
         lon_bins = np.arange(self.lon_min, self.lon_max + self.dlon, self.dlon, dtype=float)
         lon_bins[-1] += 0.001 * (1 if lon_bins[-1] >= 0 else -1)
         df["LONGITUDE"] = pd.cut(df["LONGITUDE"], bins=lon_bins, right=False,
                                  labels=lon_bins[:-1] + self.dlon / 2)
+
+        # Map latitude values
+        lat_bins = np.arange(self.lat_min, self.lat_max + self.dlat, self.dlat, dtype=float)
+        lat_bins[-1] += 0.001 * (1 if lat_bins[-1] >= 0 else -1)
+        df["LATITUDE"] = pd.cut(df["LATITUDE"], bins=lat_bins, right=False,
+                                labels=lat_bins[:-1] + self.dlat / 2)
 
         # Map depth values
         if self.z_array is not None:
@@ -348,18 +344,18 @@ class Grid:
     def _fetch_parameter(self, connection: sqlite3.Connection, table: str,
                          include_z_max: bool) -> pd.DataFrame:
         """Read one P_* table inside this grid's extent, with coordinates and time from the station table."""
-        # Join with the station table (to get lat, lon and time)
+        # Join with the station table (to get lon, lat and time)
         z_eq = "<=" if include_z_max else "<"
-        q = (f"SELECT s.LATITUDE, s.LONGITUDE, p.LEV_M, p.VAL, "
+        q = (f"SELECT s.LONGITUDE, s.LATITUDE, p.LEV_M, p.VAL, "
              f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME "
              f"FROM {table} p LEFT JOIN station s ON p.ID = s.ID WHERE "
-             f"s.LATITUDE >= ? AND s.LATITUDE <= ? AND "
              f"s.LONGITUDE >= ? AND s.LONGITUDE <= ? AND "
+             f"s.LATITUDE >= ? AND s.LATITUDE <= ? AND "
              f"p.LEV_M >= ? AND p.LEV_M {z_eq} ?")
 
         # Convert to native Python types
-        bind = [float(self.lat_min), float(self.lat_max),
-                float(self.lon_min), float(self.lon_max),
+        bind = [float(self.lon_min), float(self.lon_max),
+                float(self.lat_min), float(self.lat_max),
                 float(self.z_min), float(self.z_max)]
 
         # Add time conditions
@@ -373,8 +369,8 @@ class Grid:
         df = pd.DataFrame(cur.fetchall(), columns=np.array([x[0] for x in cur.description]))
         return df if self.has_time else df.drop(columns="DATEANDTIME")
 
-    def bin_space(self, df: pd.DataFrame, value_col: str | None = None, agg: None | str | list[str]=None) -> pd.DataFrame:
-        """Bin LATITUDE/LONGITUDE/LEV_M in *df* onto this grid's cell centres.
+    def bin_space(self, df: pd.DataFrame, value_col: str | None = None, agg: Aggregation | None = None) -> pd.DataFrame:
+        """Bin LONGITUDE/LATITUDE/LEV_M in *df* onto this grid's cell centres.
 
         Usable for data already in memory (e.g. after
         ``load_comfort``), not in the database.
@@ -391,8 +387,11 @@ class Grid:
             pandas.DataFrame: One row per occupied cell if *agg* is given,
                 otherwise one row per input row.
         """
+        # Resolve column names (insensitive to casing)
+        value_col = find_col(df, value_col)
+
         # Snap LATITUDE/LONGITUDE/LEV_M onto this grid's cell centres
-        df = self._map_lat_lon_depth(df.copy())
+        df = self._map_lon_lat_depth(df.copy())
 
         # Drop rows outside the grid's extent
         df = df.dropna(subset=["LATITUDE", "LONGITUDE", "LEV_M"])
@@ -407,7 +406,7 @@ class Grid:
         grouped[value_col] = grouped[value_col].astype(float)
         return grouped
 
-    def map_dataframes(self, dfs: dict[str, pd.DataFrame], agg="mean",
+    def map_dataframes(self, dfs: dict[str, pd.DataFrame], agg: Aggregation = "mean",
                        bin_fn=None, dropping_land_cells: bool = True) -> pd.DataFrame:
         """Turn a dict of per-parameter DataFrames into one wide grid table.
 
@@ -420,7 +419,7 @@ class Grid:
             dfs (dict[str, pandas.DataFrame]): Parameter name -> DataFrame,
                 Each DataFrame must contain LATITUDE, LONGITUDE, LEV_M
                 (+ DATEANDTIME for a grid with time axis) and a value column named
-                after its parameter key.
+                after its parameter key. Insensitive to casing and ``P_`` prefix.
             agg: Aggregation passed to ``self.bin(df, value_col, agg=agg)`` for
                 every parameter. A string ("mean"), a list, a callable, or
                 (on a grid with time axis) ``"seasonal_mean"`` for monthly-first annual
@@ -446,11 +445,10 @@ class Grid:
                       if c in df_wide.columns]
 
         # Successively merge each binned parameter onto the grid
-        for name, df in dfs.items():
-            # Rename the value column to P_<name>
-            col = name if name.startswith("P_") else f"P_{name}"
-            if name in df.columns:
-                df = df.rename(columns={name: col})
+        for parameter, df in dfs.items():
+            # Rename the value column to P_<parameter> (casing and P_ prefix of the column do not matter)
+            col = param_table_name(parameter)
+            df = df.rename(columns={resolve_param_columns(df, parameter)[0]: col})
             # Binning
             binned = bin_fn(df, col)
             # Left-merge on grid
@@ -464,30 +462,30 @@ class Grid:
                         n_before - len(df_wide), n_before, len(df_wide))
         return df_wide
 
-    def _create_grid(self, lat_variable: str, lon_variable: str,
+    def _create_grid(self, lon_variable: str, lat_variable: str,
                       depth_variable: str) -> pd.DataFrame:
         """Creating a grid based on:
         https://github.com/willirath/geomar-open-hacky-hour-2021-04/blob/main/2022-06-23/etopo05_to_grid.ipynb
         grid must be nc file, format: latitude, longitude, depth
         """
-        import xarray as xr
+        xr = import_optional("xarray", "grid", "gridding")
 
         # Load bathymetry
-        ds = self._open_bathymetry(self.bathymetry_grid_path, lat_variable, lon_variable, depth_variable)
+        ds = self._open_bathymetry(self.bathymetry_grid_path, lon_variable, lat_variable, depth_variable)
 
-        # Define cell-centered lat/lon values
-        lat = xr.DataArray(np.arange(self.lat_min + self.dlat / 2, self.lat_max, self.dlat), dims="LATITUDE")
+        # Define cell-centered lon/lat values
         lon = xr.DataArray(np.arange(self.lon_min + self.dlon / 2, self.lon_max, self.dlon), dims="LONGITUDE")
+        lat = xr.DataArray(np.arange(self.lat_min + self.dlat / 2, self.lat_max, self.dlat), dims="LATITUDE")
 
         # Add water mask (and time dimension, if the grid has one)
-        water_filled = self._water_mask(ds, lat, lon)
+        water_filled = self._water_mask(ds, lon, lat)
         if self.has_time:
             water_filled = water_filled.expand_dims(DATEANDTIME=self.time_array)
 
         # Convert to df
         df = water_filled.to_dataframe().reset_index()
 
-        dtypes = {"LEV_M": float, "LATITUDE": float, "LONGITUDE": float, "water": bool}
+        dtypes = {"LEV_M": float, "LONGITUDE": float, "LATITUDE": float, "water": bool}
         if self.has_time:
             dtypes["DATEANDTIME"] = str
         return df.astype(dtypes)
@@ -532,7 +530,7 @@ class Grid:
 
         return df
 
-    def bin_time(self, df: pd.DataFrame, value_col: str, agg="mean") -> pd.DataFrame:
+    def bin_time(self, df: pd.DataFrame, value_col: str, agg: Aggregation = "mean") -> pd.DataFrame:
         """Bin DATEANDTIME in *df* onto this grid's time steps and aggregate *value_col*.
 
         LATITUDE/LONGITUDE/LEV_M must already be snapped to grid cell centres (e.g. by calling ``bin_space`` first).
@@ -545,6 +543,9 @@ class Grid:
         Returns:
             pandas.DataFrame: One row per occupied cell and time step.
         """
+        # Resolve column names (insensitive to casing)
+        value_col = find_col(df, value_col)
+
         if not self.has_time:
             raise ValueError("bin_time requires a grid with time axis (time_min, time_max, mode, dtime)")
 
@@ -560,7 +561,7 @@ class Grid:
         grouped["DATEANDTIME"] = grouped["DATEANDTIME"].astype(str)
         return grouped
 
-    def bin(self, df: pd.DataFrame, value_col: str, agg: str | list[str] ="mean") -> pd.DataFrame:
+    def bin(self, df: pd.DataFrame, value_col: str, agg: Aggregation = "mean") -> pd.DataFrame:
         """Bin *df* onto this grid's spatial cells and time steps, aggregating
         *value_col* per cell. Usable for data already in memory (e.g. after ``load_comfort``).
 
@@ -574,6 +575,9 @@ class Grid:
         Returns:
             pandas.DataFrame: One row per occupied cell (and time step).
         """
+        # Resolve column names (insensitive to casing)
+        value_col = find_col(df, value_col)
+
         if not self.has_time:
             # No-time grid
             if agg == "seasonal_mean":
@@ -602,7 +606,7 @@ class Grid:
         annual = annual.drop(columns=["YEAR"])
         return self.bin_time(annual, value_col, agg="mean")
 
-    def map_tables(self, connection: sqlite3.Connection, param_tables: list[str] | None = None,
+    def map_tables(self, connection: sqlite3.Connection, parameters: list[str] | None = None,
                    replace_existing: bool = False, include_z_max: bool = True) -> list[str]:
         """Bin each parameter table into this grid and write the result to the database.
 
@@ -612,8 +616,8 @@ class Grid:
 
         Args:
             connection (sqlite3.Connection): Connection to the database.
-            param_tables (list[str]): Parameter names to map, e.g. "NITRATE" or
-                "P_NITRATE" (both accepted). None maps all parameter tables.
+            parameters (list[str]): Parameter names to map. Insensitive to casing and ``P_`` prefix.
+                None maps all parameter tables.
                 LATITUDE/LONGITUDE (and DATEANDTIME, for a grid with time axis)
                 are joined from station.
             replace_existing (bool): Replace already-mapped tables without prompting. Default is False.
@@ -626,13 +630,13 @@ class Grid:
         connection.create_aggregate("std", 1, sqlite_utils.Std)
 
         # Determine parameter table names
-        if not param_tables:
-            param_tables = get_names_of_all_parameter_tables(connection)
+        if not parameters:
+            parameters = get_names_of_all_parameter_tables(connection)
 
         mapped_tables = []
-        for table in param_tables:
+        for table in parameters:
             # Normalise to the P_* table name and validate it
-            table = _param_table_name(table)
+            table = param_table_name(table)
             validate_identifier(table)
 
             # Check if table already exists
@@ -689,7 +693,7 @@ class Grid:
         return mapped_tables
 
 
-def _grid_info_values(lat_min, lat_max, dlat, lon_min, lon_max, dlon,
+def _grid_info_values(lon_min, lon_max, dlon, lat_min, lat_max, dlat,
                       z_min, z_max, dz, z_array, time_min, time_max, mode, dtime,
                       selection) -> tuple:
     """Standardised grid_info column values (without grid_id) for a set of grid parameters.
@@ -717,8 +721,8 @@ def _grid_info_values(lat_min, lat_max, dlat, lon_min, lon_max, dlon,
     sel_val = "None" if selection is None else json.dumps([bool(s) for s in selection])
 
     # Return values in the column order of the grid_info table (after grid_id)
-    return (float(lat_min), float(lat_max), float(dlat),
-            float(lon_min), float(lon_max), float(dlon),
+    return (float(lon_min), float(lon_max), float(dlon),
+            float(lat_min), float(lat_max), float(dlat),
             *z_vals, _time(time_min), _time(time_max), str(mode),
             None if dtime is None else int(dtime), sel_val)
 
@@ -742,8 +746,8 @@ class GridManager:
             self.connection.execute(
                 f"CREATE TABLE {self.grid_info_table}("
                 f"  grid_id PRIMARY KEY, "
-                f"  lat_min REAL, lat_max REAL, dlat REAL, "
                 f"  lon_min REAL, lon_max REAL, dlon REAL, "
+                f"  lat_min REAL, lat_max REAL, dlat REAL, "
                 f"  z_min TEXT, z_max TEXT, dz TEXT, z_array TEXT, "
                 f"  time_min TEXT, time_max TEXT, mode TEXT, dtime INTEGER, selection TEXT);"
             )
@@ -771,7 +775,7 @@ class GridManager:
         """Add a Grid in the grid_info table and write its data table."""
         # Standardise values for grid_info table
         info_values = _grid_info_values(
-            grid.lat_min, grid.lat_max, grid.dlat, grid.lon_min, grid.lon_max, grid.dlon,
+            grid.lon_min, grid.lon_max, grid.dlon, grid.lat_min, grid.lat_max, grid.dlat,
             grid.z_min, grid.z_max, grid.dz, grid.z_array,
             grid.time_min, grid.time_max, grid.mode, grid.dtime, grid.selection,
         )
@@ -787,7 +791,7 @@ class GridManager:
             # Insert into grid_info table
             self.connection.execute(
                 f"INSERT INTO {self.grid_info_table} "
-                f"(grid_id, lat_min, lat_max, dlat, lon_min, lon_max, dlon, "
+                f"(grid_id, lon_min, lon_max, dlon, lat_min, lat_max, dlat, "
                 f"z_min, z_max, dz, z_array, time_min, time_max, mode, dtime, selection) "
                 f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (grid.grid_id, *info_values),
@@ -820,9 +824,9 @@ class GridManager:
             self.connection.execute(f"DELETE FROM {self.grid_info_table} WHERE grid_id=?;", (grid_id,))
 
             # Drop all mapped parameter tables
-            for name in to_drop:
-                validate_identifier(name)
-                self.connection.execute(f"DROP TABLE {name};")
+            for table_name in to_drop:
+                validate_identifier(table_name)
+                self.connection.execute(f"DROP TABLE {table_name};")
             self.connection.commit()
         except Exception:
             self.connection.rollback()
@@ -837,15 +841,15 @@ class GridManager:
         for (grid_id,) in rows:
             self.remove_grid(grid_id)
 
-    def load_grid(self, grid_id: int, bathymetry_grid_path: str, lat_variable: str = "lat",
-                  lon_variable: str = "lon", depth_variable: str = "elevation") -> Grid | None:
+    def load_grid(self, grid_id: int, bathymetry_grid_path: str, lon_variable: str = "lon",
+                  lat_variable: str = "lat", depth_variable: str = "elevation") -> Grid | None:
         """Load a previously saved Grid by its ID.
 
         Args:
             grid_id: Grid ID to load.
             bathymetry_grid_path (str): Path to the bathymetry NetCDF file.
-            lat_variable (str): Latitude variable name in the NetCDF file.
             lon_variable (str): Longitude variable name in the NetCDF file.
+            lat_variable (str): Latitude variable name in the NetCDF file.
             depth_variable (str): Depth/elevation variable name in the NetCDF file.
         Returns:
             Grid or None.
@@ -867,8 +871,8 @@ class GridManager:
             return None if str(v) == "None" else v
 
         return Grid(
-            lat_min=_val("lat_min"), lat_max=_val("lat_max"), dlat=_val("dlat"),
             lon_min=_val("lon_min"), lon_max=_val("lon_max"), dlon=_val("dlon"),
+            lat_min=_val("lat_min"), lat_max=_val("lat_max"), dlat=_val("dlat"),
             z_min=float(_val("z_min")) if _val("z_min") is not None else None,
             z_max=float(_val("z_max")) if _val("z_max") is not None else None,
             dz=float(_val("dz")) if _val("dz") is not None else None,
@@ -879,15 +883,14 @@ class GridManager:
             selection=(json.loads(info["selection"].values[0])
                        if info["selection"].values[0] != "None" else None),
             bathymetry_grid_path=bathymetry_grid_path,
-            lat_variable=lat_variable, lon_variable=lon_variable,
+            lon_variable=lon_variable, lat_variable=lat_variable,
             depth_variable=depth_variable, grid_id=grid_id,
         )
 
-    def create_grid(self, lat_min, lat_max, dlat, lon_min, lon_max, dlon,
+    def create_grid(self, *, bathymetry_grid_path, lon_min, lon_max, dlon, lat_min, lat_max, dlat,
                     z_min=None, z_max=None, dz=None, z_array=None,
                     time_min=None, time_max=None, mode=None, dtime=None, selection=None,
-                    bathymetry_grid_path=None,
-                    lat_variable="lat", lon_variable="lon",
+                    lon_variable="lon", lat_variable="lat",
                     depth_variable="elevation") -> Grid:
         """Create a new Grid (or load an existing one with the same parameters).
 
@@ -898,45 +901,47 @@ class GridManager:
         """
         # Try to find existing grid with same params
         grid_id = self.get_grid_id_from_params(
-            lat_min, lat_max, dlat, lon_min, lon_max, dlon,
-            z_min, z_max, dz, z_array, time_min, time_max, mode, dtime, selection,
+            lon_min=lon_min, lon_max=lon_max, dlon=dlon,
+            lat_min=lat_min, lat_max=lat_max, dlat=dlat,
+            z_min=z_min, z_max=z_max, dz=dz, z_array=z_array,
+            time_min=time_min, time_max=time_max, mode=mode, dtime=dtime, selection=selection,
         )
 
         # If the grid already exists, only load it
         if grid_id is None:
             grid = Grid(
-                lat_min=lat_min, lat_max=lat_max, dlat=dlat,
                 lon_min=lon_min, lon_max=lon_max, dlon=dlon,
+                lat_min=lat_min, lat_max=lat_max, dlat=dlat,
                 z_min=z_min, z_max=z_max, dz=dz, z_array=z_array,
                 time_min=time_min, time_max=time_max, mode=mode, dtime=dtime,
                 selection=selection, bathymetry_grid_path=bathymetry_grid_path,
-                lat_variable=lat_variable, lon_variable=lon_variable,
+                lon_variable=lon_variable, lat_variable=lat_variable,
                 depth_variable=depth_variable,
             )
             self.add_grid(grid)
         else:
             logger.info(f"Grid already exists with ID {grid_id}; loading")
             grid = self.load_grid(grid_id, bathymetry_grid_path=bathymetry_grid_path,
-                                  lat_variable=lat_variable, lon_variable=lon_variable,
+                                  lon_variable=lon_variable, lat_variable=lat_variable,
                                   depth_variable=depth_variable)
         return grid
 
-    def get_grid_id_from_params(self, lat_min, lat_max, dlat, lon_min, lon_max, dlon,
+    def get_grid_id_from_params(self, *, lon_min, lon_max, dlon, lat_min, lat_max, dlat,
                                 z_min=None, z_max=None, dz=None, z_array=None,
                                 time_min=None, time_max=None, mode=None, dtime=None,
                                 selection=None) -> int | None:
         """Return the grid_id of an existing grid matching these parameters, or None."""
         # Standardised values, so that e.g. z_min=0 and z_min=0.0 find the same grid
         params = _grid_info_values(
-            lat_min, lat_max, dlat, lon_min, lon_max, dlon,
+            lon_min, lon_max, dlon, lat_min, lat_max, dlat,
             z_min, z_max, dz, z_array, time_min, time_max, mode, dtime, selection,
         )
 
         # Get grid_id from db (dtime is NULL for a grid without time axis, and NULL = NULL is never true)
         query = (
             f"SELECT grid_id FROM {self.grid_info_table} WHERE "
-            f"lat_min=? AND lat_max=? AND dlat=? AND "
             f"lon_min=? AND lon_max=? AND dlon=? AND "
+            f"lat_min=? AND lat_max=? AND dlat=? AND "
             f"z_min=? AND z_max=? AND dz=? AND z_array=? AND "
             f"time_min=? AND time_max=? AND mode=? AND dtime IS ? AND selection=?"
         )
@@ -1013,6 +1018,10 @@ def seasonal_mean(
         pd.DataFrame with columns ``group_cols + ["YEAR", value_col]``,
         one row per group per year.
     """
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    date_col = find_col(df, date_col)
+
     if group_cols is None:
         group_cols = ["LATITUDE", "LONGITUDE", "LEV_M"]
 
@@ -1065,27 +1074,27 @@ def drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_wide_table_online(connection: sqlite3.Connection, grid_id: int,
-                             param_tables: list[str] | None = None) -> str:
+                             parameters: list[str] | None = None) -> str:
     """Create a wide table in the database by joining all mapped parameter tables.
 
     Args:
         connection (sqlite3.Connection): Connection to the database.
         grid_id: Grid ID whose mapped parameter tables should be joined.
-        param_tables (list[str]): Parameter names, e.g. "NITRATE" or "P_NITRATE"
-            (both accepted). None uses all parameter tables.
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+            None uses all parameter tables.
     Returns:
         str: Name of the created wide table.
     """
     # If no parameter tables are specified, use all
-    if not param_tables:
-        param_tables = get_names_of_all_parameter_tables(connection)
-    param_tables = [_param_table_name(p) for p in param_tables]
-    for p in param_tables:
+    if not parameters:
+        parameters = get_names_of_all_parameter_tables(connection)
+    parameters = [param_table_name(p) for p in parameters]
+    for p in parameters:
         validate_identifier(p)
 
     # Define SQL query parts
-    vals = ", ".join([f"{p}_{grid_id}.{p}" for p in param_tables])
-    joins = " ".join([f"LEFT JOIN {p}_{grid_id} USING(idx)" for p in param_tables])
+    vals = ", ".join([f"{p}_{grid_id}.{p}" for p in parameters])
+    joins = " ".join([f"LEFT JOIN {p}_{grid_id} USING(idx)" for p in parameters])
     wide_table_name = f"wide_{grid_id}_{generate_grid_id()}"
 
     # Create table in db
@@ -1116,23 +1125,23 @@ def load_wide_table(connection: sqlite3.Connection, wide_table_name: str,
 
 
 def get_missing_value_info_per_param(connection: sqlite3.Connection, wide_table_name: str,
-                                     param_tables: list[str]) -> pd.DataFrame:
+                                     parameters: list[str]) -> pd.DataFrame:
     """Compute the fraction of missing values per parameter in a wide table.
 
     Args:
         connection (sqlite3.Connection): Connection to the database.
         wide_table_name (str): Name of the wide table.
-        param_tables (list[str]): Parameter names, e.g. "NITRATE" or "P_NITRATE"
-            (both accepted) - must match the wide table's column names.
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+            The wide table must have a ``P_<name>`` column for each.
     Returns:
         pandas.DataFrame with columns 'parameter', 'total', 'relative'.
     """
     # Define SQL query parts
-    param_tables = [_param_table_name(p) for p in param_tables]
-    for p in param_tables:
+    parameters = [param_table_name(p) for p in parameters]
+    for p in parameters:
         validate_identifier(p)
-    water_or_any = " or ".join(f"{p} is not null" for p in param_tables)
-    all_not_null = " and ".join(f"{p} is not null" for p in param_tables)
+    water_or_any = " or ".join(f"{p} is not null" for p in parameters)
+    all_not_null = " and ".join(f"{p} is not null" for p in parameters)
 
     # Number of relevant grid cells
     num_grid_cells = connection.execute(
@@ -1145,7 +1154,7 @@ def get_missing_value_info_per_param(connection: sqlite3.Connection, wide_table_
     ).fetchone()[0]
 
     # Count not-null values per parameter column
-    null_expr = ", ".join(f"COUNT(*) - COUNT({p}) AS {p}" for p in param_tables)
+    null_expr = ", ".join(f"COUNT(*) - COUNT({p}) AS {p}" for p in parameters)
     cur = connection.execute(
         f"SELECT {null_expr} FROM {wide_table_name} WHERE {water_or_any} OR water=1;"
     )

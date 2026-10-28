@@ -173,7 +173,7 @@ class TestMixedLayerDepth:
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1],
                            "LEV_DBAR": [0.0, 50.0, 100.0, 200.0],
                            "CT": [15.0, 15.0, 14.75, 12.0]})
-        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2, max_ref_distance=None)
+        result = mixed_layer_depth(df, temperature_col="CT", delta_temp=0.2, max_ref_distance=None)
         # ref=15.0, 100m: |14.75-15.0|=0.25>0.2 → crossing interpolated between 50m and 100m
         # target = 15.0 - 0.2 = 14.8 → 50 + (14.8-15.0)*(100-50)/(14.75-15.0) = 90.0
         assert result["MLD_m"].iloc[0] == pytest.approx(90.0)
@@ -191,7 +191,7 @@ class TestMixedLayerDepth:
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
                            "LEV_DBAR": [10.0, 100.0, 200.0],
                            "CT": [10.0, 10.0, 10.5]})
-        result = mixed_layer_depth(df, temp_col="CT", delta_temp=0.2)
+        result = mixed_layer_depth(df, temperature_col="CT", delta_temp=0.2)
         assert result["MLD_m"].iloc[0] == pytest.approx(140.0)
 
     # No level near the reference depth means no valid MLD
@@ -203,17 +203,17 @@ class TestMixedLayerDepth:
         result = mixed_layer_depth(df, density_col="sigma0", max_ref_distance=None)
         assert not pd.isna(result["MLD_m"].iloc[0])
 
-    # When both are given, density_col takes priority over temp_col
+    # When both are given, density_col takes priority over temperature_col
     def test_density_preferred_over_temp(self):
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
                            "LEV_DBAR": [0.0, 100.0, 200.0],
                            "sigma0": [25.0, 25.0, 25.0],
                            "CT": [15.0, 15.0, 14.0]})
-        result = mixed_layer_depth(df, density_col="sigma0", temp_col="CT", delta_density=0.03)
+        result = mixed_layer_depth(df, density_col="sigma0", temperature_col="CT", delta_density=0.03)
         # density never exceeds → uses density, not temperature
         assert pd.isna(result["MLD_m"].iloc[0])
 
-    # At least one of density_col/temp_col must be given
+    # At least one of density_col/temperature_col must be given
     def test_no_column_raises(self):
         with pytest.raises(ValueError, match="Provide at least one"):
             mixed_layer_depth(self._profile_with_mld_at_100())
@@ -397,7 +397,7 @@ class TestInterpolateDepthLevels:
     def test_invalid_method_raises(self):
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1],
                            "LEV_DBAR": [0.0, 100.0], "VAL": [1.0, 2.0]})
-        with pytest.raises(ValueError, match="Unknown method"):
+        with pytest.raises(ValueError, match="method must be"):
             interpolate_depth_levels(df, target_depths=[50], method="bogus")
 
     # Target depths outside the profile's measured range are dropped, not extrapolated
@@ -528,9 +528,9 @@ class TestEmptyResults:
     # interpolate_depth_levels keeps the columns of a normal result (depth, value, key)
     def test_interpolate_depth_levels(self):
         normal = pd.DataFrame({"ID": [1, 1], "PROFILE_NUMBER": [1, 1], "LEV_M": [0.0, 10.0], "SIGMA0": [25.0, 26.0]})
-        expected = list(interpolate_depth_levels(normal, [0.0, 5.0], param_col="SIGMA0").columns)
+        expected = list(interpolate_depth_levels(normal, [0.0, 5.0], value_col="SIGMA0").columns)
         for df in (self._empty(), self._single_level()):
-            result = interpolate_depth_levels(df, [0.0, 5.0], param_col="SIGMA0")
+            result = interpolate_depth_levels(df, [0.0, 5.0], value_col="SIGMA0")
             assert result.empty
             assert list(result.columns) == expected
 
@@ -538,3 +538,21 @@ class TestEmptyResults:
     def test_custom_profile_col(self):
         result = mixed_layer_depth(self._empty(), density_col="SIGMA0", profile_col="PROFILE_NUMBER")
         assert list(result.columns) == ["PROFILE_NUMBER", "MLD_m"]
+
+
+class TestColumnCasing:
+    @staticmethod
+    def _df():
+        # Dummy df
+        return pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1], "LEV_DBAR": [0, 100, 200], "VAL": [10.0, 8.0, 6.0]})
+
+    # Column arguments in another casing give the same result
+    def test_vertical_gradient_lower_case_arguments(self):
+        expected = vertical_gradient(self._df())
+        result = vertical_gradient(self._df(), value_col="val", depth_col="lev_dbar", profile_col="profile_number")
+        pd.testing.assert_frame_equal(result, expected)
+
+    # The depth fallback still works when the column is spelled differently
+    def test_detect_depth_col_other_casing(self):
+        assert detect_depth_col(self._df(), "lev_m") == "LEV_DBAR"
+        assert detect_depth_col(self._df(), "lev_dbar") == "LEV_DBAR"

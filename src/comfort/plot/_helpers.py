@@ -5,10 +5,12 @@ import os
 from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 
+from ..util.optional import import_optional
+
 if TYPE_CHECKING:
     import sqlite3
     import pandas as pd
-    from ..qc import QCFilter
+    from ..qc import QualityFlags
 
 
 # Human-readable labels for raw column names shown in legends/colorbars
@@ -61,22 +63,15 @@ def _finish(ax, standalone: bool, save_as: str | None, dpi: int = 300):
 
 def _require_cartopy():
     """Raise ``ImportError`` with install instructions if cartopy is missing."""
-    try:
-        import cartopy.crs as ccrs
-        import cartopy.feature as cfeature
-    except ImportError:
-        raise ImportError(
-            "cartopy is required for map plots. "
-            'Install it with: pip install "comfort-db[geo]"'
-        )
-    return ccrs, cfeature
+    return (import_optional("cartopy.crs", "geo", "map plots"),
+            import_optional("cartopy.feature", "geo", "map plots"))
 
 
 def _resolve_data(
     df: pd.DataFrame | None,
     conn: sqlite3.Connection | None,
     parameter: str | None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     profiles: list[int] | None = None,
 ) -> pd.DataFrame:
     """Return *df* if provided, otherwise load from the database.
@@ -84,7 +79,7 @@ def _resolve_data(
     Args:
         df: User-supplied data. Returned as-is if not ``None``.
         conn: Database connection (required when *df* is ``None``).
-        parameter: Parameter name without the ``P_`` prefix (required when *df* is ``None``).
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix (required when *df* is ``None``).
         quality_flags: QC filter tuples forwarded to the reader.
         profiles: Profile numbers to load. Pushed to SQL when loading from DB.
     """
@@ -98,4 +93,4 @@ def _resolve_data(
         )
     from ..io import read_parameter
 
-    return read_parameter(conn, parameter, quality_flags, profiles=profiles)
+    return read_parameter(conn, parameter, quality_flags=quality_flags, profiles=profiles)

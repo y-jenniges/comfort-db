@@ -40,10 +40,10 @@ if __name__ == "__main__":
             conn,
             parameters=["NITRATE", "DIC"],
             quality_flags=comfort.QC_GOOD,
-            as_xarray=False,
+            output="dict",
         )
-        for name, df in dfs.items():
-            print(f"  {name}: {len(df)} rows, columns {list(df.columns)}")
+        for parameter, df in dfs.items():
+            print(f"  {parameter}: {len(df)} rows, columns {list(df.columns)}")
         print()
 
         # Load as xarray Dataset
@@ -52,7 +52,7 @@ if __name__ == "__main__":
             conn,
             parameters=["NITRATE", "DIC"],
             quality_flags=comfort.QC_GOOD,
-            as_xarray=True,
+            output="xarray",
         )
         print(ds, "\n")
 
@@ -62,9 +62,9 @@ if __name__ == "__main__":
             conn,
             parameters=["NITRATE"],
             quality_flags=comfort.QC_GOOD,
-            lat_min=40, lat_max=65,
             lon_min=-30, lon_max=0,
-            as_xarray=False,
+            lat_min=40, lat_max=65,
+            output="dict",
         )
         df_nit = dfs_filtered.get("NITRATE")
         if df_nit is not None:
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         # Lower-level read: single parameter table
         print("\n=== read_parameter ===")
         df_oxy = comfort.read_parameter(conn,
-                                        param_name="OXYGEN",
+                                        parameter="OXYGEN",
                                         quality_flags=comfort.QC_GOOD,
                                         limit=1000
                                         )

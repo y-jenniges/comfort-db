@@ -42,8 +42,8 @@ if __name__ == "__main__":
         dfs = comfort.load_comfort(
             conn, parameters=["TEMPERATURE", "SALINITY"],
             quality_flags=comfort.QC_GOOD,
-            lat_min=45, lat_max=55, lon_min=-30, lon_max=-20,
-            as_xarray=False,
+            lon_min=-30, lon_max=-20, lat_min=45, lat_max=55,
+            output="dict",
         )
 
     # Average duplicates and merge T + S on (station, profile, depth)

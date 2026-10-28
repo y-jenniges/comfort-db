@@ -4,26 +4,23 @@ Adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
 """
 from __future__ import annotations
 
+__all__ = [
+    "UnitsConverter",
+]
+
 import logging
 import sqlite3
 import gsw
 import numpy as np
 import pandas as pd
 
+from .database.information import param_label, param_table_name
 from .physics import convert_salinity, convert_temperature, resolve_pressure
+from .util.columns import find_col
+from .util.types import DensityFallback, OnMissing, check_choice
 from .util.sqlite_utils import validate_identifier
 
 logger = logging.getLogger(__name__)
-
-DENSITY_FALLBACKS = ("constant", "drop", "raise")
-
-
-def _get_column(df: pd.DataFrame, name: str) -> str | None:
-    """Return the column name matching name case-insensitively (or None)."""
-    for col in df.columns:
-        if col.lower() == name.lower():
-            return col
-    return None
 
 
 class UnitsConverter:
@@ -68,9 +65,9 @@ class UnitsConverter:
         units = get_table_as_df(conn, "UNITS")
         return cls(conn, default_units, units)
 
-    def convert_dataframe(self, df: pd.DataFrame, param_table_name: str,
-                          use_density: bool = False, on_missing: str = "drop",
-                          density_fallback: str = "constant") -> pd.DataFrame:
+    def convert_dataframe(self, df: pd.DataFrame, parameter: str,
+                          use_density: bool = False, on_missing: OnMissing = "drop",
+                          density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert a DataFrame's values to the default unit.
 
         Rows that cannot be converted (no UNITS_ID, no registered conversion
@@ -79,7 +76,7 @@ class UnitsConverter:
 
         Args:
             df (pandas.DataFrame): Must contain ``VAL`` and ``UNITS_ID``.
-            param_table_name (str): Table name (e.g. ``'P_TEMPERATURE'``).
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
             use_density (bool): Use computed density instead of the
                 constant 1.025 kg/L.
             on_missing (str): Policy for unconvertible rows: ``'drop'``
@@ -91,20 +88,17 @@ class UnitsConverter:
                 ``'raise'``. Counts are logged.
         """
         # Ensure that only defined missingness policies are passed
-        if on_missing not in ("drop", "keep", "raise"):
-            raise ValueError(f"on_missing must be 'drop', 'keep' or 'raise', got {on_missing!r}")
-        if density_fallback not in DENSITY_FALLBACKS:
-            raise ValueError(f"density_fallback must be one of {DENSITY_FALLBACKS}, "
-                             f"got {density_fallback!r}")
+        check_choice(on_missing, OnMissing, "on_missing")
+        check_choice(density_fallback, DensityFallback, "density_fallback")
 
         # Ensure unit id info is given
         if "UNITS_ID" not in df.columns or df.empty:
             return df
 
         # Check if default unit exists
-        target = self.default_unit_id(param_table_name)
+        target = self.default_unit_id(parameter)
         if target is None:
-            logger.warning("convert_dataframe: no default unit for %s", param_table_name)
+            logger.warning("convert_dataframe: no default unit for %s", parameter)
             return df
 
         # Get used unit IDs
@@ -123,7 +117,7 @@ class UnitsConverter:
         # Rows without a unit ID cannot be converted
         if n_no_units_id:
             if on_missing == "raise":
-                raise ValueError(f"{param_table_name}: {n_no_units_id} rows have no UNITS_ID")
+                raise ValueError(f"{parameter}: {n_no_units_id} rows have no UNITS_ID")
             if on_missing == "keep":
                 parts.append(df[df["UNITS_ID"].isna()])
 
@@ -138,30 +132,30 @@ class UnitsConverter:
 
             # Look up conversion formula
             formula = self.formulas.conversions.get((int(uid), target))
-            if formula is not None and not self.formulas.is_allowed(int(uid), target, param_table_name):
+            if formula is not None and not self.formulas.is_allowed(int(uid), target, parameter):
                 # If a formula was found for the conversion, but is not allowed
                 # (e.g. only valid for a specific parameter), set to None
                 formula = None
             if formula is None:
                 # No formula found
-                logger.warning(f"Conversion from unit {int(uid)} to {target} not implemented for {param_table_name}")
+                logger.warning(f"Conversion from unit {int(uid)} to {target} not implemented for {parameter}")
                 # Missing formula policy
                 if on_missing == "raise":
                     # Raise error
-                    raise ValueError(f"{param_table_name}: no conversion from unit {int(uid)} to {target}")
+                    raise ValueError(f"{parameter}: no conversion from unit {int(uid)} to {target}")
                 if on_missing == "keep":
                     # Keep the values
                     parts.append(chunk)
                 n_no_formula += len(chunk)
                 continue
 
-            converted = formula(chunk, param_table_name, use_density=use_density, density_fallback=density_fallback)
+            converted = formula(chunk, parameter, use_density=use_density, density_fallback=density_fallback)
 
             # NaN from a non-NaN input marks a failed conversion (missing T/S)
             failed = converted[vc].isna() & chunk[vc].notna()
             if failed.any():
                 if on_missing == "raise":
-                    raise ValueError(f"{param_table_name}: {int(failed.sum())} rows could not be "
+                    raise ValueError(f"{parameter}: {int(failed.sum())} rows could not be "
                                      f"converted from unit {int(uid)} "
                                      f"(missing temperature/salinity)")
                 if on_missing == "keep":
@@ -174,13 +168,13 @@ class UnitsConverter:
         # Report unconvertible rows
         action = "kept unconverted" if on_missing == "keep" else "dropped"
         if n_no_units_id:
-            logger.warning("%s: %d rows without UNITS_ID %s", param_table_name, n_no_units_id, action)
+            logger.warning("%s: %d rows without UNITS_ID %s", parameter, n_no_units_id, action)
         if n_no_formula:
             logger.warning("%s: %d rows with no conversion formula to unit %d %s",
-                            param_table_name, n_no_formula, target, action)
+                            parameter, n_no_formula, target, action)
         if n_missing_input:
             logger.warning("%s: %d rows missing temperature/salinity inputs %s",
-                            param_table_name, n_missing_input, action)
+                            parameter, n_missing_input, action)
 
         if not parts:
             return df.iloc[0:0]
@@ -188,33 +182,34 @@ class UnitsConverter:
         # Restore the original row order
         return pd.concat(parts).sort_index()
 
-    def default_unit_id(self, param_table_name: str) -> int | None:
+    def default_unit_id(self, parameter: str) -> int | None:
         """Return the ID of a parameter's default unit.
 
         Args:
-            param_table_name (str): Table name (e.g. ``'P_OXYGEN'``).
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             int or None: Unit ID, or ``None`` when no default unit is
-                registered for *param_table_name*.
+                registered for *parameter*.
         """
-        mask = self.df_default_units["NAME_TABLE"] == param_table_name
+        # Compare in the canonical spelling on both sides
+        mask = self.df_default_units["NAME_TABLE"].map(param_table_name) == param_table_name(parameter)
         if not mask.any():
             return None
         return int(self.df_default_units.loc[mask, "UNITS_ID_DEFAULT"].iloc[0])
 
-    def required_inputs(self, param_table_name: str, use_density: bool = False) -> tuple[bool, bool]:
+    def required_inputs(self, parameter: str, use_density: bool = False) -> tuple[bool, bool]:
         """Returns which co-located measurements a conversions potentially need.
 
         Combines requirements of all conversions into the parameter's default unit
         (see :meth:`ConversionFormulas.is_allowed`).
 
         Args:
-            param_table_name (str): Table name (e.g. ``'P_OXYGEN'``).
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
             use_density (bool): If densities are computed (``True``) or the constant is used.
         Returns:
             tuple[bool, bool]: ``(needs_temperature, needs_salinity)``.
         """
-        target = self.default_unit_id(param_table_name)  # default unit ID
+        target = self.default_unit_id(parameter)  # default unit ID
         needs: set[str] = set()  # list of required co-located parameters
 
         # Iterate over all potential targets
@@ -222,22 +217,22 @@ class UnitsConverter:
             # Iterate over all conversions with default unit ID as target
             for source, conversion_target in self.formulas.conversions:
                 # Check if the formula is allowed for the parameter
-                if conversion_target == target and self.formulas.is_allowed(source, target, param_table_name):
+                if conversion_target == target and self.formulas.is_allowed(source, target, parameter):
                     # Check if the conversion requires temperature and/or salinity
-                    needs |= self.formulas.t_s_inputs_needed(source, target, param_table_name, use_density)
+                    needs |= self.formulas.t_s_inputs_needed(source, target, parameter, use_density)
         return "temperature" in needs, "salinity" in needs
 
-    def default_unit_name(self, param_table_name: str) -> str | None:
+    def default_unit_name(self, parameter: str) -> str | None:
         """Return the human-readable name of a parameter's default unit.
 
         Args:
-            param_table_name (str): Table name (e.g. ``'P_OXYGEN'``).
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             str or None: Unit name (e.g. ``'µmol/kg'``), or ``None`` when
-                no default unit is registered for *param_table_name*.
+                no default unit is registered for *parameter*.
         """
         # Get target unit ID
-        target = self.default_unit_id(param_table_name)
+        target = self.default_unit_id(parameter)
         if target is None:
             return None
 
@@ -247,8 +242,8 @@ class UnitsConverter:
 
     def convert_units(self, tables: list[str], use_density: bool = False,
                       override_old_tables: bool = False,
-                      on_missing: str = "drop",
-                      density_fallback: str = "constant") -> dict[str, str]:
+                      on_missing: OnMissing = "drop",
+                      density_fallback: DensityFallback = "constant") -> dict[str, str]:
         """Convert units for the given parameter tables to their default unit.
 
         Args:
@@ -340,7 +335,7 @@ class ConversionFormulas:
             (26, 3): molar_mass_tables,
         }
 
-    def t_s_inputs_needed(self, source_unit_id: int, target_unit_id: int, param_table_name: str,
+    def t_s_inputs_needed(self, source_unit_id: int, target_unit_id: int, parameter: str,
                           use_density: bool = False) -> set[str]:
         """Check if the conversion needs co-located temperature and/or salinity measurements.
         Depends on whether density should be used (lab_dens needs salinity, real_dens needs both)
@@ -348,7 +343,7 @@ class ConversionFormulas:
         Args:
             source_unit_id (int): Unit ID of the values.
             target_unit_id (int): Unit ID to convert to.
-            param_table_name (str): Table name (e.g. ``'P_CHLOROPHYLL'``), case-insensitive.
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
             use_density (bool): Whether densities are computed (``True``) or the constant is used.
         Returns:
             set[str]: Subset of ``{'temperature', 'salinity'}``.
@@ -360,7 +355,7 @@ class ConversionFormulas:
         if not use_density:
             # No density for conversions -> No T, S needed
             return set()
-        if pair == (21, 3) or (pair == (4, 14) and param_table_name.upper().endswith("CHLOROPHYLL")):
+        if pair == (21, 3) or (pair == (4, 14) and param_label(parameter) == "CHLOROPHYLL"):
             # Conversions using real_dens
             return {"temperature", "salinity"}
         if pair in ((5, 3), (7, 3), (4, 3), (4, 14)):
@@ -368,94 +363,94 @@ class ConversionFormulas:
             return {"salinity"}
         return set()
 
-    def is_allowed(self, source_unit_id: int, target_unit_id: int, param_table_name: str) -> bool:
+    def is_allowed(self, source_unit_id: int, target_unit_id: int, parameter: str) -> bool:
         """Check if a registered conversion may be applied to a parameter.
 
         Args:
             source_unit_id (int): Unit ID of the values.
             target_unit_id (int): Unit ID to convert to.
-            param_table_name (str): Table name (e.g. ``'P_OXYGEN'``), case-insensitive.
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
-            bool: ``True`` if the conversion has no parameter restriction or lists *param_table_name*.
+            bool: ``True`` if the conversion has no parameter restriction or lists *parameter*.
         """
         allowed = self.allowed_parameters.get((source_unit_id, target_unit_id))  # consult the valid-parameter map
-        return allowed is None or param_table_name.upper() in allowed  # check if passed param is contained
+        return allowed is None or param_table_name(parameter) in allowed  # check if passed param is contained
 
-    def get_molar_mass(self, param_table_name: str) -> float:
-        """Return the molar mass for param_table_name."""
-        mask = self.molar_masses["NAME_TABLE"] == param_table_name
+    def get_molar_mass(self, parameter: str) -> float:
+        """Return the molar mass for parameter."""
+        mask = self.molar_masses["NAME_TABLE"] == param_table_name(parameter)
         if not mask.any():
-            raise ValueError(f"Molar mass not defined for {param_table_name}")
+            raise ValueError(f"Molar mass not defined for {parameter}")
         return float(self.molar_masses.loc[mask, "MOLAR_MASS"].iloc[0])
 
-    def milliEquivalentPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def milliEquivalentPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                     use_density: bool = False,
-                                                    density_fallback: str = "constant") -> pd.DataFrame:
+                                                    density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert meq/L to umol/kg (App. C: lab_dens). Valid for alkalinity."""
         logger.debug("milliEquivalentPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)
 
-    def microgramPerLiter_microgramPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramPerLiter_microgramPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                use_density: bool = False,
-                                               density_fallback: str = "constant") -> pd.DataFrame:
+                                               density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert ug/L to ug/kg (App. C: real_dens for chlorophyll, lab_dens otherwise)."""
         logger.debug("microgramPerLiter -> microgramPerKilogram")
-        density_fn = (self.real_density if param_name.upper().endswith("CHLOROPHYLL") else self.lab_density)
+        density_fn = (self.real_density if param_label(parameter) == "CHLOROPHYLL" else self.lab_density)
         temp, dens = self._with_density(df, density_fn, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] / dens, UNITS_ID=14)
 
-    def millimolPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def millimolPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                              use_density: bool = False,
-                                             density_fallback: str = "constant") -> pd.DataFrame:
+                                             density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert mmol/L to umol/kg (App. C: lab_dens)."""
         logger.debug("millimolPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 1000 / lab_dens, UNITS_ID=3)
 
-    def nanomolPerKilogram_femtomolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def nanomolPerKilogram_femtomolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                use_density: bool = False,
-                                               density_fallback: str = "constant") -> pd.DataFrame:
+                                               density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert nmol/kg to fmol/kg."""
         logger.debug("nanomolPerKilogram -> femtomolPerKilogram")
         return df.copy().assign(VAL=df["VAL"] * 1_000_000, UNITS_ID=19)
 
-    def milliliterPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def milliliterPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                use_density: bool = False,
-                                               density_fallback: str = "constant") -> pd.DataFrame:
+                                               density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert mL/L to umol/kg (oxygen-specific, factor 44.661; App. C: real_dens)."""
         logger.debug("milliliterPerLiter -> micromolPerKilogram (oxygen-specific, factor 44.661)")
         temp, real_dens = self._with_density(df, self.real_density, use_density=use_density, density_fallback=density_fallback)
         return temp.assign(VAL=temp["VAL"] * 44.661 / real_dens, UNITS_ID=3)
 
-    def microgramPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                  use_density: bool = False,
-                                                 density_fallback: str = "constant") -> pd.DataFrame:
+                                                 density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert ug/kg to umol/kg using molar mass."""
         logger.debug("microgramPerKilogram -> micromolPerKilogram")
         temp = df.copy()
-        molar_mass = self.get_molar_mass(param_name)
+        molar_mass = self.get_molar_mass(parameter)
         return temp.assign(VAL=temp["VAL"] / molar_mass, UNITS_ID=3)
 
-    def microgramPerLiter_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramPerLiter_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                               use_density: bool = False,
-                                              density_fallback: str = "constant") -> pd.DataFrame:
+                                              density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert ug/L to umol/kg using molar mass (App. C: lab_dens)."""
         logger.debug("microgramPerLiter -> micromolPerKilogram")
         temp, lab_dens = self._with_density(df, self.lab_density, use_density=use_density, density_fallback=density_fallback)
-        molar_mass = self.get_molar_mass(param_name)
+        molar_mass = self.get_molar_mass(parameter)
         return temp.assign(VAL=temp["VAL"] / (molar_mass * lab_dens), UNITS_ID=3)
 
-    def microgramAtomPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def microgramAtomPerKilogram_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                                      use_density: bool = False,
-                                                     density_fallback: str = "constant") -> pd.DataFrame:
+                                                     density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert ugAtom/kg to umol/kg (1:1 equivalence)."""
         logger.debug("microgramAtomPerKilogram -> micromolPerKilogram")
         return df.copy().assign(UNITS_ID=3)
 
-    def percent_micromolPerKilogram(self, df: pd.DataFrame, param_name: str,
+    def percent_micromolPerKilogram(self, df: pd.DataFrame, parameter: str,
                                     use_density: bool = False,
-                                    density_fallback: str = "constant") -> pd.DataFrame:
+                                    density_fallback: DensityFallback = "constant") -> pd.DataFrame:
         """Convert % saturation to umol/kg using TEOS-10 oxygen solubility.
 
         Requires co-located temperature and salinity columns (any casing).
@@ -465,8 +460,8 @@ class ConversionFormulas:
         """
         logger.debug("percent -> micromolPerKilogram (gsw.O2sol_SP_pt)")
         temp = df.copy()
-        sal_col = _get_column(df, "SALINITY")
-        temp_col = _get_column(df, "TEMPERATURE")
+        sal_col = find_col(df, "SALINITY", required=False)
+        temp_col = find_col(df, "TEMPERATURE", required=False)
 
         # Check if salinity and temperature columns are given
         if sal_col is None or temp_col is None:
@@ -480,14 +475,14 @@ class ConversionFormulas:
         return temp.assign(VAL=temp["VAL"] * np.asarray(o2_eq) / 100, UNITS_ID=3)
 
     def _potential_temperature_for_o2sol(self, df: pd.DataFrame, sal_col: str,
-                                         temp_col: str) -> np.ndarray:
+                                         temperature_col: str) -> np.ndarray:
         """Helper function to compute potential temperature (pt0) for oxygen solubility.
 
         If pressure is not given, it computes pressure from depth and latitude if both are available.
         Falls back to in-situ temperature when pressure/latitude/longitude are unavailable.
         """
-        lat_col = _get_column(df, "LATITUDE")
-        lon_col = _get_column(df, "LONGITUDE")
+        lat_col = find_col(df, "LATITUDE", required=False)
+        lon_col = find_col(df, "LONGITUDE", required=False)
 
         # Resolve pressure (without latitude, the in-situ temperature fallback applies)
         pressure = resolve_pressure(df) if lat_col is not None else None
@@ -497,15 +492,15 @@ class ConversionFormulas:
             logger.warning("percent -> micromolPerKilogram: pressure/latitude/longitude "
                             "missing, using in-situ temperature as an approximation to "
                             "potential temperature")
-            return df[temp_col].to_numpy(dtype=float)
+            return df[temperature_col].to_numpy(dtype=float)
 
         # Compute absolute salinity and potential temperature
         sa = convert_salinity(df[sal_col], pressure, df[lon_col], df[lat_col])
-        pt = convert_temperature(df[temp_col], sa.to_numpy(), pressure, to="pt0")
+        pt = convert_temperature(df[temperature_col], sa.to_numpy(), pressure, to="pt0")
         return pt.to_numpy()
 
     def _with_density(self, df: pd.DataFrame, density_fn, use_density: bool,
-                      density_fallback: str) -> tuple[pd.DataFrame, float | pd.Series]:
+                      density_fallback: DensityFallback) -> tuple[pd.DataFrame, float | pd.Series]:
         """Return (df, density) with rows lacking a density removed (``'drop'`` policy)."""
         dens = density_fn(df, use_density=use_density, density_fallback=density_fallback)
         if isinstance(dens, pd.Series):
@@ -519,42 +514,39 @@ class ConversionFormulas:
         return df.copy(), dens
 
     def lab_density(self, df: pd.DataFrame, use_density: bool,
-                    density_fallback: str = "constant") -> float | pd.Series:
+                    density_fallback: DensityFallback = "constant") -> float | pd.Series:
         """Density at sample salinity, T = 22 °C, atmospheric pressure [kg/L],
         see ``lab_dens`` of COMFORT report Appendix C.
         """
         return self._density(df, use_density=use_density, lab_temperature=22.0, density_fallback=density_fallback)
 
     def real_density(self, df: pd.DataFrame, use_density: bool,
-                     density_fallback: str = "constant") -> float | pd.Series:
+                     density_fallback: DensityFallback = "constant") -> float | pd.Series:
         """Density at sample salinity, in-situ temperature, atmospheric pressure [kg/L],
         see ``real_dens`` of COMFORT report Appendix C.
         """
         return self._density(df, use_density=use_density, lab_temperature=None, density_fallback=density_fallback)
 
     def _density(self, df: pd.DataFrame, use_density: bool,
-                 lab_temperature: float | None, density_fallback: str) -> float | pd.Series:
+                 lab_temperature: float | None, density_fallback: DensityFallback) -> float | pd.Series:
         """TEOS-10 density [kg/L] at sea pressure 0, column names resolved case-insensitively.
 
         With ``use_density=False`` the COMFORT report's fixed factor 1.025 kg/L is returned.
         Otherwise, densities are computed and for non-computable densities, the fallback
         policy (``density_fallback``) is applied.
         """
-        if density_fallback not in DENSITY_FALLBACKS:
-            # Ensure valid density fallback
-            raise ValueError(f"density_fallback must be one of {DENSITY_FALLBACKS}, "
-                             f"got {density_fallback!r}")
+        check_choice(density_fallback, DensityFallback, "density_fallback")
         if not use_density:
             return 1.025
 
         # Get column names
-        sal_col = _get_column(df, "SALINITY")
-        lat_col = _get_column(df, "LATITUDE")
-        lon_col = _get_column(df, "LONGITUDE")
+        sal_col = find_col(df, "SALINITY", required=False)
+        lat_col = find_col(df, "LATITUDE", required=False)
+        lon_col = find_col(df, "LONGITUDE", required=False)
         needed = [("salinity", sal_col), ("latitude", lat_col), ("longitude", lon_col)]
         temp_col = None
         if lab_temperature is None:
-            temp_col = _get_column(df, "TEMPERATURE")
+            temp_col = find_col(df, "TEMPERATURE", required=False)
             needed.append(("temperature", temp_col))
 
         # Check if any column required for density computations is missing

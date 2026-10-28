@@ -1,12 +1,17 @@
 """Parameter value scaling for the COMFORT database."""
 from __future__ import annotations
 
+__all__ = [
+    "ParamScaler",
+]
+
 import logging
 import sqlite3
 from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from .util.optional import import_optional
 from .util.sqlite_utils import validate_identifier
 
 if TYPE_CHECKING:
@@ -25,27 +30,21 @@ class ParamScaler:
     """
 
     def __init__(self, scaler_class: type[Any] | None = None, **scaler_kwargs):
-        try:
-            from sklearn.preprocessing import MinMaxScaler
-        except ImportError:
-            raise ImportError(
-                "scikit-learn is required for scaling; "
-                "install it with: pip install \"comfort-db[scale]\""
-            )
+        preprocessing = import_optional("sklearn.preprocessing", "scale", "scaling")
 
         # Set up scalers per parameter
-        self.scaler_class = scaler_class or MinMaxScaler
+        self.scaler_class = scaler_class or preprocessing.MinMaxScaler
         self.scaler_kwargs = scaler_kwargs
         self.scalers: dict = {}
 
-    def _get_or_fit_scaler(self, param_name: str, vals: np.ndarray) -> Any:
-        """Return a fitted scaler for param_name, creating one if needed."""
-        if param_name in self.scalers:
-            return self.scalers[param_name]
+    def _get_or_fit_scaler(self, parameter: str, vals: np.ndarray) -> Any:
+        """Return a fitted scaler for parameter, creating one if needed."""
+        if parameter in self.scalers:
+            return self.scalers[parameter]
 
         # Fit and store new scaler
         scaler = self.scaler_class(**self.scaler_kwargs).fit(vals)
-        self.scalers[param_name] = scaler
+        self.scalers[parameter] = scaler
         return scaler
 
     def scale(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -88,20 +87,20 @@ class ParamScaler:
             temp[col + "_SCALED"] = scaler.transform(vals)
         return temp
 
-    def scale_value(self, param_name: str, value: float) -> float:
-        """Scale a single value using the already-fitted scaler for param_name.
+    def scale_value(self, parameter: str, value: float) -> float:
+        """Scale a single value using the already-fitted scaler for parameter.
 
         Args:
-            param_name (str): Parameter name.
+            parameter (str): Parameter name.
             value (float): Value to scale.
         Raises:
-            KeyError: If no scaler has been fitted for param_name.
+            KeyError: If no scaler has been fitted for parameter.
         """
         # Check if there is a scaler for the parameter
-        if param_name not in self.scalers:
-            raise KeyError(f"No scaler fitted for {param_name!r} - call scale_columns first")
+        if parameter not in self.scalers:
+            raise KeyError(f"No scaler fitted for {parameter!r} - call scale_columns first")
 
-        return self.scalers[param_name].transform([[value]])[0][0]
+        return self.scalers[parameter].transform([[value]])[0][0]
 
 
 class DBParamScaler:

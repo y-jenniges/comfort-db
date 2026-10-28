@@ -47,7 +47,7 @@ def main():
         raw = comfort.load_comfort(
             conn, parameters=["TEMPERATURE", "SALINITY", "OXYGEN"],
             quality_flags=comfort.QC_GOOD,
-            convert_units=True, use_density=True, as_xarray=False,
+            convert_units=True, use_density=True, output="dict",
         )
         for param, df_param in raw.items():
             log.info("  %-12s %10d rows", param, len(df_param))
@@ -86,12 +86,12 @@ def main():
     # Global T-S diagram with isopycnal contours, coloured by oxygen concentration
     ax = plot_ts_diagram(
         df,
-        temp_col="CT",
-        sal_col="SA",
-        temp_type="CT",
-        sal_type="SA",
-        color_col="OXYGEN",
-        colorbar_label=oxygen_label,
+        temperature_col="CT",
+        salinity_col="SA",
+        temperature_type="CT",
+        salinity_type="SA",
+        colour_col="OXYGEN",
+        colourbar_label=oxygen_label,
         kind="hexbin",
         gridsize=60,
     )

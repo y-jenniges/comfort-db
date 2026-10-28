@@ -400,45 +400,45 @@ class TestWaterMassStatistics:
 
     # Output is a DataFrame
     def test_returns_dataframe(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert isinstance(result, pd.DataFrame)
 
     # Rows are indexed by region name
     def test_rows_are_regions(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert set(result.index) == {"north", "south"}
 
     # Unlabelled (NaN-region) observations do not get their own row
     def test_nan_region_excluded(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert np.nan not in result.index
 
     # Standard descriptive statistics are all present
     def test_statistics_columns(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert set(result.columns.get_level_values(1)) >= {"count", "mean", "std", "min", "max"}
 
     # Multiple parameter columns each get their own statistics block
     def test_multiple_params(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL", "VAL2"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL", "VAL2"])
         assert ("VAL", "mean") in result.columns
         assert ("VAL2", "mean") in result.columns
 
     # Each region's count matches its number of observations
     def test_count_correct(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert result.loc["north", ("VAL", "count")] == 1
         assert result.loc["south", ("VAL", "count")] == 1
 
     # Per-region mean is computed correctly
     def test_mean_correct(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols=["VAL"])
+        result = water_mass_statistics(self._labelled_df(), parameters=["VAL"])
         assert result.loc["north", ("VAL", "mean")] == pytest.approx(1.0)
         assert result.loc["south", ("VAL", "mean")] == pytest.approx(2.0)
 
     # Single parameter as string (not list) still works
     def test_string_param_col(self):
-        result = water_mass_statistics(self._labelled_df(), param_cols="VAL")
+        result = water_mass_statistics(self._labelled_df(), parameters="VAL")
         assert ("VAL", "mean") in result.columns
 
 
@@ -452,12 +452,12 @@ class TestRegionBbox:
     # Union bbox spans both named regions
     def test_union_bbox(self):
         result = region_bbox(self._regions)
-        assert result == (-50.0, 50.0, 0.0, 10.0)
+        assert result == (0.0, 10.0, -50.0, 50.0)
 
     # Bbox of a single region
     def test_single_region_bbox(self):
         result = region_bbox({"north": self._regions["north"]})
-        assert result == (40.0, 50.0, 0.0, 10.0)
+        assert result == (0.0, 10.0, 40.0, 50.0)
 
     # A projected GeoDataFrame yields a bbox in degrees
     @pytest.mark.skipif(not _has_geopandas, reason="geopandas not installed ([geo] extra)")
@@ -469,13 +469,13 @@ class TestRegionBbox:
             crs="EPSG:4326",
         ).to_crs("EPSG:3857")
         result = region_bbox(gdf)
-        assert np.allclose(result, (2.0, 4.0, 1.0, 3.0))
+        assert np.allclose(result, (1.0, 3.0, 2.0, 4.0))
 
     # Works with a shapely polygon wrapped in a dict
     def test_shapely_polygon_input(self):
         from shapely.geometry import Polygon
         result = region_bbox({"box": Polygon([(1, 2), (3, 2), (3, 4), (1, 4)])})
-        assert result == (2.0, 4.0, 1.0, 3.0)
+        assert result == (1.0, 3.0, 2.0, 4.0)
 
     # A region crossing the antimeridian (stored as two parts near +-180, as a real
     # Pacific basin shapefile would be) wraps correctly and returns lon_min > lon_max
@@ -486,7 +486,7 @@ class TestRegionBbox:
             Polygon([(-180, -10), (-170, -10), (-170, 10), (-180, 10)]),
         ])
         result = region_bbox({"pacific_strip": pacific_strip})
-        assert result == (-10.0, 10.0, 170.0, -170.0)
+        assert result == (170.0, -170.0, -10.0, 10.0)
 
 
 @pytest.mark.skipif(not _has_shapely, reason="shapely not installed ([geo] extra)")
@@ -543,7 +543,7 @@ class TestSelectRegions:
             "ProvDescr": ["box"],
             "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
         })
-        with pytest.raises(ValueError, match="Could not find region name column"):
+        with pytest.raises(KeyError, match="not found"):
             select_regions(gdf, "box")
 
 
@@ -579,7 +579,7 @@ class TestLoadLonghurst:
     # code_col/name_col override auto-detection of names
     def test_explicit_column_names(self, tmp_path):
         path = self._write_shapefile(tmp_path, code_col="code", name_col="label")
-        result = load_longhurst(path, code_col="code", name_col="label")
+        result = load_longhurst(path, code_col="code", region_name_col="label")
         assert "province_code" in result.columns
         assert "province_name" in result.columns
 
@@ -622,7 +622,7 @@ class TestLoadBasins:
     # name_col overrides auto-detection
     def test_explicit_column_name(self, tmp_path):
         path = self._write_shapefile(tmp_path, name_col="label")
-        result = load_basins(path, name_col="label")
+        result = load_basins(path, region_name_col="label")
         assert "basin_name" in result.columns
 
     # No name column, auto-detected or explicit, raises an error
@@ -716,7 +716,7 @@ class TestLoadBiomes:
     # Output is flattened to LATITUDE, LONGITUDE, label
     def test_returns_flattened_dataframe(self, tmp_path):
         result = load_biomes(self._write_biomes_nc(tmp_path), biome_var="biomes")
-        assert list(result.columns) == ["LATITUDE", "LONGITUDE", "label"]
+        assert list(result.columns) == ["LONGITUDE", "LATITUDE", "label"]
 
     # NaN cells (e.g. land) are dropped
     def test_drops_nan_cells(self, tmp_path):
@@ -736,7 +736,7 @@ class TestLoadBiomes:
     def test_time_dimension_returns_long_form(self, tmp_path):
         path = self._write_biomes_nc(tmp_path, with_time=True)
         result = load_biomes(path, biome_var="biomes")
-        assert list(result.columns) == ["LATITUDE", "LONGITUDE", "TIME", "label"]
+        assert list(result.columns) == ["LONGITUDE", "LATITUDE", "TIME", "label"]
         assert len(result) == 10
         assert set(result["TIME"]) == {0, 1}
 
@@ -852,3 +852,18 @@ class TestClassifyFromGrid:
         df = pd.DataFrame({"LATITUDE": [50.0, 55.0], "LONGITUDE": [-30.0, -25.0], "YEAR": [2000, 2010]})
         result = classify_from_grid(df, self._time_grid(), time_col="YEAR")
         assert list(result["label"]) == [1, 20]
+
+
+class TestColumnCasing:
+    # Column arguments in another casing give the same result
+    def test_along_track_distance_lower_case_arguments(self):
+        df = pd.DataFrame({"LATITUDE": [0.0, 0.0, 0.0], "LONGITUDE": [0.0, 1.0, 2.0]})
+        expected = along_track_distance(df)
+        result = along_track_distance(df, lat_col="latitude", lon_col="longitude")
+        pd.testing.assert_series_equal(result, expected)
+
+    # A missing region name column is a KeyError that lists the available columns
+    def test_unknown_column_raises_key_error(self):
+        df = pd.DataFrame({"LATITUDE": [0.0], "LONGITUDE": [0.0]})
+        with pytest.raises(KeyError, match="Available columns"):
+            along_track_distance(df, lat_col="lat")

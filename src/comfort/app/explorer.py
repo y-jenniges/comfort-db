@@ -24,18 +24,18 @@ import base64
 import io
 import numpy as np
 import pandas as pd
+
+from ..util.optional import import_optional
+
+# Fail with install instructions if the dash extra is missing
+for _module in ("dash", "dash_bootstrap_components", "plotly"):
+    import_optional(_module, "dash", "the COMFORT app")
+
+import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
-
-try:
-    import dash_bootstrap_components as dbc
-except ImportError:
-    raise ImportError(
-        "dash-bootstrap-components is required for the COMFORT app; "
-        "install it with: pip install \"comfort-db[dash]\""
-    )
 
 try:
     from dotenv import load_dotenv
@@ -227,16 +227,6 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
                 dbc.CardHeader("Spatial extent"),
                 dbc.CardBody([
                     dbc.Row([
-                        dbc.Col([dbc.Label("Lat min"), dbc.Input(
-                            id="sc-lat-min", type="number",
-                            min=-90, max=90, value=0,
-                        )], width=6),
-                        dbc.Col([dbc.Label("Lat max"), dbc.Input(
-                            id="sc-lat-max", type="number",
-                            min=-90, max=90, value=70,
-                        )], width=6),
-                    ], className="mb-2"),
-                    dbc.Row([
                         dbc.Col([dbc.Label("Lon min"), dbc.Input(
                             id="sc-lon-min", type="number",
                             min=-180, max=180, value=-77,
@@ -244,6 +234,16 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
                         dbc.Col([dbc.Label("Lon max"), dbc.Input(
                             id="sc-lon-max", type="number",
                             min=-180, max=180, value=30,
+                        )], width=6),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([dbc.Label("Lat min"), dbc.Input(
+                            id="sc-lat-min", type="number",
+                            min=-90, max=90, value=0,
+                        )], width=6),
+                        dbc.Col([dbc.Label("Lat max"), dbc.Input(
+                            id="sc-lat-max", type="number",
+                            min=-90, max=90, value=70,
                         )], width=6),
                     ]),
                 ]),
@@ -576,15 +576,15 @@ def _on_tab_switch(active_tab):
     Input("sc-global-map", "value"),
     Input("sc-colour-by", "value"),
     State("scatter-param", "value"),
-    State("sc-lat-min", "value"), State("sc-lat-max", "value"),
     State("sc-lon-min", "value"), State("sc-lon-max", "value"),
+    State("sc-lat-min", "value"), State("sc-lat-max", "value"),
     State("sc-qc", "value"),
     State("sc-depth-slider", "min"), State("sc-depth-slider", "max"),
     State("sc-year-slider", "min"), State("sc-year-slider", "max"),
     prevent_initial_call=True,
 )
 def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global, colour_by,
-                      param, lat_min, lat_max, lon_min, lon_max, use_qc,
+                      param, lon_min, lon_max, lat_min, lat_max, use_qc,
                       cur_z_min, cur_z_max, cur_y_min, cur_y_max):
     """Load data on button click, or re-render from cache on slider change."""
     trigger = ctx.triggered_id
@@ -605,8 +605,8 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
             # Load all rows matching the spatial and QC filters
             df = read_parameter(
                 conn, param, quality_flags=qc,
-                lat_min=lat_min, lat_max=lat_max,
                 lon_min=lon_min, lon_max=lon_max,
+                lat_min=lat_min, lat_max=lat_max,
                 extra_station_cols=["CRUISE_ID", "ST_NUMBER_ORIGIN"],
             )
 
@@ -615,7 +615,7 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
             if "UNITS_ID" in df.columns and df["UNITS_ID"].nunique() > 1:
                 try:
                     uc = UnitsConverter.from_connection(conn)
-                    df = uc.convert_dataframe(df, f"P_{param}")
+                    df = uc.convert_dataframe(df, param)
                     converted = True
                 except (ValueError, Exception) as e:
                     logger.warning("Unit conversion skipped: %s", e)
@@ -651,8 +651,8 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
         # Populate server-side cache
         _scatter_cache["df"] = df
         _scatter_cache["bounds"] = {
-            "lat_min": lat_min, "lat_max": lat_max,
             "lon_min": lon_min, "lon_max": lon_max,
+            "lat_min": lat_min, "lat_max": lat_max,
             "param": param,
         }
         _scatter_cache["unit_note"] = " (units converted)" if converted else ""
@@ -926,9 +926,9 @@ def _populate_grid_controls(table_name):
     State("grid-table", "value"),
     prevent_initial_call=True,
 )
-def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global, table_name):
+def _render_grid(value_col, depth_range, time_idx_range, plot_type, show_global, table_name):
     """Query a depth/time range from the wide table and render."""
-    if not table_name or not param_col:
+    if not table_name or not value_col:
         raise PreventUpdate
 
     depths = _grid_cache.get("depths", [])
@@ -966,7 +966,7 @@ def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global,
 
     # Build status text
     n_total = len(df)
-    n_valid = df[param_col].notna().sum()
+    n_valid = df[value_col].notna().sum()
     depth_label = (
         _format_range_label(depth_range[0], depth_range[1], "{:.0f}") + " m"
         if depth_range is not None else "all"
@@ -976,10 +976,10 @@ def _render_grid(param_col, depth_range, time_idx_range, plot_type, show_global,
         if time_range is not None else "all"
     )
     status = (f"{n_valid:,} / {n_total:,} cells - "
-              f"{param_col}  |  depth: {depth_label}  |  time: {time_label}")
+              f"{value_col}  |  depth: {depth_label}  |  time: {time_label}")
 
     label = f"depth {depth_label}" + (f", time {time_label}" if time_range is not None else "")
-    fig = _grid_figure(df, param_col, label, plot_type, show_global)
+    fig = _grid_figure(df, value_col, label, plot_type, show_global)
     return fig, status, "", False
 
 
@@ -1008,18 +1008,18 @@ def _show_grid_time(idx_range):
         return ""
 
 
-def _grid_figure(df, param_col, depth_label, plot_type, show_global=False):
+def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
     """Build a Plotly figure for the grid tab."""
     if plot_type == "map":
         # Show only cells with data, aggregated to one value per lat/lon (mean)
-        valid = df[df[param_col].notna()]
+        valid = df[df[value_col].notna()]
         is_aggregated = valid.duplicated(subset=["LATITUDE", "LONGITUDE"]).any()
-        plot_df = valid.groupby(["LATITUDE", "LONGITUDE"], as_index=False)[param_col].mean()
+        plot_df = valid.groupby(["LATITUDE", "LONGITUDE"], as_index=False)[value_col].mean()
         title_suffix = " (mean)" if is_aggregated else ""
         fig = px.scatter_geo(
-            plot_df, lat="LATITUDE", lon="LONGITUDE", color=param_col,
+            plot_df, lat="LATITUDE", lon="LONGITUDE", color=value_col,
             color_continuous_scale="Viridis",
-            title=f"{param_col}{title_suffix} - {depth_label}",
+            title=f"{value_col}{title_suffix} - {depth_label}",
         )
         # Crop map to grid extent
         lat_min, lat_max = df["LATITUDE"].min(), df["LATITUDE"].max()
@@ -1060,10 +1060,10 @@ def _grid_figure(df, param_col, depth_label, plot_type, show_global=False):
         fig.update_layout(coloraxis_showscale=False)
     else:
         # Histogram of non-null values
-        valid = df[param_col].dropna()
+        valid = df[value_col].dropna()
         fig = px.histogram(
-            valid, x=param_col, nbins=80,
-            title=f"{param_col} - {depth_label}",
+            valid, x=value_col, nbins=80,
+            title=f"{value_col} - {depth_label}",
         )
 
     fig.update_layout(template="plotly_white")
@@ -1185,9 +1185,9 @@ def _load_csv(contents, filename):
     Input("csv-global-map", "value"),
     prevent_initial_call=True,
 )
-def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
+def _render_csv(value_col, depth_range, time_idx_range, plot_type, show_global):
     """Query a depth/time range from the CSV table and render."""
-    if _csv_cache["df"] is None or not param_col:
+    if _csv_cache["df"] is None or not value_col:
         raise PreventUpdate
 
     times = _csv_cache.get("times", [])
@@ -1210,7 +1210,7 @@ def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
 
     # Build status text
     n_total = len(df)
-    n_valid = df[param_col].notna().sum()
+    n_valid = df[value_col].notna().sum()
     depth_label = (
         _format_range_label(depth_range[0], depth_range[1], "{:.0f}") + " m"
         if depth_range is not None else "all"
@@ -1220,10 +1220,10 @@ def _render_csv(param_col, depth_range, time_idx_range, plot_type, show_global):
         if time_range is not None else "all"
     )
     status = (f"{n_valid:,} / {n_total:,} cells - "
-              f"{param_col} | depth: {depth_label} | time: {time_label}")
+              f"{value_col} | depth: {depth_label} | time: {time_label}")
 
     label = f"depth {depth_label}" + (f", time {time_label}" if time_range is not None else "")
-    fig = _grid_figure(df, param_col, label, plot_type, show_global)
+    fig = _grid_figure(df, value_col, label, plot_type, show_global)
     return fig, status, "", False
 
 

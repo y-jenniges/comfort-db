@@ -177,7 +177,7 @@ class TestApplyQcFlags:
 
     # A filter on a column absent from df raises
     def test_missing_column_raises(self):
-        with pytest.raises(ValueError, match="SQF"):
+        with pytest.raises(KeyError, match="SQF"):
             apply_qc_flags(self._df(), [QCFilter("SQF", ">0")])
 
     # An unsupported operator raises instead of silently filtering nothing
@@ -263,12 +263,12 @@ class TestFlagSalinityLikeOxygen:
 
     # OXYGEN is a required column
     def test_missing_oxygen_column_raises(self):
-        with pytest.raises(ValueError, match="OXYGEN"):
+        with pytest.raises(KeyError, match="OXYGEN"):
             flag_salinity_like_oxygen(pd.DataFrame({"SALINITY": [35.0]}))
 
     # A salinity column is required
     def test_missing_salinity_column_raises(self):
-        with pytest.raises(ValueError, match="SALINITY"):
+        with pytest.raises(KeyError, match="SALINITY"):
             flag_salinity_like_oxygen(pd.DataFrame({"OXYGEN": [250.0]}))
 
     # tol widens the matching range: a 0.0005 difference is only flagged with a larger tol
@@ -282,3 +282,11 @@ class TestFlagSalinityLikeOxygen:
     def test_negative_tolerance_raises(self):
         with pytest.raises(ValueError, match="tol"):
             flag_salinity_like_oxygen(self._df(), tol=-1.0)
+
+
+class TestColumnCasing:
+    # A flag column in another casing is found
+    def test_apply_qc_flags_other_casing(self):
+        df = pd.DataFrame({"PQF1": [0, 1, 1], "VAL": [10.0, 20.0, 30.0]})
+        result = apply_qc_flags(df, [QCFilter("pqf1", ">0")])
+        assert result["VAL"].tolist() == [20.0, 30.0]

@@ -1,6 +1,17 @@
 """High-level I/O helpers for reading and subsetting COMFORT parameter data."""
 from __future__ import annotations
 
+__all__ = [
+    "connect",
+    "describe_variables",
+    "info",
+    "list_parameters",
+    "load_comfort",
+    "read_parameter",
+    "read_station",
+    "subset_region",
+]
+
 import logging
 import sqlite3
 from collections.abc import Iterator
@@ -15,10 +26,13 @@ if TYPE_CHECKING:
     import geopandas as gpd
 
 from .profile_analysis import interpolate_depth_levels
-from .database.information import get_names_of_all_parameter_tables
+from .database.information import get_names_of_all_parameter_tables, param_label, param_table_name
 from .geo import region_bbox, water_mass_masks
-from .qc import QCFilter, build_where_clause, qc_conditions
+from .qc import QualityFlags, build_where_clause, qc_conditions
+from .util.columns import find_col
+from .util.optional import import_optional
 from .util.sqlite_utils import validate_identifier
+from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +41,6 @@ def _refine_to_region(df, region, region_name_col):
     """Drop rows outside the exact region polygon(s), e.g. after SQL-level bounding box filtering."""
     # Check if region and df have data
     if region is None or df.empty:
-        return df
-
-    # Check if latitude and longitude columns are given
-    if "LATITUDE" not in df.columns or "LONGITUDE" not in df.columns:
-        logger.warning("Region filter requested but LATITUDE/LONGITUDE columns not found - filter skipped.")
         return df
 
     # Filter for exact regions
@@ -88,7 +97,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
         rows = []
         for param in params:
             validate_identifier(param)
-            table = f"P_{param}"
+            table = param_table_name(param)
             cur = conn.cursor()
 
             # Get depth range
@@ -129,14 +138,14 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
     Returns:
         list[str]: Parameter names, e.g. ``['NITRATE', 'OXYGEN', ...]``.
     """
-    return [name[2:] for name in get_names_of_all_parameter_tables(conn)]
+    return [param_label(table_name) for table_name in get_names_of_all_parameter_tables(conn)]
 
 
-def read_parameter(conn: sqlite3.Connection, param_name: str,
-                   quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+def read_parameter(conn: sqlite3.Connection, parameter: str, *,
+                   quality_flags: QualityFlags | None = None,
                    profiles: list[int] | None = None,
-                   lat_min: float | None = None, lat_max: float | None = None,
                    lon_min: float | None = None, lon_max: float | None = None,
+                   lat_min: float | None = None, lat_max: float | None = None,
                    depth_min: float | None = None, depth_max: float | None = None,
                    date_min: str | None = None, date_max: str | None = None,
                    region: dict | str | Path | gpd.GeoDataFrame | gpd.GeoSeries | None = None,
@@ -150,20 +159,19 @@ def read_parameter(conn: sqlite3.Connection, param_name: str,
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        param_name (str): Parameter name (without ``'P_'`` prefix).
-        quality_flags (list[QCFilter] or list[tuple[str, str]]): QC filters,
-            e.g. ``QC_GOOD``.
+        parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+        quality_flags (QualityFlags): QC filters, e.g. ``QC_GOOD``.
         profiles (list[int]): Profile numbers to load. ``None`` loads all.
-        lat_min (float): Minimum latitude [degrees N].
-        lat_max (float): Maximum latitude [degrees N].
         lon_min (float): Minimum longitude [degrees E].
         lon_max (float): Maximum longitude [degrees E].
+        lat_min (float): Minimum latitude [degrees N].
+        lat_max (float): Maximum latitude [degrees N].
         depth_min (float): Minimum depth [m].
         depth_max (float): Maximum depth [m].
         date_min (str or datetime-like): Start date (inclusive).
         date_max (str or datetime-like): End date (inclusive).
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
-            Longhurst province) instead of or in addition to the lat/lon box above.
+            Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
         region_name_col (str): Region name column for *region*.
         limit (int): Maximum number of rows to return (the first rows in
@@ -178,8 +186,8 @@ def read_parameter(conn: sqlite3.Connection, param_name: str,
     region_box = region_bbox(region, region_name_col) if region is not None else None
 
     # Get the data from the database
-    df = _read_with_geo(conn, param_name, quality_flags,
-                        lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max,
+    df = _read_with_geo(conn, parameter, quality_flags,
+                        lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max,
                         depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
                         limit=limit, region_box=region_box,
                         profiles=profiles, extra_station_cols=extra_station_cols)
@@ -204,7 +212,7 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
 
 def describe_variables(conn: sqlite3.Connection,
                        parameters: list[str] | None = None,
-                       quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None) -> pd.DataFrame:
+                       quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Summarise available parameters: sample counts, depth range, value range,
     units, instruments and platforms.
 
@@ -214,7 +222,7 @@ def describe_variables(conn: sqlite3.Connection,
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names (without ``P_`` prefix).
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
             ``None`` describes all available parameters.
         quality_flags (list[list[str, str]]): Optional QC filters applied
             when counting samples and computing ranges.
@@ -229,11 +237,13 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Iterate over given parameters
     if parameters is not None:
-        # Warn if parameters are unknown
-        unknown = set(parameters) - set(all_params)
+        # Canonical names (case and P_ prefix do not matter), each only once
+        params = list(dict.fromkeys(param_label(p) for p in parameters))
+
+        # Fail if parameters are unknown
+        unknown = set(params) - set(all_params)
         if unknown:
             raise ValueError(f"Unknown parameters: {sorted(unknown)}")
-        params = parameters
     else:
         params = all_params
 
@@ -253,7 +263,7 @@ def describe_variables(conn: sqlite3.Connection,
         validate_identifier(param)
 
         # Define table name
-        table = f"P_{param}"
+        table = param_table_name(param)
 
         # Connect to db and fetch parameter statistics
         cur = conn.cursor()
@@ -383,71 +393,63 @@ def _load_lookups(conn) -> _Lookups:
     )
 
 
-def subset_region(df: pd.DataFrame,
-                  lat_min: float | None = None, lat_max: float | None = None,
+def subset_region(df: pd.DataFrame, *,
                   lon_min: float | None = None, lon_max: float | None = None,
+                  lat_min: float | None = None, lat_max: float | None = None,
                   depth_min: float | None = None, depth_max: float | None = None,
                   date_min: str | None = None, date_max: str | None = None,
                   region: dict | str | Path | gpd.GeoDataFrame | gpd.GeoSeries | None = None,
                   region_name_col: str = "name") -> pd.DataFrame:
     """Filter a DataFrame to a geographic, depth and/or time region.
 
-    Logs a warning when a requested bound cannot be applied because the
-    corresponding column is absent. Recognised columns: LATITUDE, LONGITUDE,
-    LEV_M, DATEANDTIME.
+    Columns are looked up insensitive to casing: LONGITUDE, LATITUDE, LEV_M, DATEANDTIME.
 
     Args:
         df (pandas.DataFrame): Extended parameter or station DataFrame.
-        lat_min (float): Minimum latitude in degrees N.
-        lat_max (float): Maximum latitude in degrees N.
         lon_min (float): Minimum longitude in degrees E.
         lon_max (float): Maximum longitude in degrees E.
+        lat_min (float): Minimum latitude in degrees N.
+        lat_max (float): Maximum latitude in degrees N.
         depth_min (float): Minimum depth in metres.
         depth_max (float): Maximum depth in metres.
         date_min (str or datetime-like): Start date (inclusive).
         date_max (str or datetime-like): End date (inclusive).
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
-            Longhurst province) instead of or in addition to the lat/lon box above.
+            Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
         region_name_col (str): Region name column for *region*.
     Returns:
         pandas.DataFrame: Filtered copy.
+    Raises:
+        KeyError: If a requested bound or *region* needs a column that *df* does not have.
     """
-    # Apply a single bound, skip with warning if column absent
-    def _apply(mask, col, bound_name, bound_val, op):
-        if bound_val is None:
-            return mask
-        if col not in df.columns:
-            logger.warning(
-                "subset_region: %r requested but column %r not found - filter skipped",
-                bound_name, col,
-            )
-            return mask
-        return mask & op(df[col], bound_val)
-
-    import operator as op
-
-    # Spatial bounds
+    # Spatial and depth bounds, a missing column raises
     mask = pd.Series(True, index=df.index)
-    mask = _apply(mask, "LATITUDE", "lat_min", lat_min, op.ge)
-    mask = _apply(mask, "LATITUDE", "lat_max", lat_max, op.le)
-    mask = _apply(mask, "LONGITUDE", "lon_min", lon_min, op.ge)
-    mask = _apply(mask, "LONGITUDE", "lon_max", lon_max, op.le)
-    mask = _apply(mask, "LEV_M", "depth_min", depth_min, op.ge)
-    mask = _apply(mask, "LEV_M", "depth_max", depth_max, op.le)
+    for col, lower, upper in (("LONGITUDE", lon_min, lon_max),
+                              ("LATITUDE", lat_min, lat_max),
+                              ("LEV_M", depth_min, depth_max)):
+        if lower is None and upper is None:
+            # No bounds
+            continue
+
+        # Get the required column
+        values = df[find_col(df, col)]
+        if lower is not None:
+            # Apply lower threshold
+            mask &= values >= lower
+        if upper is not None:
+            # Apply upper threshold
+            mask &= values <= upper
 
     # Date range filter
     if date_min is not None or date_max is not None:
-        if "DATEANDTIME" not in df.columns:
-            logger.warning(
-                "subset_region: date filter requested but column 'DATEANDTIME' not found - filter skipped"
-            )
-        else:
-            dates = pd.to_datetime(df["DATEANDTIME"])
-            if date_min is not None:
-                mask &= dates >= pd.Timestamp(date_min)
-            if date_max is not None:
-                mask &= dates <= pd.Timestamp(date_max)
+        dates = pd.to_datetime(df[find_col(df, "DATEANDTIME")])
+        if date_min is not None:
+            # Apply lower threshold
+            mask &= dates >= pd.Timestamp(date_min)
+        if date_max is not None:
+            # Apply upper threshold
+            mask &= dates <= pd.Timestamp(date_max)
 
     # Exact polygon refine (in addition to the explicit bounds above)
     return _refine_to_region(df[mask].copy(), region, region_name_col)
@@ -456,21 +458,22 @@ def subset_region(df: pd.DataFrame,
 def load_comfort(
         db_path_or_conn: str | Path | sqlite3.Connection,
         parameters: list[str] | None = None,
-        quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
-        lat_min: float | None = None, lat_max: float | None = None,
+        *,
+        quality_flags: QualityFlags | None = None,
         lon_min: float | None = None, lon_max: float | None = None,
+        lat_min: float | None = None, lat_max: float | None = None,
         depth_min: float | None = None, depth_max: float | None = None,
         date_min: str | None = None, date_max: str | None = None,
         region: dict | str | Path | gpd.GeoDataFrame | gpd.GeoSeries | None = None,
         region_name_col: str = "name",
         target_depths: np.ndarray | list[float] | None = None,
         max_gap: float | None = None,
-        interp_method: str = "pchip",
-        as_xarray: bool = True,
+        interp_method: InterpMethod = "pchip",
+        output: LoadOutput = "xarray",
         convert_units: bool = False,
         use_density: bool = False,
-        on_missing: str = "drop",
-        density_fallback: str = "constant",
+        on_missing: OnMissing = "drop",
+        density_fallback: DensityFallback = "constant",
         limit: int | None = None,
 ) -> xr.Dataset | dict[str, pd.DataFrame]:
     """Load COMFORT data into a filtered xarray Dataset or dict of DataFrames.
@@ -487,20 +490,21 @@ def load_comfort(
             SQLite database or an existing open connection. When a path is
             given, the connection is opened and closed automatically. When a
             connection is passed, it is left open.
-        parameters (list[str]): Parameter names (without prefix).
+        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+            The result uses the upper case name without prefix.
             ``None`` loads all available parameters.
         quality_flags: QC filter preset, e.g. :data:`comfort.qc.QC_GOOD`.
             ``None`` means no filtering.
-        lat_min (float): Minimum latitude [degrees N].
-        lat_max (float): Maximum latitude [degrees N].
         lon_min (float): Minimum longitude [degrees E].
         lon_max (float): Maximum longitude [degrees E].
+        lat_min (float): Minimum latitude [degrees N].
+        lat_max (float): Maximum latitude [degrees N].
         depth_min (float): Minimum depth [m].
         depth_max (float): Maximum depth [m].
         date_min (str or datetime-like): Start date (inclusive).
         date_max (str or datetime-like): End date (inclusive).
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
-            Longhurst province) instead of or in addition to the lat/lon box above.
+            Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
         region_name_col (str): Region name column for *region*. See
             :func:`comfort.geo.water_mass_masks`.
@@ -515,8 +519,8 @@ def load_comfort(
             :func:`~comfort.profile_analysis.interpolate_depth_levels`:
             ``"pchip"`` (default) or ``"linear"``. Ignored when
             *target_depths* is ``None``.
-        as_xarray (bool): ``True`` returns ``xr.Dataset``, ``False`` returns
-            ``dict[param_name, pandas.DataFrame]``.
+        output (str): ``"xarray"`` (default) returns an ``xr.Dataset``, ``"dict"``
+            returns ``dict[parameter, pandas.DataFrame]``.
         convert_units (bool): When ``True``, convert each parameter's values
             to its default unit using :class:`comfort.units.UnitsConverter`.
         use_density (bool): When ``True`` and ``convert_units=True``, use
@@ -539,15 +543,25 @@ def load_comfort(
         xarray.Dataset or dict[str, pandas.DataFrame].
         For the dict path each DataFrame has the measurement column named
         after the parameter (e.g. ``"NITRATE"``), not ``"VAL"``.
-        For the scattered xarray path (``as_xarray=True,
+        For the scattered xarray path (``output="xarray",
         target_depths=None``), each parameter's coordinates are prefixed
         with its name (e.g. ``NITRATE_depth``, ``NITRATE_latitude``) since
         different parameters have independent observation dimensions.
     """
+    # Fail early on unknown options
+    check_choice(output, LoadOutput, "output")
+    check_choice(interp_method, InterpMethod, "interp_method")
+    check_choice(on_missing, OnMissing, "on_missing")
+    check_choice(density_fallback, DensityFallback, "density_fallback")
+
+    # Fail before loading any data if xarray is needed but missing
+    if output == "xarray":
+        import_optional("xarray", "grid", 'load_comfort(output="xarray")')
+
     # Collect geo/temporal filter arguments (the region bounding box is ANDed with the explicit bounds in SQL)
     geo_kwargs = dict(
-        lat_min=lat_min, lat_max=lat_max,
         lon_min=lon_min, lon_max=lon_max,
+        lat_min=lat_min, lat_max=lat_max,
         depth_min=depth_min, depth_max=depth_max,
         date_min=date_min, date_max=date_max,
         region_box=region_bbox(region, region_name_col) if region is not None else None,
@@ -562,8 +576,11 @@ def load_comfort(
         if parameters is None:
             parameters = available
         else:
+            # Canonical names (case and P_ prefix do not matter), each only once
+            parameters = list(dict.fromkeys(param_label(p) for p in parameters))
+
             # Fail (before loading anything) if a requested parameter table is missing
-            unknown = {p for p in parameters if p.upper() not in {a.upper() for a in available}}
+            unknown = {p for p in parameters if p not in available}
             if unknown:
                 raise ValueError(f"Unknown parameters: {sorted(unknown)}")
 
@@ -598,24 +615,24 @@ def load_comfort(
     if not dfs:
         # No data was found
         logger.warning("load_comfort: No data found for the given filters")
-        if as_xarray:
+        if output == "xarray":
             import xarray as xr
             return xr.Dataset()
         return {}
 
     # Return each profile at its native measured depths (if no target_depths given)
     if target_depths is None:
-        if not as_xarray:
+        if output == "dict":
             return dfs
         return _build_scattered_dataset(dfs, lookups=lookups, param_unit_ids=_param_unit_ids)
 
     # target_depths given: Project every parameter onto it
     depths = np.asarray(target_depths, dtype=float)
     interp_dfs = {
-        param: interpolate_depth_levels(df, depths, param_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
+        param: interpolate_depth_levels(df, depths, value_col=param, depth_col="LEV_M", max_gap=max_gap, method=interp_method)
         for param, df in dfs.items()
     }
-    if not as_xarray:
+    if output == "dict":
         # Return dfs
         return interp_dfs
 
@@ -632,7 +649,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
 
     # Check if temperature and/or salinity are required for unit conversions
     with_temperature, with_salinity = (
-        converter.required_inputs(f"P_{param.upper()}", use_density) if converter else (False, False))
+        converter.required_inputs(param_table_name(param), use_density) if converter else (False, False))
 
     # Load param with space, time and optionally T and S columns
     df = _read_with_geo(conn, param, quality_flags, limit=limit,
@@ -657,7 +674,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
 
     # Convert to default unit before renaming VAL
     if converter is not None and "VAL" in df.columns:
-        df = converter.convert_dataframe(df, f"P_{param}",
+        df = converter.convert_dataframe(df, param_table_name(param),
                                          use_density=use_density,
                                          on_missing=on_missing,
                                          density_fallback=density_fallback)
@@ -859,8 +876,8 @@ def _build_scattered_dataset(dfs, lookups, param_unit_ids):
     return ds
 
 
-def _read_with_geo(conn, param_name, quality_flags,
-                   lat_min=None, lat_max=None, lon_min=None, lon_max=None,
+def _read_with_geo(conn, parameter, quality_flags,
+                   lon_min=None, lon_max=None, lat_min=None, lat_max=None,
                    depth_min=None, depth_max=None, date_min=None, date_max=None,
                    limit=None, with_temperature=False, with_salinity=False, region_box=None,
                    profiles=None, extra_station_cols=None):
@@ -875,7 +892,8 @@ def _read_with_geo(conn, param_name, quality_flags,
     from .database.information import does_table_exist
 
     # Validate identifiers
-    validate_identifier(param_name)
+    table = param_table_name(parameter)
+    validate_identifier(table)
     for col in extra_station_cols or []:
         validate_identifier(col)
 
@@ -889,7 +907,8 @@ def _read_with_geo(conn, param_name, quality_flags,
         params.extend(profiles)
     _append_geo_conditions(
         conditions, params, "s.", "s.", "p.", "s.",
-        lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
+        lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max,
+        depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
         region_box=region_box,
     )
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -902,7 +921,8 @@ def _read_with_geo(conn, param_name, quality_flags,
         t_params: list = []
         _append_geo_conditions(
             t_conditions, t_params, "s2.", "s2.", "t.", "s2.",
-            lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
+            lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max,
+            depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
             region_box=region_box,
         )
         t_where = ("WHERE " + " AND ".join(t_conditions)) if t_conditions else ""
@@ -918,7 +938,8 @@ def _read_with_geo(conn, param_name, quality_flags,
         sal_params: list = []
         _append_geo_conditions(
             sal_conditions, sal_params, "s2.", "s2.", "t.", "s2.",
-            lat_min, lat_max, lon_min, lon_max, depth_min, depth_max, date_min, date_max,
+            lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max,
+            depth_min=depth_min, depth_max=depth_max, date_min=date_min, date_max=date_max,
             region_box=region_box,
         )
         sal_where = ("WHERE " + " AND ".join(sal_conditions)) if sal_conditions else ""
@@ -934,9 +955,9 @@ def _read_with_geo(conn, param_name, quality_flags,
 
     # Assemble the query
     query = (
-        f"SELECT p.*, s.LATITUDE, s.LONGITUDE{extra_select}, "
+        f"SELECT p.*, s.LONGITUDE, s.LATITUDE{extra_select}, "
         f"strftime('%Y-%m-%d %H:%M:%S', s.DATEANDTIME) AS DATEANDTIME{ts_select} "
-        f"FROM P_{param_name.upper()} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
+        f"FROM {table} p JOIN station s ON p.ID = s.ID {ts_join}{where}"
     )
     # T/S sub-query values come first in the SQL text, so they come first in the parameters
     params = ts_params + params
@@ -949,15 +970,9 @@ def _read_with_geo(conn, param_name, quality_flags,
     return pd.read_sql_query(query, conn, params=params)
 
 
-def _append_box_conditions(conditions, params, lat_pfx, lon_pfx,
-                           lat_min, lat_max, lon_min, lon_max):
-    """Append lat/lon bounding-box SQL conditions and ? parameter values in-place."""
-    if lat_min is not None:
-        conditions.append(f"{lat_pfx}LATITUDE >= ?")
-        params.append(float(lat_min))
-    if lat_max is not None:
-        conditions.append(f"{lat_pfx}LATITUDE <= ?")
-        params.append(float(lat_max))
+def _append_box_conditions(conditions, params, lon_pfx, lat_pfx, *,
+                           lon_min, lon_max, lat_min, lat_max):
+    """Append lon/lat bounding-box SQL conditions and ? parameter values in-place."""
     if lon_min is not None and lon_max is not None and lon_min > lon_max:
         # Region contains the antimeridian (see comfort.geo.region_bbox) -> Use OR
         conditions.append(f"({lon_pfx}LONGITUDE >= ? OR {lon_pfx}LONGITUDE <= ?)")
@@ -971,18 +986,27 @@ def _append_box_conditions(conditions, params, lat_pfx, lon_pfx,
         if lon_max is not None:
             conditions.append(f"{lon_pfx}LONGITUDE <= ?")
             params.append(float(lon_max))
+    if lat_min is not None:
+        conditions.append(f"{lat_pfx}LATITUDE >= ?")
+        params.append(float(lat_min))
+    if lat_max is not None:
+        conditions.append(f"{lat_pfx}LATITUDE <= ?")
+        params.append(float(lat_max))
 
 
-def _append_geo_conditions(conditions, params, lat_pfx, lon_pfx, depth_pfx, date_pfx,
-                           lat_min, lat_max, lon_min, lon_max,
+def _append_geo_conditions(conditions, params, lon_pfx, lat_pfx, depth_pfx, date_pfx, *,
+                           lon_min, lon_max, lat_min, lat_max,
                            depth_min, depth_max, date_min, date_max, region_box=None):
     """Append spatial/temporal SQL conditions and ? parameter values in-place."""
-    # Append lat/lon conditions
-    _append_box_conditions(conditions, params, lat_pfx, lon_pfx, lat_min, lat_max, lon_min, lon_max)
+    # Append lon/lat conditions
+    _append_box_conditions(conditions, params, lon_pfx, lat_pfx,
+                           lon_min=lon_min, lon_max=lon_max, lat_min=lat_min, lat_max=lat_max)
 
     # Append region bbox conditions
     if region_box is not None:
-        _append_box_conditions(conditions, params, lat_pfx, lon_pfx, *region_box)
+        lon_lo, lon_hi, lat_lo, lat_hi = region_box
+        _append_box_conditions(conditions, params, lon_pfx, lat_pfx,
+                               lon_min=lon_lo, lon_max=lon_hi, lat_min=lat_lo, lat_max=lat_hi)
 
     # Append depth conditions
     if depth_min is not None:

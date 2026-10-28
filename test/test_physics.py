@@ -110,7 +110,7 @@ class TestConvertTemperature:
 
     # An unrecognised target raises value error
     def test_invalid_to_raises(self):
-        with pytest.raises(ValueError, match="Unknown target"):
+        with pytest.raises(ValueError, match="to must be"):
             convert_temperature(t_insitu=10.0, sa=34.6, pressure=200, to="bad")
 
     # Array-like inputs are converted element-wise
@@ -150,7 +150,7 @@ class TestComputeDensity:
 
     # An unrecognised quantity name raises instead of guessing
     def test_invalid_quantity_raises(self):
-        with pytest.raises(ValueError, match="Unknown quantity"):
+        with pytest.raises(ValueError, match="quantity must be"):
             compute_density(34.6, 10.0, quantity="bad")
 
     # Cold, salty water is denser (higher sigma0) than warm, fresh water

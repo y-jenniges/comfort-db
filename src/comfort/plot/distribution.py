@@ -16,13 +16,16 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from ..util.columns import find_col
+from ..util.optional import import_optional
+from ..util.types import BoxKind, check_choice
 from ._helpers import _finish, _get_or_create_ax, _resolve_data, _save_fig
 
 if TYPE_CHECKING:
     import sqlite3
     import matplotlib.axes
     import matplotlib.figure
-    from ..qc import QCFilter
+    from ..qc import QualityFlags
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +34,11 @@ def boxplot(
     df: pd.DataFrame | None = None,
     value_col: str = "VAL",
     *,
-    kind: str = "box",
+    kind: BoxKind = "box",
     title: str | None = None,
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
     dpi: int = 300,
@@ -50,7 +53,7 @@ def boxplot(
         kind: Plot type (``'box'`` or ``'violin'``).
         title: Plot title (defaults to *value_col*).
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         ax: Axes to draw into.
         save_as: File path to save the figure.
@@ -59,7 +62,11 @@ def boxplot(
     Returns:
         The matplotlib Axes.
     """
+    check_choice(kind, BoxKind, "kind")
     df = _resolve_data(df, conn, parameter, quality_flags)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
     ax, standalone = _get_or_create_ax(ax)
 
     # Draw the chosen distribution plot
@@ -81,7 +88,7 @@ def plot_histogram(
     kind: str = "hist",
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     ax: matplotlib.axes.Axes | None = None,
     save_as: str | None = None,
     dpi: int = 300,
@@ -96,7 +103,7 @@ def plot_histogram(
         title: Plot title.
         kind: Plot kind accepted by ``DataFrame.plot()``.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         ax: Axes to draw into.
         save_as: File path to save the figure.
@@ -106,6 +113,9 @@ def plot_histogram(
         The matplotlib Axes.
     """
     df = _resolve_data(df, conn, parameter, quality_flags)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
     ax, standalone = _get_or_create_ax(ax)
 
     df[[value_col]].plot(
@@ -123,7 +133,7 @@ def plot_monthly_histogram(
     date_col: str = "DATEANDTIME",
     conn: sqlite3.Connection | None = None,
     parameter: str | None = None,
-    quality_flags: list[QCFilter] | list[tuple[str, str]] | None = None,
+    quality_flags: QualityFlags | None = None,
     save_as: str | None = None,
     dpi: int = 300,
 ) -> matplotlib.figure.Figure:
@@ -136,7 +146,7 @@ def plot_monthly_histogram(
         value_col: Column with measured values.
         date_col: Column with datetime values.
         conn: Database connection (alternative to *df*).
-        parameter: Parameter name without ``P_`` prefix.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         quality_flags: QC filters.
         save_as: File path to save the figure.
         dpi: Resolution (dots per inch) used when saving.
@@ -145,6 +155,10 @@ def plot_monthly_histogram(
         The matplotlib Figure.
     """
     df = _resolve_data(df, conn, parameter, quality_flags)
+
+    # Resolve column names (insensitive to casing)
+    value_col = find_col(df, value_col)
+    date_col = find_col(df, date_col)
     temp = df.copy()
     temp[date_col] = pd.to_datetime(temp[date_col])
 
@@ -206,6 +220,10 @@ def compare_stats(
     Returns:
         The matplotlib Axes.
     """
+    # Resolve column names (insensitive to casing)
+    group_col = find_col(df, group_col)
+    value_cols = find_col(df, value_cols)
+
     # Auto-detect numeric columns when none are specified
     if value_cols is None:
         value_cols = sorted(
@@ -221,14 +239,8 @@ def compare_stats(
 
     # Scale to [0, 1] for cross-parameter comparability
     if scale:
-        try:
-            from sklearn.preprocessing import MinMaxScaler
-        except ImportError:
-            raise ImportError(
-                "scikit-learn is required for compare_stats(scale=True). "
-                'Install it with: pip install "comfort-db[scale]"'
-            )
-        scaler = MinMaxScaler().fit(temp[value_cols])
+        preprocessing = import_optional("sklearn.preprocessing", "scale", "compare_stats(scale=True)")
+        scaler = preprocessing.MinMaxScaler().fit(temp[value_cols])
         scaled = pd.DataFrame(
             scaler.transform(temp[value_cols]),
             columns=value_cols, index=temp.index,
