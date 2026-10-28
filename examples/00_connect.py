@@ -85,7 +85,6 @@ if BATHYMETRY_PATH:
         mode="Y", dtime=5,
     )
     print("--- Grid ---")
-    print(f"Grid ID:    {grid.grid_id}")
     print(f"Cells:      {grid.grid.shape}")
     print(f"Time steps: {len(grid.time_array)}")
 else:

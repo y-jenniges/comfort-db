@@ -1,7 +1,6 @@
 """Tests for comfort.gridding."""
 import itertools
 import os
-import sqlite3
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,18 +11,12 @@ try:
 except ImportError:
     _has_xarray = False
 
-from comfort.database.information import does_table_exist, get_table_as_df
 from comfort.gridding import (
     Grid,
-    GridManager,
-    generate_grid_id,
     average_duplicate_locations,
-    create_wide_table_online,
     drop_land_cells,
     get_missing_value_info_offline,
     get_missing_value_info_offline_per_param,
-    get_missing_value_info_per_param,
-    load_wide_table,
     seasonal_mean,
 )
 
@@ -576,51 +569,6 @@ class TestNoTimeGridBin:
         assert _make_grid_stub().has_time
 
 
-class TestNoTimeMapTables:
-    """Test Grid.map_tables for a grid without time axis against an in-memory database."""
-
-    @staticmethod
-    def _conn():
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE station (ID INTEGER, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)")
-        conn.execute("CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL)")
-        conn.executemany("INSERT INTO station VALUES (?, ?, ?, ?)", [
-            (1, 1.0, 1.0, "2000-01-01 00:00:00"),
-            (2, 2.0, 2.0, "2000-01-02 00:00:00"),
-            (3, 20.0, 1.0, "2000-01-03 00:00:00"),  # outside the grid extent
-        ])
-        conn.executemany("INSERT INTO P_NITRATE VALUES (?, ?, ?)",
-                         [(1, 10.0, 1.0), (2, 20.0, 3.0), (3, 10.0, 99.0)])
-        return conn
-
-    # Coordinates come from station, observations in one cell are aggregated, bare names work
-    def test_joins_station_and_aggregates_per_cell(self):
-        grid = _make_no_time_grid_stub()
-        grid.grid_id = 998
-        conn = self._conn()
-        mapped = grid.map_tables(conn, parameters=["NITRATE"])
-
-        assert mapped == ["P_NITRATE_998"]
-        out = get_table_as_df(conn, "P_NITRATE_998")
-        assert "DATEANDTIME" not in out.columns
-        # The out-of-extent observation is dropped, the two others share one cell
-        assert len(out) == 1
-        assert out["P_NITRATE"].iloc[0] == 2.0
-        assert out["count"].iloc[0] == 2
-        assert out["median"].iloc[0] == 2.0
-        assert out["idx"].notna().all()
-
-
-class TestMapTablesSpellings:
-    # Bare, lower-case and prefixed parameter names map the same table
-    @pytest.mark.parametrize("spelling", ["NITRATE", "nitrate", "P_NITRATE", "p_nitrate"])
-    def test_spellings(self, spelling):
-        grid = _make_no_time_grid_stub()
-        grid.grid_id = 997
-        conn = TestNoTimeMapTables._conn()
-        assert grid.map_tables(conn, parameters=[spelling]) == ["P_NITRATE_997"]
-
-
 class TestMapDataframes:
     """Test map_dataframes, which first creates the grid and then maps the data to it."""
 
@@ -727,413 +675,23 @@ class TestMapDataframes:
         assert len(result) == 8
 
 
-class TestOnlineWideTableFunctions:
-    """create_wide_table_online / load_wide_table / get_missing_value_info_per_param(_offline)
-    operate on tables already mapped into the database by Grid.map_tables."""
-
-    @staticmethod
-    def _mapped_conn():
-        conn = sqlite3.connect(":memory:")
-        # Create dummy station and nitrate tables
-        conn.execute("CREATE TABLE station (ID INTEGER, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)")
-        conn.execute("CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL)")
-        conn.executemany("INSERT INTO station VALUES (?,?,?,?)", [
-            (1, 1.0, 1.0, "2000-03-01 00:00:00"),
-            (2, 6.0, 6.0, "2000-06-01 00:00:00"),
-        ])
-        conn.executemany("INSERT INTO P_NITRATE VALUES (?,?,?)", [
-            (1, 10.0, 5.0),
-            (2, 60.0, 9.0),
-        ])
-        conn.commit()
-
-        grid = _make_grid_stub()
-        grid.grid_id = 999
-        grid.grid_name = "grid_999"
-        grid.time_min = "2000-01-01 00:00:00"
-        grid.map_tables(conn, parameters=["P_NITRATE"])
-        return conn
-
-    # map_tables writes both the grid template and a per-parameter mapped table
-    def test_map_tables_creates_grid_and_mapped_table(self):
-        conn = self._mapped_conn()
-        assert does_table_exist(conn, "grid_999", "table")
-        assert does_table_exist(conn, "P_NITRATE_999", "table")
-
-    # Bare parameter names ("NITRATE") are accepted everywhere "P_NITRATE" is
-    def test_bare_parameter_name_accepted_everywhere(self):
-        # Create dummy station and nitrate tables
-        conn = sqlite3.connect(":memory:")
-        conn.execute(
-            "CREATE TABLE station (ID INTEGER, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)"
-        )
-        conn.execute("CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL)")
-        conn.executemany("INSERT INTO station VALUES (?,?,?,?)", [(1, 1.0, 1.0, "2000-03-01 00:00:00")])
-        conn.executemany("INSERT INTO P_NITRATE VALUES (?,?,?)", [(1, 10.0, 5.0)])
-        conn.commit()
-
-        # Gridding and map_tables
-        grid = _make_grid_stub()
-        grid.grid_id = 997
-        grid.grid_name = "grid_997"
-        grid.time_min = "2000-01-01 00:00:00"
-        mapped = grid.map_tables(conn, parameters=["NITRATE"])  # bare parameter name
-        assert mapped == ["P_NITRATE_997"]
-        assert does_table_exist(conn, "P_NITRATE_997", "table")
-
-        # create_wide_tale_online
-        wide_name = create_wide_table_online(conn, 997, parameters=["NITRATE"]) # bare parameter name
-        df_wide = get_table_as_df(conn, wide_name)
-        assert "P_NITRATE" in df_wide.columns
-
-        # get_missing_value_info_per_param
-        coverage = get_missing_value_info_per_param(conn, wide_name, ["NITRATE"]) # bare parameter name
-        assert "P_NITRATE" in coverage["parameter"].values
-
-    # map_tables casts every bind value to a native Python type
-    def test_map_tables_handles_numpy_int64_bounds(self):
-        conn = sqlite3.connect(":memory:")
-        conn.execute(
-            "CREATE TABLE station (ID INTEGER, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)"
-        )
-        conn.execute("CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL)")
-        conn.executemany("INSERT INTO station VALUES (?,?,?,?)", [(1, 1.0, 1.0, "2000-03-01 00:00:00")])
-        conn.executemany("INSERT INTO P_NITRATE VALUES (?,?,?)", [(1, 10.0, 5.0)])
-        conn.commit()
-
-        # Grid spec
-        grid = _make_grid_stub()
-        grid.grid_id = 996
-        grid.grid_name = "grid_996"
-        grid.time_min = "2000-01-01 00:00:00"
-        grid.z_min = np.array([0, 50, 100], dtype=np.int64).min()
-        grid.z_max = np.array([0, 50, 100], dtype=np.int64).max()
-        assert isinstance(grid.z_min, np.int64) and isinstance(grid.z_max, np.int64)  # check if type in grid is correct
-
-        # Map parameter table onto grid (should work with correct types)
-        grid.map_tables(conn, parameters=["P_NITRATE"])
-        df = get_table_as_df(conn, "P_NITRATE_996")
-        assert df["P_NITRATE"].notna().sum() == 1
-
-    # The wide table joins the grid template with each mapped parameter table on idx
-    def test_create_wide_table_online(self):
-        conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
-        assert wide_name.startswith("wide_999_")
-
-        df_wide = get_table_as_df(conn, wide_name)
-        assert len(df_wide) == 8  # 2 lat x 2 lon x 2 depth, 1 time step
-        assert "P_NITRATE" in df_wide.columns
-
-        cell = df_wide[(df_wide["LATITUDE"] == 2.5) & (df_wide["LONGITUDE"] == 2.5)
-                       & (df_wide["LEV_M"] == 0.0)]
-        assert cell["P_NITRATE"].iloc[0] == pytest.approx(5.0)
-
-        cell = df_wide[(df_wide["LATITUDE"] == 7.5) & (df_wide["LONGITUDE"] == 7.5)
-                       & (df_wide["LEV_M"] == 50.0)]
-        assert cell["P_NITRATE"].iloc[0] == pytest.approx(9.0)
-
-    # dropping_land_cells removes an empty land cell that was loaded back from SQL
-    def test_load_wide_table_drops_empty_land_cells(self):
-        conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
-        # Mark a cell with no data as land
-        conn.execute(
-            f"UPDATE {wide_name} SET water=0 WHERE LATITUDE=2.5 AND LONGITUDE=7.5 AND LEV_M=0.0"
-        )
-        conn.commit()
-
-        dropped = load_wide_table(conn, wide_name, dropping_land_cells=True)
-        assert len(dropped) == 7
-
-        kept = load_wide_table(conn, wide_name, dropping_land_cells=False)
-        assert len(kept) == 8
-
-    # The online per-param missingness matches the manually computed fraction
-    def test_get_missing_value_info_per_param(self):
-        conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
-        result = get_missing_value_info_per_param(conn, wide_name, ["P_NITRATE"])
-        row = result[result["parameter"] == "P_NITRATE"].iloc[0]
-        assert row["total"] == 6
-        assert row["relative"] == pytest.approx(75.0)
-
-    # The offline (list-of-DataFrames) missingness-info variant agrees with the online (SQL) variant
-    def test_get_missing_value_info_offline_per_param_matches_online(self):
-        conn = self._mapped_conn()
-        wide_name = create_wide_table_online(conn, 999, parameters=["P_NITRATE"])
-        df_wide = get_table_as_df(conn, wide_name)
-
-        online = get_missing_value_info_per_param(conn, wide_name, ["P_NITRATE"])
-        offline = get_missing_value_info_offline_per_param([df_wide])
-
-        online_row = online[online["parameter"] == "P_NITRATE"].iloc[0]
-        offline_row = offline[offline["parameter"] == "P_NITRATE"].iloc[0]
-
-        assert offline_row["absolute"] == online_row["total"]
-        assert offline_row["relative"] == pytest.approx(online_row["relative"])
-
-    # An empty input list returns an empty, correctly-shaped DataFrame
-    def test_get_missing_value_info_offline_per_param_empty_list(self):
-        result = get_missing_value_info_offline_per_param([])
-        assert result.empty
-        assert list(result.columns) == ["parameter", "absolute", "relative"]
-
-
 @pytest.mark.needs_bathymetry
 @pytest.mark.skipif(not _has_xarray, reason="xarray not installed ([grid] extra)")
-class TestGridManagerWithBathymetry:
-    # Full round-trip against a real bathymetry file: Create, look up, load, remove a grid
-    def test_create_and_retrieve_grid(self, tmp_path):
-        bathymetry = os.environ.get("BATHYMETRY_PATH")
-        db_copy = str(tmp_path / "test.sqlite")
+class TestGridWithBathymetry:
+    # The grid template is built from a real bathymetry file
+    def test_builds_template(self):
+        grid = Grid(
+            lon_min=0, lon_max=10, dlon=1,
+            lat_min=0, lat_max=10, dlat=1,
+            z_min=0, z_max=1000, dz=500,
+            time_min="2000-01-01 00:00:00", time_max="2001-01-01 00:00:00",
+            mode="Y", dtime=1,
+            bathymetry_grid_path=os.environ.get("BATHYMETRY_PATH"),
+        )
+        assert {"LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME", "water"} <= set(grid.grid.columns)
+        # 10 x 10 cells, 2 depth levels (z_max is the upper edge), one time step
+        assert len(grid.grid) == 10 * 10 * 2 * len(grid.time_array)
 
-        gm = GridManager(db_copy, "grid_info")
-        try:
-            grid = gm.create_grid(
-                lat_min=0, lat_max=10, dlat=1,
-                lon_min=0, lon_max=10, dlon=1,
-                z_min=0, z_max=1000, dz=500,
-                time_min="2000-01-01 00:00:00",
-                time_max="2001-01-01 00:00:00",
-                mode="Y", dtime=1,
-                bathymetry_grid_path=bathymetry,
-            )
-            assert gm.does_grid_exist(grid.grid_id)
-
-            loaded = gm.load_grid(grid.grid_id, bathymetry_grid_path=bathymetry)
-            assert loaded.grid_id == grid.grid_id
-            assert loaded.lat_min == grid.lat_min
-
-            gm.remove_grid(grid.grid_id)
-            assert not gm.does_grid_exist(grid.grid_id)
-        finally:
-            gm.close()
-
-
-class TestGenerateId:
-    # IDs generated at same second are distinct and increasing
-    def test_unique_and_increasing(self):
-        ids = [generate_grid_id() for _ in range(1000)]
-        assert len(set(ids)) == 1000
-        assert ids == sorted(ids)
-
-    # IDs are plain integers
-    def test_is_int(self):
-        assert isinstance(generate_grid_id(), int)
-
-    # Two wide tables for the same grid created in quick succession do not collide
-    def test_wide_table_names_unique(self):
-        conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE grid_1 (idx INTEGER, DATEANDTIME, LEV_M, LATITUDE, LONGITUDE, water)")
-        conn.execute("CREATE TABLE P_X_1 (idx INTEGER, P_X)")
-        a = create_wide_table_online(conn, 1, ["X"])
-        b = create_wide_table_online(conn, 1, ["X"])
-        assert a != b
-        conn.close()
-
-
-def _make_manager_grid(grid_id):
-    """Build a dummy Grid adn insert it into a dummy grid_info table."""
-    # Dummy grid
-    grid = _make_grid_stub()
-
-    # Insert dummy grid into dummy grid_info tables
-    for k, v in dict(
-        grid_id=grid_id, grid_name=f"grid_{grid_id}", selection=None,
-        time_min="2000-01-01 00:00:00", dtime=1,
-    ).items():
-        setattr(grid, k, v)
-    return grid
-
-
-class TestAddGrid:
-    @pytest.fixture
-    def gm(self, tmp_path):
-        # Define a grid manager
-        manager = GridManager(str(tmp_path / "test.sqlite"))
-        yield manager
-        manager.close()
-
-    # Grid table and grid_info row are both written
-    def test_adds_table_and_row(self, gm):
-        grid = _make_manager_grid(11)
-        gm.add_grid(grid)
-        assert gm.does_grid_exist(11)
-        assert does_table_exist(gm.connection, "grid_11", "table")
-
-    # A duplicate grid_id raises and leaves the first grid intact
-    def test_duplicate_id_raises_and_keeps_first(self, gm):
-        gm.add_grid(_make_manager_grid(11))
-        with pytest.raises(Exception):
-            gm.add_grid(_make_manager_grid(11))
-        assert gm.does_grid_exist(11)
-        assert len(get_table_as_df(gm.connection, "grid_11")) == len(_make_manager_grid(11).grid)
-
-    # A failing grid_info insert drops the grid table
-    def test_failed_insert_leaves_no_table(self, gm):
-        # A grid_info row with this ID but no grid table makes the insert fail
-        gm.connection.execute("INSERT INTO grid_info (grid_id) VALUES (12)")
-        gm.connection.commit()
-        with pytest.raises(sqlite3.Error):
-            gm.add_grid(_make_manager_grid(12))
-        assert not does_table_exist(gm.connection, "grid_12", "table")
-
-    # A grid without time axis (dtime is NULL) is found again by its parameters
-    def test_no_time_grid_found_by_params(self, gm):
-        grid = _make_no_time_grid_stub()
-        for k, v in dict(grid_id=21, grid_name="grid_21", selection=None,
-                         time_min=None, time_max=None, dtime=None).items():
-            setattr(grid, k, v)
-        gm.add_grid(grid)
-        found = gm.get_grid_id_from_params(lat_min=0, lat_max=10, dlat=5, lon_min=0, lon_max=10, dlon=5, z_min=0, z_max=100, dz=50)
-        assert found == 21
-
-    # A table with the grid name that already exists is not overwritten
-    def test_existing_table_not_overwritten(self, gm):
-        gm.connection.execute("CREATE TABLE grid_13 (x INTEGER)")
-        gm.connection.execute("INSERT INTO grid_13 VALUES (1)")
-        gm.connection.commit()
-        with pytest.raises(ValueError):
-            gm.add_grid(_make_manager_grid(13))
-        assert gm.connection.execute("SELECT x FROM grid_13").fetchall() == [(1,)]
-        assert not gm.does_grid_exist(13)
-
-
-def _add_mapped_tables(gm, grid_id):
-    """Add a mapped parameter table and a wide table for a grid, as map_tables/create_wide_table_online do."""
-    gm.connection.execute(f"CREATE TABLE P_NITRATE_{grid_id} (idx INTEGER)")
-    gm.connection.execute(f"CREATE TABLE wide_{grid_id}_555 (idx INTEGER)")
-    gm.connection.commit()
-
-
-class TestRemoveGrid:
-    @pytest.fixture
-    def gm(self, tmp_path):
-        # Dummy grid manager
-        manager = GridManager(str(tmp_path / "test.sqlite"))
-        yield manager
-        manager.close()
-
-    @staticmethod
-    def _table_names(gm):
-        # Get table names
-        return {r[0] for r in gm.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-
-    # The grid_info row, grid table, mapped tables and wide tables are removed, other grids and tables stay
-    def test_removes_only_this_grid(self, gm):
-        gm.add_grid(_make_manager_grid(31))
-        gm.add_grid(_make_manager_grid(32))
-        _add_mapped_tables(gm, 31)
-        _add_mapped_tables(gm, 32)
-        gm.connection.execute("CREATE TABLE P_NITRATE (ID INTEGER)")
-
-        gm.remove_grid(31)
-
-        assert not gm.does_grid_exist(31)
-        assert gm.does_grid_exist(32)
-        assert self._table_names(gm) == {"grid_info", "grid_32", "P_NITRATE_32", "wide_32_555", "P_NITRATE"}
-
-    # grid_info keeps its primary key and column types after removing a grid
-    def test_keeps_grid_info_schema(self, gm):
-        gm.add_grid(_make_manager_grid(31))
-        gm.add_grid(_make_manager_grid(32))
-        before = gm.connection.execute("PRAGMA table_info(grid_info)").fetchall()
-        gm.remove_grid(31)
-        assert gm.connection.execute("PRAGMA table_info(grid_info)").fetchall() == before
-        with pytest.raises(sqlite3.IntegrityError):
-            gm.connection.execute("INSERT INTO grid_info (grid_id) VALUES (32)")
-
-    # A custom grid_info table name is used, the default one is not touched
-    def test_custom_grid_info_table(self, tmp_path):
-        with GridManager(str(tmp_path / "test.sqlite"), "my_info") as gm:
-            gm.add_grid(_make_manager_grid(33))
-            gm.connection.execute("CREATE TABLE grid_info (grid_id)")
-            gm.connection.execute("INSERT INTO grid_info VALUES (99)")
-            gm.remove_grid(33)
-            assert not gm.does_grid_exist(33)
-            assert gm.connection.execute("SELECT grid_id FROM grid_info").fetchall() == [(99,)]
-
-    # A row in grid_info whose grid table is already gone is still removed
-    def test_removes_row_without_table(self, gm):
-        gm.add_grid(_make_manager_grid(34))
-        gm.connection.execute("DROP TABLE grid_34")
-        gm.connection.commit()
-        gm.remove_grid(34)
-        assert not gm.does_grid_exist(34)
-
-    # remove_all_grids empties grid_info and drops every grid's tables
-    def test_remove_all_grids(self, gm):
-        gm.add_grid(_make_manager_grid(35))
-        gm.add_grid(_make_manager_grid(36))
-        _add_mapped_tables(gm, 35)
-        gm.remove_all_grids()
-        assert gm.connection.execute("SELECT COUNT(*) FROM grid_info").fetchone() == (0,)
-        assert self._table_names(gm) == {"grid_info"}
-
-    # Removing an unknown grid does nothing
-    def test_unknown_grid_is_noop(self, gm):
-        gm.add_grid(_make_manager_grid(37))
-        gm.remove_grid(12345)
-        assert gm.does_grid_exist(37)
-
-    # A failure while dropping rolls back the row deletion and the earlier drops
-    def test_failure_rolls_back(self, gm):
-        gm.add_grid(_make_manager_grid(38))
-        _add_mapped_tables(gm, 38)
-        # An invalid table name makes validate_identifier raise part-way through the drops
-        gm.connection.execute('CREATE TABLE "bad name_38" (x)')
-        gm.connection.commit()
-        with pytest.raises(ValueError):
-            gm.remove_grid(38)
-        assert gm.does_grid_exist(38)
-        assert {"grid_38", "P_NITRATE_38", "wide_38_555"} <= self._table_names(gm)
-
-
-class TestGridLookup:
-    """get_grid_id_from_params finds a stored grid independent of how its parameters are written."""
-
-    @pytest.fixture
-    def gm(self, tmp_path):
-        # Dummy grid manager
-        manager = GridManager(str(tmp_path / "test.sqlite"))
-        yield manager
-        manager.close()
-
-    @staticmethod
-    def _stored(gm, grid_id, **overrides):
-        # Build test grid, optionally override parameters
-        grid = _make_manager_grid(grid_id)
-        for k, v in overrides.items():
-            setattr(grid, k, v)
-        gm.add_grid(grid)
-
-    # Define a base row in grid_info table
-    _BASE = dict(lat_min=0, lat_max=10, dlat=5, lon_min=0, lon_max=10, dlon=5,
-                 z_min=0, z_max=100, dz=50, time_min="2000-01-01 00:00:00",
-                 time_max="2001-01-01", mode="Y", dtime=1)
-
-    # int and float depth parameters describe the same grid
-    def test_int_and_float_depths_match(self, gm):
-        self._stored(gm, 41)
-        assert gm.get_grid_id_from_params(**{**self._BASE, "z_min": 0.0, "z_max": 100.0, "dz": 50.0}) == 41
-
-    # Date strings with or without time of day describe the same grid
-    def test_equivalent_time_strings_match(self, gm):
-        self._stored(gm, 42)
-        assert gm.get_grid_id_from_params(**{**self._BASE, "time_min": "2000-01-01", "time_max": "2001-01-01 00:00:00"}) == 42
-
-    # z_array: order and int/float do not matter (Grid sorts it)
-    def test_z_array_order_and_type_do_not_matter(self, gm):
-        self._stored(gm, 43, z_array=np.array([0.0, 50.0, 100.0]))
-        params = {k: v for k, v in self._BASE.items() if k not in ("z_min", "z_max", "dz")}
-        assert gm.get_grid_id_from_params(**params, z_array=[100, 0, 50]) == 43
-
-    # Different grids are told apart
-    def test_different_grid_not_found(self, gm):
-        self._stored(gm, 44)
-        assert gm.get_grid_id_from_params(**{**self._BASE, "dz": 25}) is None
-        assert gm.get_grid_id_from_params(**{**self._BASE, "dtime": 2}) is None
 
 
 def _make_time_grid_stub(mode, dtime):
@@ -1217,6 +775,12 @@ class TestEmptyMissingValueInfo:
             result = get_missing_value_info_offline(df)
             assert result.empty
             assert list(result.columns) == ["parameter", "absolute", "relative"]
+
+    # An empty input list returns an empty, correctly-shaped DataFrame
+    def test_offline_per_param_empty_list(self):
+        result = get_missing_value_info_offline_per_param([])
+        assert result.empty
+        assert list(result.columns) == ["parameter", "absolute", "relative"]
 
     # The per-parameter variant returns exactly the documented columns
     def test_offline_per_param_columns(self):

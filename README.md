@@ -39,7 +39,7 @@ Optional extras add more specialised functionality:
 |---|---|-------------------------------------------------------|
 | `plot` | matplotlib, seaborn | `comfort.plot`                                        |
 | `geo` | shapely, geopandas, cartopy | Water masses, Longhurst provinces, coastline distance |
-| `grid` | xarray, netcdf4 | Spatiotemporal gridding, bathymetry masking           |
+| `grid` | xarray, netcdf4 | Spatio-temporal gridding, bathymetry masking, xarray output |
 | `scale` | scikit-learn | `ParamScaler`                                         |
 | `dash` | dash, plotly | Interactive Dash explorer app                         |
 | `all` | everything above |                                                       |
@@ -101,7 +101,7 @@ with comfort.connect("/path/to/comfort.sqlite") as conn:
 pip install -e ".[dev]"
 pytest
 
-# Include the bathymetry round-trip test (needs a GEBCO NetCDF file)
+# Include the bathymetry test (needs a GEBCO NetCDF file)
 export BATHYMETRY_PATH=/path/to/gebco_bathymetry.nc
 pytest
 ```

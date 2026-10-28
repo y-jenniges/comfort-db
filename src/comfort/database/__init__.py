@@ -15,10 +15,7 @@ from .information import (
     param_label,
     param_table_name,
 )
-from .structure import (
-    create_combined_parameter_table,
-    remove_tables_like,
-)
+from .structure import create_combined_parameter_table
 
 __all__ = [
     "count_negative_samples",
@@ -34,5 +31,4 @@ __all__ = [
     "get_table_as_df",
     "param_label",
     "param_table_name",
-    "remove_tables_like",
 ]

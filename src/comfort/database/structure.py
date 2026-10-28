@@ -1,49 +1,18 @@
-"""Functions to manage views and tables in the COMFORT database.
-
-remove_tables_like adapted from Jenniges (2025), doi:10.5281/zenodo.15827777
-"""
+"""Functions to manage views and tables in the COMFORT database."""
 from __future__ import annotations
 
 __all__ = [
     "create_combined_parameter_table",
-    "remove_tables_like",
 ]
 
 import logging
 import sqlite3
 
-from .information import does_table_exist, get_names_of_all_parameter_tables, param_label, param_table_name
+from .information import does_table_exist, param_label, param_table_name
 from ..qc import QualityFlags, build_where_clause
 from ..util.sqlite_utils import validate_identifier
 
 logger = logging.getLogger(__name__)
-
-
-def remove_tables_like(conn: sqlite3.Connection, like_pattern: str, escape_char: str = "|",
-                       table_type: str = "view", tables_except: list[str] | None = None) -> None:
-    """Drop views/tables whose names match the given LIKE pattern.
-
-    Args:
-        conn (sqlite3.Connection): Connection to the database.
-        like_pattern (str): SQLite LIKE pattern, e.g. ``'grid|_%'`` with the default escape character.
-        escape_char (str): Escape character. Default is '|'.
-        table_type (str): 'view' or 'table'. Default is 'view'.
-        tables_except (list[str]): Names to exclude from removal.
-    """
-    # Get views/tables to remove
-    table_names = get_names_of_all_parameter_tables(conn, like_pattern, escape_char,
-                                                    table_type=table_type, include_digits=True)
-    if tables_except:
-        table_names = [t for t in table_names if t not in tables_except]
-
-    # Connect to db and drop the tables
-    cur = conn.cursor()
-    for table_name in table_names:
-        query = f"DROP {table_type} {table_name};"
-        logger.info(f"remove_tables_like: {query}")
-        cur.execute(query)
-
-    conn.commit()
 
 
 def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[str],

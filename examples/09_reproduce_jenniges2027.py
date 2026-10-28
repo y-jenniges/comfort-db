@@ -14,7 +14,8 @@ Steps:
   4. Average params over identical (lat, lon, depth, time)
   5. Convert in-situ T to potential temperature
   6. Grid: 1° x 1° x 12 depth layers (0-5000 m) x 13 20-year time means
-  7. Remove empty land cells (using GEBCO)
+  7. Remove empty land cells (using GEBCO) and save the gridded table as CSV
+     (inspect it in the CSV tab of the explorer: python -m comfort.app.explorer)
   8. Diagnostic plots
 
 Requires:
@@ -180,6 +181,12 @@ def main():
             "Done. Final grid: %d rows, %d years, %d parameters",
             len(df_wide), n_years, len(param_cols),
         )
+
+        # Save the gridded table (loadable in the CSV tab of the explorer)
+        sp = _save_path(output_dir, "gridded_table.csv")
+        if sp:
+            df_wide.to_csv(sp, index=False)
+            log.info("Saved gridded table to %s", sp)
 
         # ------------------------------------------------------------------ #
         # Step 8: Diagnostic plots                                           #

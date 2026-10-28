@@ -16,7 +16,7 @@ from dash import Dash
 from comfort.app import explorer
 
 # Number of @callback functions registered in explorer.py
-N_CALLBACKS = 11
+N_CALLBACKS = 6
 
 
 @pytest.fixture

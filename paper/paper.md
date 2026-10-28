@@ -119,7 +119,7 @@ workflows.
 
 To this point, [@jenniges2025] is the only published study using the COMFORT dataset and investigated three-dimensional
 biogeochemical provinces in the North Atlantic. Future analyses [@jenniges2027] will apply the data to spatio-temporal imputation. 
-The preprocessing of both studies can be closely reproduced using `comfort-db` (examples 9 and 10, respectively), 
+The preprocessing of both studies can be closely reproduced using `comfort-db` (examples 8 and 9, respectively), 
 with minor numerical differences from refinements to the density conventions since the original analyses.
 
 ## AI usage disclosure
