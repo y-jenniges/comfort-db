@@ -39,9 +39,10 @@ Optional extras add more specialised functionality:
 |---|---|-------------------------------------------------------|
 | `plot` | matplotlib, seaborn | `comfort.plot`                                        |
 | `geo` | shapely, geopandas, cartopy | Water masses, Longhurst provinces, coastline distance |
-| `grid` | xarray, netcdf4 | Spatio-temporal gridding, bathymetry masking, xarray output |
+| `grid` | xarray, netcdf4 | Spatio-temporal gridding, bathymetry masking, biome classification (`load_biomes`), xarray output |
 | `scale` | scikit-learn | `ParamScaler`                                         |
 | `dash` | dash, plotly | Interactive Dash explorer app                         |
+| `docs` | sphinx, sphinx-rtd-theme | Building the documentation locally                    |
 | `all` | everything above |                                                       |
 
 Install via e.g.
@@ -76,8 +77,9 @@ import comfort
 # Overview of the database (no data loaded, takes some minutes)
 comfort.info("/path/to/comfort.sqlite")
 
-# Filter at SQL level, get back an xarray Dataset
-ds = comfort.load_comfort(
+# Filter at SQL level, get back one DataFrame per parameter
+# (output="xarray" returns an xarray Dataset and needs the `grid` extra)
+data = comfort.load_comfort(
     "/path/to/comfort.sqlite",
     parameters=["NITRATE", "DIC"],
     quality_flags=comfort.QC_GOOD,  # quality filter
@@ -85,8 +87,8 @@ ds = comfort.load_comfort(
     date_min="2000-01-01 00:00:00",  # date filter, format YYYY-MM-DD HH:MM:SS
     target_depths=[0, 50, 100, 200, 500, 1000],  # depth interpolation
     limit=500_000,  # safeguard for large tables
+    output="dict",
 )
-# ds.NITRATE -> xr.DataArray with dims (profile, depth)
 
 # Table exploration
 with comfort.connect("/path/to/comfort.sqlite") as conn:
