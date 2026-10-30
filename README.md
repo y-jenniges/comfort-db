@@ -82,7 +82,7 @@ ds = comfort.load_comfort(
     parameters=["NITRATE", "DIC"],
     quality_flags=comfort.QC_GOOD,  # quality filter
     lat_min=30, lat_max=70,  # latitude filter
-    date_min="2000-01-01",  # date filter
+    date_min="2000-01-01 00:00:00",  # date filter, format YYYY-MM-DD HH:MM:SS
     target_depths=[0, 50, 100, 200, 500, 1000],  # depth interpolation
     limit=500_000,  # safeguard for large tables
 )

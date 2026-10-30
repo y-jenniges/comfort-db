@@ -164,8 +164,8 @@ def main():
             lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             z_array=DEPTH_INTERVALS,
             bathymetry_grid_path=bathy_path,
-            time_min=f"{START_YEAR}-01-01",
-            time_max=f"{END_YEAR}-12-31",
+            time_min=f"{START_YEAR}-01-01 00:00:00",
+            time_max=f"{END_YEAR}-12-31 23:59:59",
             mode="Y", dtime=DTIME,
         )
         log.info("  Grid template: %d cells", len(grid.grid))

@@ -319,6 +319,12 @@ class TestGridValidation:
         with pytest.raises(ValueError, match=missing):
             Grid(**{**self._COMMON_PARAMS, missing: None})
 
+    # Time bounds must be given in the long format (date-only is rejected)
+    @pytest.mark.parametrize("param", ["time_min", "time_max"])
+    def test_date_only_time_bound_raises(self, param):
+        with pytest.raises(ValueError, match=param):
+            Grid(**{**self._COMMON_PARAMS, param: "2000-01-01"})
+
     # Grid is accepted without time parameters (then fails on the missing bathymetry file)
     def test_no_time_parameters_accepted(self):
         params = {**self._COMMON_PARAMS, "time_min": None, "time_max": None, "mode": None, "dtime": None}
@@ -399,13 +405,15 @@ def _full_grid_df(with_time=False, time_array=("2000-01-01 00:00:00",)):
     return df
 
 
-def _make_grid_stub(mode="Y", time_array=("2000-01-01 00:00:00",), time_max="2001-01-01"):
+def _make_grid_stub(mode="Y", time_array=("2000-01-01 00:00:00",), time_min="2000-01-01 00:00:00",
+                    time_max="2000-12-31 23:59:59"):
     """Build a dummy Grid with time (no bathymetry/xarray needed)."""
     grid = object.__new__(Grid)
     for k, v in dict(
         lat_min=0, lat_max=10, dlat=5, lon_min=0, lon_max=10, dlon=5,
         z_min=0, z_max=100, dz=50, z_array=None,
-        mode=mode, time_array=np.array(time_array), time_max=time_max,
+        mode=mode, time_array=np.array(time_array), time_min=time_min, time_max=time_max,
+        dtime=1, selection=None,
     ).items():
         setattr(grid, k, v)
     grid.grid = _full_grid_df(with_time=True, time_array=time_array)
@@ -565,7 +573,8 @@ class TestCellAxes:
 class TestBinTime:
     # DATEANDTIME is binned onto the grid's time steps and value_col aggregated within each
     def test_bins_time_and_aggregates(self):
-        grid = _make_grid_stub(time_array=("2000-01-01 00:00:00", "2001-01-01 00:00:00"), time_max="2002-01-01")
+        grid = _make_grid_stub(time_array=("2000-01-01 00:00:00", "2001-01-01 00:00:00"),
+                               time_max="2001-12-31 23:59:59")
         df = pd.DataFrame({
             "LATITUDE": [1.0, 1.0], "LONGITUDE": [1.0, 1.0], "LEV_M": [10.0, 10.0],
             "DATEANDTIME": ["2000-03-01", "2000-06-01"],
@@ -575,6 +584,40 @@ class TestBinTime:
         assert len(result) == 1
         assert result["VAL"].iloc[0] == 2.0
         assert result["DATEANDTIME"].iloc[0] == "2000-01-01 00:00:00"
+
+
+class TestTimeWindow:
+    """bin_time drops rows outside [time_min, time_max] in every mode."""
+
+    @staticmethod
+    def _df(dates):
+        # Simple df (onw row)
+        return pd.DataFrame({"LATITUDE": 1.0, "LONGITUDE": 1.0, "LEV_M": 10.0,
+                             "DATEANDTIME": dates, "VAL": np.arange(len(dates), dtype=float)})
+
+    # Both ends are included (Y mode)
+    def test_y_mode_window_is_inclusive(self):
+        grid = _make_grid_stub(time_array=("2000-01-01 00:00:00", "2001-01-01 00:00:00"), time_max="2001-12-31 23:59:59")
+        dates = ["1999-12-31 23:59:59", "2000-01-01 00:00:00", "2001-12-31 23:59:59", "2002-01-01 00:00:00"]
+        result = grid.bin_time(self._df(dates), "VAL", agg="count")
+        assert dict(zip(result["DATEANDTIME"], result["VAL"])) == {"2000-01-01 00:00:00": 1, "2001-01-01 00:00:00": 1}
+
+    # Data from outside the time window is not included (M, D, MD modes)
+    @pytest.mark.parametrize("mode", ["M", "D", "MD"])
+    def test_pooling_modes_drop_out_of_window_rows(self, mode):
+        grid = _make_grid_stub(mode=mode, time_array=("01",))
+        dates = ["1990-01-01 00:00:00", "2000-01-01 00:00:00", "2000-12-31 23:59:59", "2001-01-01 00:00:00"]
+        result = grid.bin_time(self._df(dates), "VAL", agg="count")
+        assert result["VAL"].sum() == 2
+
+    # A deselected time step is dropped (not counted into previous bin)
+    def test_deselected_step_does_not_leak_into_previous_bin(self):
+        grid = _make_grid_stub(time_max="2002-12-31 23:59:59")
+        # Nodes are 2000, 2001, 2002 (2001 is deselected)
+        grid.selection = np.array([True, False, True])
+        grid.time_array = grid._create_time_array()
+        result = grid.bin_time(self._df(["2000-06-01", "2001-06-01", "2002-06-01"]), "VAL", agg="count")
+        assert dict(zip(result["DATEANDTIME"], result["VAL"])) == {"2000-01-01 00:00:00": 1, "2002-01-01 00:00:00": 1}
 
 
 class TestGridBinComposesSpaceAndTime:
@@ -609,6 +652,26 @@ class TestGridBinSeasonalMean:
         # (Jan mean=0, Jul mean=30) -> 15, not the naive row mean of 7.5
         assert result["VAL"].iloc[0] == 15.0
         assert result["DATEANDTIME"].iloc[0] == "2000-01-01 00:00:00"
+
+    # The annual stamp of a year at or after time_max does not contaminate the last bin (2.3)
+    def test_year_at_time_max_is_excluded(self):
+        grid = _make_grid_stub(time_array=("2000-01-01 00:00:00", "2001-01-01 00:00:00"),
+                               time_max="2002-01-01 00:00:00")
+        df = pd.DataFrame({
+            "LATITUDE": 1.0, "LONGITUDE": 1.0, "LEV_M": 10.0,
+            "DATEANDTIME": ["2001-03-01 00:00:00", "2002-01-01 00:00:00"], "VAL": [1.0, 100.0],
+        })
+        result = grid.bin(df, "VAL", agg="seasonal_mean")
+        assert dict(zip(result["DATEANDTIME"], result["VAL"])) == {"2001-01-01 00:00:00": 1.0}
+
+    # Seasonal means need annual stamps to match the bins
+    @pytest.mark.parametrize("kwargs", [{"mode": "YM"}, {"time_min": "2000-07-01 00:00:00"}])
+    def test_unsupported_grid_raises(self, kwargs):
+        grid = _make_grid_stub(**kwargs)
+        df = pd.DataFrame({"LATITUDE": 1.0, "LONGITUDE": 1.0, "LEV_M": 10.0,
+                           "DATEANDTIME": ["2000-08-01"], "VAL": [1.0]})
+        with pytest.raises(ValueError, match="seasonal_mean"):
+            grid.bin(df, "VAL", agg="seasonal_mean")
 
     # map_dataframes forwards agg="seasonal_mean" through to Grid.bin
     def test_map_dataframes_accepts_seasonal_mean_as_agg(self):
@@ -782,7 +845,7 @@ def _make_time_grid_stub(mode, dtime):
     """Build a dummy Grid with only the attributes the time array and _map_time need."""
     grid = object.__new__(Grid)
     for k, v in dict(mode=mode, dtime=dtime, selection=None,
-                     time_min="2000-01-01", time_max="2001-01-01").items():
+                     time_min="2000-01-01 00:00:00", time_max="2001-01-01 00:00:00").items():
         setattr(grid, k, v)
     grid.time_array = grid._create_time_array()
     return grid

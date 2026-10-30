@@ -21,7 +21,7 @@ from dateutil.relativedelta import relativedelta
 
 from .util.columns import find_col, resolve_param_columns
 from .util.optional import import_optional
-from .util.types import Aggregation, GridMode, check_choice
+from .util.types import Aggregation, GridMode, check_choice, check_timestamp
 from .database.information import param_table_name
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ class Grid:
             bathymetry_grid_path (str): Path to a bathymetry NetCDF file. Required.
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
             z_array (array-like): Explicit depth nodes [m]. Mutually exclusive with dz.
-            time_min, time_max (str): Date strings bounding the time dimension.
+            time_min, time_max (str): Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
             mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
             dtime (int): Number of time units per cell.
                 time_min, time_max, mode and dtime must be given together, or all be
@@ -131,6 +131,10 @@ class Grid:
                 "Set all of time_min, time_max, mode and dtime or none of them."
             )
 
+        # Bounds must be in correct format
+        check_timestamp(self.time_min, "time_min")
+        check_timestamp(self.time_max, "time_max")
+
         # Time step >=1
         if self.dtime < 1:
             raise ValueError("dtime must be >= 1")
@@ -152,8 +156,8 @@ class Grid:
             yield current
             current += step
 
-    def _create_time_array(self) -> np.ndarray:
-        """Create the time array containing the time steps for the grid."""
+    def _time_nodes(self) -> np.ndarray:
+        """Create the time steps of the grid, before ``selection`` is applied."""
         time_array = []
 
         # Determine all valid dates for the desired time range
@@ -174,8 +178,13 @@ class Grid:
         elif self.mode == "D":
             time_array = np.char.zfill(np.arange(1, 32, self.dtime).astype(str), 2)
 
+        return np.array(time_array)
+
+    def _create_time_array(self) -> np.ndarray:
+        """Create the time array containing the (selected) time steps for the grid."""
+        time_array = self._time_nodes()  # get the nodes
+
         # Perform selection
-        time_array = np.array(time_array)
         if self.selection is not None:
             if time_array.shape != self.selection.shape:
                 raise ValueError("selection shape must match time_array shape")
@@ -429,11 +438,18 @@ class Grid:
             dtypes["DATEANDTIME"] = str
         return df.astype(dtypes)
 
+    def _filter_time_window(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Filter *df* for ``[time_min, time_max]``."""
+        dates = pd.to_datetime(df["DATEANDTIME"])
+        in_window = (dates >= pd.Timestamp(self.time_min)) & (dates <= pd.Timestamp(self.time_max))
+        return df[in_window].copy()
+
     def _map_time(self, df: pd.DataFrame) -> pd.DataFrame:
         """Bin the DATEANDTIME column, according to self.mode."""
         if self.mode in ("Y", "YM", "YD"):
-            time_bins = pd.DatetimeIndex(self.time_array)
-            time_bins = time_bins.union([pd.Timestamp(self.time_max) + pd.Timedelta(nanoseconds=1)])
+            # Bins from all nodes (also deselected ones), the last edge just after time_max so that it is included
+            last_edge = pd.Timestamp(self.time_max) + pd.Timedelta(nanoseconds=1)
+            time_bins = pd.DatetimeIndex(self._time_nodes()).append(pd.DatetimeIndex([last_edge]))
             df["DATEANDTIME"] = pd.cut(
                 pd.to_datetime(df["DATEANDTIME"]),
                 bins=time_bins, labels=time_bins[:-1], right=False,
@@ -488,8 +504,12 @@ class Grid:
         if not self.has_time:
             raise ValueError("bin_time requires a grid with time axis (time_min, time_max, mode, dtime)")
 
-        # Grid DATEANDTIME
-        df = self._map_time(df.copy())
+        # Drop rows outside the time window, then grid DATEANDTIME
+        df = self._map_time(self._filter_time_window(df))
+
+        # Drop rows that fell into a deselected time step
+        if self.selection is not None:
+            df = df[df["DATEANDTIME"].isin(self.time_array)]
 
         # Group rows in the same cell and time bin and aggregate value_col
         grouped = df.groupby(
@@ -529,20 +549,27 @@ class Grid:
 
     def _bin_seasonal_mean(self, df: pd.DataFrame, value_col: str) -> pd.DataFrame:
         """Average value_col per grid cell per year, monthly-first, then bin onto this grid's time steps.
+        Requires ``mode="Y"`` and a ``time_min`` on 1 January.
 
         Implements ``agg="seasonal_mean"`` on ``bin``. A plain annual mean lets
         months with more observations dominate. Averaging month-by-month first,
         then averaging those (at most 12) monthly means, corrects for that.
         """
-        # Grid space, then compute the monthly-first annual mean per cell
+        # Check if mode="Y" and time_min is on 1 January
+        start = pd.Timestamp(self.time_min)
+        if self.mode != "Y" or start != pd.Timestamp(year=start.year, month=1, day=1):
+            raise ValueError("agg='seasonal_mean' requires mode='Y' and a time_min on 1 January")
+
+        # Grid space (inside the time window), then compute the monthly-first annual mean per cell
         annual = seasonal_mean(
-            self.bin_space(df), value_col=value_col,
+            self.bin_space(self._filter_time_window(df)), value_col=value_col,
             group_cols=["LATITUDE", "LONGITUDE", "LEV_M"],
         )
 
         # Convert YEAR returned by seasonal_mean into a time stamp
         annual["DATEANDTIME"] = annual["YEAR"].astype(int).astype(str) + "-01-01 00:00:00"
         annual = annual.drop(columns=["YEAR"])
+        annual = annual[pd.to_datetime(annual["DATEANDTIME"]) < pd.Timestamp(self.time_max)]  # filter for max timestamp
         return self.bin_time(annual, value_col, agg="mean")
 
 

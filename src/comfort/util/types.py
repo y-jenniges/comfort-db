@@ -4,10 +4,14 @@ from __future__ import annotations
 __all__ = [
     "Aggregation", "BoxKind", "DensityFallback", "DensityQuantity", "GridMode", "InterpMethod",
     "JointKind", "LoadOutput", "OnMissing", "SalinityType", "ScatterKind", "TemperatureTarget",
-    "TemperatureType", "TimeMode", "check_choice",
+    "TemperatureType", "TimeMode", "check_choice", "check_timestamp",
 ]
 
+from datetime import date, datetime
 from typing import Literal, get_args
+
+# Long timestamp format that all date and time bounds are given in
+_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Output container of load_comfort
 LoadOutput = Literal["xarray", "dict"]
@@ -45,3 +49,20 @@ def check_choice(value, choices, option: str) -> None:
     options = get_args(choices)
     if value not in options:
         raise ValueError(f"{option} must be one of {options}, got {value!r}")
+
+
+def check_timestamp(value, option: str) -> None:
+    """Raise ``ValueError`` if *value* is not in the :data:`_TIMESTAMP_FORMAT` format."""
+    # Accept datetime and Timestamp objects (datetime.date does not support time of day)
+    valid = not isinstance(value, date) or isinstance(value, datetime)
+    if isinstance(value, str):
+        # Str Object
+        try:
+            # Apply time format
+            datetime.strptime(value, _TIMESTAMP_FORMAT)
+            valid = True
+        except ValueError:
+            valid = False
+    if not valid:
+        # Invalid format
+        raise ValueError(f"{option} must be given as 'YYYY-MM-DD HH:MM:SS', got {value!r}")
