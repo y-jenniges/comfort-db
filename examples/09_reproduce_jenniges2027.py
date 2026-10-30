@@ -37,7 +37,7 @@ import seaborn as sns
 from dotenv import load_dotenv
 
 from comfort import connect
-from comfort.gridding import Grid, average_duplicate_locations
+from comfort.gridding import Grid, average_duplicate_locations, get_missing_value_info
 from comfort.io import load_comfort
 from comfort.physics import convert_to_potential_temperature
 from comfort.plot import (
@@ -249,11 +249,7 @@ def main():
             plt.close()
 
         # Missingness bar chart
-        n_total = len(df_wide)
-        miss = pd.DataFrame({
-            "parameter": [c.replace("P_", "") for c in param_cols],
-            "relative": [df_wide[c].isna().sum() / n_total * 100 for c in param_cols],
-        })
+        miss = get_missing_value_info(df_wide, parameters=PARAMETERS)
         plot_missing_value_info(miss, save_as=_save_path(output_dir, "missingness_bar.png"))
         plt.close()
 

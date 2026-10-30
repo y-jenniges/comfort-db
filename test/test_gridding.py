@@ -15,9 +15,8 @@ from comfort.gridding import (
     Grid,
     _axis_cells,
     average_duplicate_locations,
-    drop_land_cells,
-    get_missing_value_info_offline,
-    get_missing_value_info_offline_per_param,
+    _drop_land_cells,
+    get_missing_value_info,
     seasonal_mean,
 )
 
@@ -168,20 +167,20 @@ class TestDropLandCells:
     # A land cell with no parameter value at all is dropped
     def test_land_with_no_value_is_dropped(self):
         df = self._make_wide([False, True], [None, 1.0])
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 1
         assert result["water"].iloc[0]
 
     # A land cell that does have a value is kept despite water=False
     def test_land_with_value_is_kept(self):
         df = self._make_wide([False, True], [5.0, 1.0])
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 2
 
     # A grid with no land cells at all passes through unchanged
     def test_all_water_unchanged(self):
         df = self._make_wide([True, True], [1.0, 2.0])
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 2
 
     # A land cell with data in at least one time step keeps the cell in every time step
@@ -195,7 +194,7 @@ class TestDropLandCells:
             "water":       [False] * 6,
             "P_NITRATE":   [None, 5.0, None, 7.0, None, None],
         })
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
 
         # Cell lat=0.0 never has data -> dropped in both years
         assert not ((result["LATITUDE"] == 0.0)).any()
@@ -222,20 +221,20 @@ class TestDropLandCells:
     # A land cell with no parameter value at all is dropped
     def test_no_time_land_without_value_dropped(self):
         df = self._make_wide_no_time([False, True], [None, 1.0])
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 1
         assert result["water"].iloc[0]
 
     # A land cell that does have a value is kept despite water=False
     def test_no_time_land_with_value_kept(self):
         df = self._make_wide_no_time([False, True], [5.0, 1.0])
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 2
 
     # A grid with no land cells at all passes through unchanged
     def test_no_time_all_water_unchanged(self):
         df = self._make_wide_no_time([True, True], [1.0, 2.0])
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 2
 
     # "Ever has data" is evaluated per (lat, lon, depth) cell, across depths too
@@ -247,13 +246,13 @@ class TestDropLandCells:
             "water": [False, False, True, True],
             "P_NITRATE": [3.0, None, 1.0, 2.0],
         })
-        result = drop_land_cells(df)
+        result = _drop_land_cells(df)
         assert len(result) == 3
         dropped = set(df.index) - set(result.index)
         assert dropped == {1}
 
 
-class TestGetMissingValueInfoOffline:
+class TestGetMissingValueInfo:
     def _make_wide(self, values):
         return pd.DataFrame({
             "P_NITRATE": values,
@@ -263,20 +262,31 @@ class TestGetMissingValueInfoOffline:
     # No missing values gives absolute=0
     def test_no_nulls(self):
         df = self._make_wide([1.0, 2.0, 3.0])
-        result = get_missing_value_info_offline(df)
-        assert result.loc[result["parameter"] == "P_NITRATE", "absolute"].iloc[0] == 0
+        result = get_missing_value_info(df)
+        assert result.loc[result["parameter"] == "NITRATE", "absolute"].iloc[0] == 0
 
     # Every value missing gives relative=100%
     def test_all_nulls(self):
         df = self._make_wide([None, None])
-        result = get_missing_value_info_offline(df)
-        assert result.loc[result["parameter"] == "P_NITRATE", "relative"].iloc[0] == 100.0
+        result = get_missing_value_info(df)
+        assert result.loc[result["parameter"] == "NITRATE", "relative"].iloc[0] == 100.0
+
+    # Parameters restrict the output and are matched ignoring casing and the P_ prefix
+    def test_parameters_select_columns(self):
+        df = self._make_wide([1.0, None]).assign(P_DIC=[1.0, 2.0])
+        result = get_missing_value_info(df, parameters=["nitrate"])
+        assert list(result["parameter"]) == ["NITRATE"]
+
+    # A parameter without a column raises
+    def test_unknown_parameter_raises(self):
+        with pytest.raises(KeyError):
+            get_missing_value_info(self._make_wide([1.0]), parameters=["DIC"])
 
     # An empty DataFrame does not divide by zero
     def test_empty_dataframe(self):
         df = pd.DataFrame({"P_NITRATE": pd.Series([], dtype=float)})
-        result = get_missing_value_info_offline(df)
-        assert result.loc[result["parameter"] == "P_NITRATE", "relative"].iloc[0] == 0.0
+        result = get_missing_value_info(df)
+        assert result.loc[result["parameter"] == "NITRATE", "relative"].iloc[0] == 0.0
 
 
 @pytest.mark.skipif(not _has_xarray, reason="xarray not installed ([grid] extra)")
@@ -917,48 +927,11 @@ class TestEmptyMissingValueInfo:
     """Missing-value summaries keep their documented columns for degenerate input."""
 
     # No P_* columns at all: Empty summary
-    def test_offline_without_parameter_columns(self):
+    def test_without_parameter_columns(self):
         for df in (pd.DataFrame({"a": [1, 2]}), pd.DataFrame({"a": pd.Series(dtype=float)})):
-            result = get_missing_value_info_offline(df)
+            result = get_missing_value_info(df)
             assert result.empty
             assert list(result.columns) == ["parameter", "absolute", "relative"]
-
-    # An empty input list returns an empty, correctly-shaped DataFrame
-    def test_offline_per_param_empty_list(self):
-        result = get_missing_value_info_offline_per_param([])
-        assert result.empty
-        assert list(result.columns) == ["parameter", "absolute", "relative"]
-
-    # The per-parameter variant returns exactly the documented columns
-    def test_offline_per_param_columns(self):
-        df = pd.DataFrame({
-            "LATITUDE": [1.0, 2.0], "LONGITUDE": [1.0, 2.0], "LEV_M": [0.0, 0.0],
-            "DATEANDTIME": ["2000", "2000"], "water": [True, True], "P_X": [1.0, np.nan],
-        })
-        result = get_missing_value_info_offline_per_param([df])
-        assert list(result.columns) == ["parameter", "absolute", "relative"]
-
-    # Relative missingness of a grid without any rows is 0 instead of a division by zero (0 grid cells)
-    def test_offline_per_param_zero_cells(self):
-        df = pd.DataFrame({
-            "LATITUDE": pd.Series(dtype=float), "LONGITUDE": pd.Series(dtype=float),
-            "LEV_M": pd.Series(dtype=float), "DATEANDTIME": pd.Series(dtype=object),
-            "water": pd.Series(dtype=bool), "P_X": pd.Series(dtype=float),
-        })
-        result = get_missing_value_info_offline_per_param([df])
-        assert list(result.columns) == ["parameter", "absolute", "relative"]
-        assert result["relative"].iloc[0] == 0.0
-
-    # Relative missingness of a grid with only land cells without data is 0 instead of a division by zero
-    # (land cells without data are not counted as grid cells)
-    def test_offline_per_param_all_land_cells(self):
-        df = pd.DataFrame({
-            "LATITUDE": [1.0], "LONGITUDE": [1.0], "LEV_M": [0.0],
-            "DATEANDTIME": ["2000"], "water": [False], "P_X": [np.nan],
-        })
-        result = get_missing_value_info_offline_per_param([df])
-        assert list(result.columns) == ["parameter", "absolute", "relative"]
-        assert result["relative"].iloc[0] == 0.0
 
 
 class TestBinColumnCasing:

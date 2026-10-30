@@ -7,9 +7,7 @@ from __future__ import annotations
 __all__ = [
     "Grid",
     "average_duplicate_locations",
-    "drop_land_cells",
-    "get_missing_value_info_offline",
-    "get_missing_value_info_offline_per_param",
+    "get_missing_value_info",
     "seasonal_mean",
 ]
 
@@ -22,7 +20,7 @@ from dateutil.relativedelta import relativedelta
 from .util.columns import find_col, resolve_param_columns
 from .util.optional import import_optional
 from .util.types import Aggregation, GridMode, check_choice, check_timestamp
-from .database.information import param_table_name
+from .database.information import param_label, param_table_name
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +403,7 @@ class Grid:
         if dropping_land_cells:
             # Drop cells that are on land and have no data for any parameter
             n_before = len(df_wide)
-            df_wide = drop_land_cells(df_wide).reset_index(drop=True)
+            df_wide = _drop_land_cells(df_wide).reset_index(drop=True)
             logger.info("map_dataframes: dropped %d empty land cells (%d -> %d rows)",
                         n_before - len(df_wide), n_before, len(df_wide))
         return df_wide
@@ -668,7 +666,7 @@ def seasonal_mean(
     return annual.rename(columns={"_YEAR": "YEAR"})
 
 
-def drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
+def _drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
     """Remove grid cells that are on land (water=False) and never have a parameter value.
 
     A (LATITUDE, LONGITUDE, LEV_M) cell is dropped only if it is on land AND all
@@ -697,57 +695,30 @@ def drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
     return temp[temp["water"] | ever_has_data]
 
 
-def get_missing_value_info_offline_per_param(mapped_dataframes: list[pd.DataFrame]) -> pd.DataFrame:
-    """Compute missing-value statistics from a list of per-parameter DataFrames.
+def get_missing_value_info(df_wide: pd.DataFrame, parameters: list[str] | None = None) -> pd.DataFrame:
+    """Count missing values per parameter in a wide grid table.
+
+    Every row counts as a grid cell, so land cells without data raise the
+    percentages unless they were dropped (see ``dropping_land_cells`` in
+    :meth:`Grid.map_dataframes`).
 
     Args:
-        mapped_dataframes (list[pandas.DataFrame]): One DataFrame per parameter.
+        df_wide (pandas.DataFrame): Wide grid table with ``P_*`` columns.
+        parameters (list[str]): Parameters to report, insensitive to casing and ``P_`` prefix.
+            Default ``None`` reports every ``P_*`` column.
     Returns:
-        pandas.DataFrame with columns 'parameter', 'absolute', 'relative'.
+        pandas.DataFrame: Columns ``'parameter'`` (without ``P_``),
+        ``'absolute'`` (number of missing cells) and ``'relative'`` (percent),
+        sorted by ``'relative'``.
     """
-    # If no mapped dfs are passed, return empty df
-    if not mapped_dataframes:
-        return pd.DataFrame(columns=np.array(["parameter", "absolute", "relative"]))
-
-    # Extract grid
-    grid = mapped_dataframes[0][["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME", "water"]].copy()
-    grid["water"] = grid["water"].astype(bool)  # Ensure bool type
-    grid = grid[grid["water"]]
-
-    # Compute number of null values per mapped table
-    num_nulls = pd.DataFrame(columns=np.array(["parameter", "complete"]))
-    for df in mapped_dataframes:
-        param_col = [x for x in df.columns if x.startswith("P_")][0]
-        num_complete = df[~df[param_col].isna()][param_col].count()
-        num_nulls = pd.concat(
-            [num_nulls, pd.DataFrame([{"parameter": param_col, "complete": num_complete}])],
-            ignore_index=True,
-        )
-        water = df["water"].astype(bool)  # Ensure bool type
-        filled_land = df[~water & ~df[param_col].isna()]
-        grid = pd.concat([grid, filled_land[["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]]])
-
-    # Assemble missingness info df
-    grid = grid.drop_duplicates()
-    num_grid_cells = len(grid)
-    num_nulls["absolute"] = num_grid_cells - num_nulls["complete"]
-    num_nulls["relative"] = num_nulls["absolute"] / num_grid_cells * 100 if num_grid_cells else 0.0
-    return num_nulls[["parameter", "absolute", "relative"]].sort_values("relative")
-
-
-def get_missing_value_info_offline(df_wide: pd.DataFrame) -> pd.DataFrame:
-    """Compute missing-value counts from a wide DataFrame.
-
-    Args:
-        df_wide (pandas.DataFrame): Wide grid table.
-    Returns:
-        pandas.DataFrame with columns 'parameter', 'absolute', 'relative'.
-    """
-    # Get parameter table names
-    param_tables = [x for x in df_wide.columns if x.startswith("P_")]
+    # Get parameter columns
+    if parameters is None:
+        param_tables = [x for x in df_wide.columns if x.startswith("P_")]
+    else:
+        param_tables = resolve_param_columns(df_wide, parameters)
 
     # Compute absolute missingness
-    rows = [{"parameter": p, "absolute": df_wide[p].isna().sum()} for p in param_tables]
+    rows = [{"parameter": param_label(p), "absolute": df_wide[p].isna().sum()} for p in param_tables]
     num_nulls = pd.DataFrame(rows, columns=["parameter", "absolute"])
 
     # Compute relative missingness
