@@ -36,6 +36,19 @@ def _is_multiple(span: float, step: float) -> bool:
     return abs(n - round(n)) < 1e-9
 
 
+def _axis_cells(lo: float, hi: float, step: float) -> tuple[np.ndarray, np.ndarray]:
+    """Return the cell edges and cell centres of an axis from *lo* to *hi*. """
+    n = round((hi - lo) / step)  # number of bins
+    return lo + step * np.arange(n + 1), lo + step * (np.arange(n) + 0.5)
+
+
+def _inclusive_last_edge(edges: np.ndarray) -> np.ndarray:
+    """Return a float copy of *edges* whose last edge is adapted so that the last bin includes the maximum."""
+    edges = np.asarray(edges, dtype=float).copy()  # copy the edges
+    edges[-1] = np.nextafter(edges[-1], np.inf)  # increase last edge by the next floating point number
+    return edges
+
+
 class Grid:
     """A grid based on a bathymetry file, with or without a time axis.
     Lat/lon are cell-centred, time and depth are node-centred.
@@ -242,7 +255,7 @@ class Grid:
     def _make_z_arr(self) -> np.ndarray:
         """Return the depth array to use for the water mask (excluding the last boundary node)."""
         if self.z_array is None:
-            return np.arange(self.z_min, self.z_max, self.dz)
+            return _axis_cells(self.z_min, self.z_max, self.dz)[0][:-1]
         return self.z_array[:-1]
 
     def _water_mask(self, ds, lon, lat):
@@ -261,29 +274,20 @@ class Grid:
 
     def _map_lon_lat_depth(self, df: pd.DataFrame) -> pd.DataFrame:
         """Bin LONGITUDE, LATITUDE and LEV_M columns in df to grid cell centres."""
-        # Map longitude values into grid cells (labels = cell centres)
-        lon_bins = np.arange(self.lon_min, self.lon_max + self.dlon, self.dlon, dtype=float)
-        lon_bins[-1] += 0.001 * (1 if lon_bins[-1] >= 0 else -1)
-        df["LONGITUDE"] = pd.cut(df["LONGITUDE"], bins=lon_bins, right=False,
-                                 labels=lon_bins[:-1] + self.dlon / 2)
+        # Map longitude values into grid cells (labels = cell centres, maximum included)
+        lon_edges, lon_centres = _axis_cells(self.lon_min, self.lon_max, self.dlon)
+        df["LONGITUDE"] = pd.cut(df["LONGITUDE"], bins=_inclusive_last_edge(lon_edges), right=False, labels=lon_centres)
 
         # Map latitude values
-        lat_bins = np.arange(self.lat_min, self.lat_max + self.dlat, self.dlat, dtype=float)
-        lat_bins[-1] += 0.001 * (1 if lat_bins[-1] >= 0 else -1)
-        df["LATITUDE"] = pd.cut(df["LATITUDE"], bins=lat_bins, right=False,
-                                labels=lat_bins[:-1] + self.dlat / 2)
+        lat_edges, lat_centres = _axis_cells(self.lat_min, self.lat_max, self.dlat)
+        df["LATITUDE"] = pd.cut(df["LATITUDE"], bins=_inclusive_last_edge(lat_edges), right=False, labels=lat_centres)
 
-        # Map depth values
+        # Map depth values (labels = the node at the top of each depth bin, maximum included)
         if self.z_array is not None:
-            z_bins = self.z_array.astype(float)
+            z_edges = self.z_array.astype(float)
         else:
-            z_bins = np.arange(self.z_min, self.z_max + self.dz, self.dz, dtype=float)
-
-        if len(z_bins) == 1:
-            df["LEV_M"] = z_bins[0]
-        else:
-            z_bins[-1] += 0.001
-            df["LEV_M"] = pd.cut(df["LEV_M"], bins=z_bins, right=False, labels=z_bins[:-1])
+            z_edges = _axis_cells(self.z_min, self.z_max, self.dz)[0]
+        df["LEV_M"] = pd.cut(df["LEV_M"], bins=_inclusive_last_edge(z_edges), right=False, labels=z_edges[:-1])
 
         return df
 
@@ -409,8 +413,8 @@ class Grid:
         ds = self._open_bathymetry(self.bathymetry_grid_path, lon_variable, lat_variable, depth_variable)
 
         # Define cell-centered lon/lat values
-        lon = xr.DataArray(np.arange(self.lon_min + self.dlon / 2, self.lon_max, self.dlon), dims="LONGITUDE")
-        lat = xr.DataArray(np.arange(self.lat_min + self.dlat / 2, self.lat_max, self.dlat), dims="LATITUDE")
+        lon = xr.DataArray(_axis_cells(self.lon_min, self.lon_max, self.dlon)[1], dims="LONGITUDE")
+        lat = xr.DataArray(_axis_cells(self.lat_min, self.lat_max, self.dlat)[1], dims="LATITUDE")
 
         # Add water mask (and time dimension, if the grid has one)
         water_filled = self._water_mask(ds, lon, lat)

@@ -13,6 +13,7 @@ except ImportError:
 
 from comfort.gridding import (
     Grid,
+    _axis_cells,
     average_duplicate_locations,
     drop_land_cells,
     get_missing_value_info_offline,
@@ -476,6 +477,89 @@ class TestBinSpace:
         result = grid.bin_space(df, "VAL", agg=["mean", "std", "count"])
         assert result["VAL"].iloc[0] == 2.0
         assert result["count"].iloc[0] == 2
+
+
+class TestCellAxes:
+    """Template cell centres and the bins of bin_space come from one construction."""
+
+    @staticmethod
+    def _axes_stub(lon, lat):
+        """Dummy Grid with the given (min, max, step) per axis and two depth layers."""
+        grid = object.__new__(Grid)
+        for k, v in dict(
+            lon_min=lon[0], lon_max=lon[1], dlon=lon[2],
+            lat_min=lat[0], lat_max=lat[1], dlat=lat[2],
+            z_min=0, z_max=100, dz=50, z_array=None,
+        ).items():
+            setattr(grid, k, v)
+        return grid
+
+    @staticmethod
+    def _bathymetry(tmp_path):
+        """Write a flat 500 m deep bathymetry NetCDF."""
+        lon = np.arange(0.0, 4.0, 0.5)
+        lat = np.arange(0.0, 4.0, 0.5)
+        ds = xarray.Dataset(
+            {"elevation": (("lat", "lon"), np.full((len(lat), len(lon)), -500.0))},
+            coords={"lat": lat, "lon": lon},
+        )
+        path = str(tmp_path / "bathymetry.nc")
+        ds.to_netcdf(path)
+        return path
+
+    # The centres assigned by bin_space equal the template cell centres
+    @pytest.mark.skipif(not _has_xarray, reason="xarray not installed ([grid] extra)")
+    @pytest.mark.parametrize("step", [0.1, 0.2, 0.3])
+    def test_binned_centres_equal_template_centres(self, tmp_path, step):
+        grid = Grid(
+            bathymetry_grid_path=self._bathymetry(tmp_path),
+            lon_min=0, lon_max=3, dlon=step, lat_min=0, lat_max=3, dlat=step,
+            z_min=0, z_max=100, dz=50,
+        )
+        lon, lat = np.meshgrid(grid.grid["LONGITUDE"].unique(), grid.grid["LATITUDE"].unique())
+        df = pd.DataFrame({"LONGITUDE": lon.ravel(), "LATITUDE": lat.ravel(), "LEV_M": 10.0, "VAL": 1.0})
+
+        binned = grid.bin_space(df, "VAL", "mean")
+
+        # The binned centres are exactly the template centres
+        for col in ("LONGITUDE", "LATITUDE"):
+            assert np.array_equal(np.sort(binned[col].unique()), np.sort(grid.grid[col].unique()))
+
+        # Merging the binned values onto the template fills every cell of the first depth layer
+        merged = grid.grid.merge(binned, on=["LATITUDE", "LONGITUDE", "LEV_M"], how="left")
+        assert merged.loc[merged["LEV_M"] == 0, "VAL"].notna().all()
+
+    # An axis has (max - min) / step cells and one more edge
+    @pytest.mark.parametrize("lo, hi, step", [(-90, 90, 0.3), (30, 70, 0.7), (0, 1, 0.1)])
+    def test_cell_count(self, lo, hi, step):
+        edges, centres = _axis_cells(lo, hi, step)
+        assert len(centres) == round((hi - lo) / step)
+        assert len(edges) == len(centres) + 1
+
+    # A point beyond the maximum belongs to no cell and is dropped
+    def test_point_beyond_the_maximum_is_dropped(self):
+        grid = self._axes_stub(lon=(0, 10, 1), lat=(-90, 90, 0.3))
+        df = pd.DataFrame({"LONGITUDE": [5.5, 5.5], "LATITUDE": [89.95, 90.1], "LEV_M": 10.0, "VAL": 1.0})
+        result = grid.bin_space(df, "VAL", "mean")
+        assert len(result) == 1
+        assert result["LATITUDE"].iloc[0] == pytest.approx(89.85)
+
+    # The maximum itself is inclusive, also for a negative maximum
+    @pytest.mark.parametrize("hi", [30, 0, -10])
+    def test_maximum_is_inclusive(self, hi):
+        grid = self._axes_stub(lon=(hi - 10, hi, 5), lat=(hi - 10, hi, 5))
+        df = pd.DataFrame({"LONGITUDE": [hi], "LATITUDE": [hi], "LEV_M": 10.0, "VAL": 1.0})
+        result = grid.bin_space(df, "VAL", "mean")
+        assert len(result) == 1
+        assert result["LONGITUDE"].iloc[0] == hi - 2.5
+        assert result["LATITUDE"].iloc[0] == hi - 2.5
+
+    # Each depth bin is labelled by its upper boundary (the top of the layer), the maximum depth belongs to the last bin
+    def test_depth_maximum_is_inclusive(self):
+        grid = self._axes_stub(lon=(0, 10, 5), lat=(0, 10, 5))
+        df = pd.DataFrame({"LONGITUDE": 1.0, "LATITUDE": 1.0, "LEV_M": [0.0, 49.9, 50.0, 100.0], "VAL": 1.0})
+        result = grid.bin_space(df, "VAL", "count")
+        assert dict(zip(result["LEV_M"], result["VAL"])) == {0.0: 2, 50.0: 2}
 
 
 class TestBinTime:
