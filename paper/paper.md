@@ -28,7 +28,7 @@ affiliations:
   - index: 4
     name: University of Applied Sciences, An der Karlstadt 8, Bremerhaven 27568, Germany
 
-date: 01 October 2026
+date: 06 November 2026
 
 bibliography: paper.bib
 ---
@@ -79,17 +79,11 @@ To our knowledge, no existing package offers a comparable reproducible interface
 The organisation of the `comfort-db` library is driven by usability and the scale of the COMFORT dataset. Since the dataset
 is distributed as a single multi-gigabyte SQLite file, efficiency and low memory usage were key design goals. 
 For example, space, time and quality filtering is applied at the SQL level rather than after loading potentially large data tables into memory.
-<!-- SQLite does not support polygon-based filtering, e.g. to extract a specific ocean basin. Therefore, `comfort-db` enables -->
-<!-- it by first computing a broader bounding box, filtering for it in the database and subsequently filtering the data in-memory to -->
-<!-- the exact polygon shape. -->
-Computations were vectorised where possible to avoid per-row iteration. 
-For example, `distance_to_coast` builds a k-d tree (`scipy`, [@virtanen2020]) 
-on radian-converted coastline coordinates, retrieves the five nearest candidate coastline points and computes exact
-vectorised haversine distances among them. 
-The `classify_from_grid` function similarly performs a k-d tree search, but only
-retrieves a single nearest-neighbour, without a subsequent refinement step. 
-Both functions approximate great-circle distance with Euclidean distance in radians, which is imprecise near the poles and the 
-antimeridian (±180°).
+SQLite does not support polygon-based filtering, e.g. to extract a specific ocean basin. Therefore, `comfort-db` first
+computes a broader bounding box, filters for it in the database and subsequently filters the data in-memory to
+the exact polygon shape.
+Moreover, `distance_to_coast` and `classify_from_grid` map coordinates to the unit sphere and build a k-d tree (`scipy`, [@virtanen2020]) 
+to efficiently query the nearest coastline point or grid cell.
 
 Quality flag interpretation and unit conversions are centralised in dedicated modules (`comfort.qc`, `comfort.units`) so 
 that corrections and settings apply everywhere consistently. 
@@ -100,7 +94,7 @@ need database access and preprocessing.
 Some processing steps require a single parameter value per spatio-temporal location, which is not guaranteed in the COMFORT dataset.
 For example, there can be different instruments and multiple bottles on a conductivity-temperature-depth (CTD) rosette at the same time, depth and coordinates. 
 Also, there are measurements that were contributed by more than one of the merged source datasets under different station IDs.
-Therefore, `average_duplicate_locations` averages the records of each parameter by latitude, longitude, depth and time, 
+Therefore, `average_duplicate_locations` averages the records of each parameter by longitude, latitude, depth and time, 
 irrespective of station ID, profile, instrument or bottle number. 
 Records that the dataset itself flagged as duplicates (PQF2=-1) can be removed by applying the `QC_GOOD` quality filter.
 When auxiliary temperature and salinity are added to another parameter table for unit conversions, they are first 
