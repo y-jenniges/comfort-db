@@ -647,8 +647,8 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
                        grid_time_col: str | None = None) -> pd.DataFrame:
     """Classify observations against a labelled grid by nearest-neighbour lookup.
 
-    Finds the closest grid point (Euclidean distance on radian-converted
-    coordinates) and copies its label.
+    Finds the closest grid point (unit-sphere k-d tree, works at any latitude
+    and across +-180°) and copies its label.
 
     If *time_col* is given, each sample is first matched to its nearest
     time step in *grid_time_col*. Then, spatial neighbours are searched
@@ -722,16 +722,12 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
 
 
 def _nearest_labels(obs_lon, obs_lat, grid_lon, grid_lat, grid_labels):
-    """Nearest-neighbour label lookup (Euclidean distance on radian-converted coordinates)."""
+    """Nearest-neighbour label lookup on the unit sphere (works at any latitude and across +-180°)."""
     from scipy.spatial import cKDTree
 
-    # Convert to radians
-    grid_coords = np.column_stack([np.radians(grid_lon.astype(float)), np.radians(grid_lat.astype(float))])
-    obs_coords = np.column_stack([np.radians(obs_lon.astype(float)), np.radians(obs_lat.astype(float))])
-
-    # Construct neighbourhood graph
-    tree = cKDTree(grid_coords)
+    # Construct neighbourhood graph on unit sphere coordinates
+    tree = cKDTree(_to_unit_sphere(grid_lon.astype(float), grid_lat.astype(float)))
 
     # Return the one nearest neighbour for each observation
-    _, idxs = tree.query(obs_coords, k=1)
+    _, idxs = tree.query(_to_unit_sphere(obs_lon.astype(float), obs_lat.astype(float)), k=1)
     return grid_labels[idxs]

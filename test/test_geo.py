@@ -853,6 +853,12 @@ class TestClassifyFromGrid:
         result = classify_from_grid(df, self._time_grid(), time_col="YEAR")
         assert list(result["label"]) == [1, 20]
 
+    # Nearest neighbour is found across the antimeridian when the grid has a gap
+    def test_dateline_neighbour(self):
+        grid = pd.DataFrame({"LATITUDE": [0.0, 0.0], "LONGITUDE": [170.0, -179.5], "label": [1, 2]})
+        df = pd.DataFrame({"LATITUDE": [0.0], "LONGITUDE": [179.9]})
+        assert classify_from_grid(df, grid)["label"].iloc[0] == 2
+
 
 class TestColumnCasing:
     # Column arguments in another casing give the same result
