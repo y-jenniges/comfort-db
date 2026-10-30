@@ -310,22 +310,23 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     xr = import_optional("xarray", "grid", "load_biomes")
 
     # Read NetCDF file
-    ds = xr.open_dataset(path)
+    with xr.open_dataset(path) as ds:
+        # Filter for the requested biome data
+        if biome_var not in ds.data_vars:
+            raise ValueError(
+                f"biome_var {biome_var!r} not found in {list(ds.data_vars)}. "
+                "Pass one of these explicitly."
+            )
+        da = ds[biome_var]
 
-    # Filter for the requested biome data
-    if biome_var not in ds.data_vars:
-        raise ValueError(
-            f"biome_var {biome_var!r} not found in {list(ds.data_vars)}. "
-            "Pass one of these explicitly."
-        )
-    da = ds[biome_var]
+        # Extract time dimension
+        extra_dims = [d for d in da.dims if d not in ("lat", "lon")]
+        time_dim = extra_dims[0] if extra_dims else None
 
-    # Extract time dimension
-    extra_dims = [d for d in da.dims if d not in ("lat", "lon")]
-    time_dim = extra_dims[0] if extra_dims else None
+        # Read the data into a DataFrame
+        df = da.to_dataframe(name="label").reset_index()
 
     # Formatting
-    df = da.to_dataframe(name="label").reset_index()  # to df
     df = df.rename(columns={"lat": "LATITUDE", "lon": "LONGITUDE"})  # rename to library convention
     df = df.dropna(subset=["label"])  # drop land/no-biome cells
     out_cols = ["LONGITUDE", "LATITUDE", "label"]
