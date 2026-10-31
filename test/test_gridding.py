@@ -494,7 +494,8 @@ class TestBinSpace:
         })
         result = grid.bin_space(df, "VAL", agg=["mean", "std", "count"])
         assert result["VAL"].iloc[0] == 2.0
-        assert result["count"].iloc[0] == 2
+        assert result["VAL_count"].iloc[0] == 2
+        assert "count" not in result.columns
 
 
 class TestCellAxes:
@@ -751,6 +752,22 @@ class TestMapDataframes:
 
         cell = result[(result["LATITUDE"] == 7.5) & (result["LONGITUDE"] == 7.5) & (result["LEV_M"] == 50.0)]
         assert cell["P_OXYGEN"].iloc[0] == 5.0
+
+    # A list for agg names the extra statistics per parameter, so two parameters do not collide on the merge
+    def test_list_agg_with_two_parameters_has_no_suffix_collisions(self):
+        grid = _make_no_time_grid_stub()
+        dataframes = {
+            name: pd.DataFrame({"LATITUDE": [1.0, 1.0], "LONGITUDE": [1.0, 1.0], "LEV_M": [10.0, 10.0], name: values})
+            for name, values in {"NITRATE": [1.0, 3.0], "OXYGEN": [10.0, 20.0]}.items()
+        }
+        result = grid.map_dataframes(dataframes, agg=["mean", "median", "std", "count"])
+        assert not [c for c in result.columns if c.endswith(("_x", "_y"))]  # no auto suffixes
+        cell = result[(result["LATITUDE"] == 2.5) & (result["LONGITUDE"] == 2.5) & (result["LEV_M"] == 0.0)]
+        assert cell["P_NITRATE"].iloc[0] == 2.0
+        assert cell["P_NITRATE_count"].iloc[0] == 2
+        assert cell["P_OXYGEN"].iloc[0] == 15.0
+        assert cell["P_OXYGEN_median"].iloc[0] == 15.0
+        assert cell["P_OXYGEN_std"].iloc[0] == pytest.approx(7.0710678)
 
     # Keys and value columns in any casing / with P_ prefix are matched
     @pytest.mark.parametrize("key, column", [("nitrate", "NITRATE"), ("NITRATE", "p_nitrate"), ("P_NITRATE", "nitrate")])

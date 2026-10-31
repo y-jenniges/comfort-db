@@ -310,16 +310,16 @@ class Grid:
         if not isinstance(agg, (list, tuple)):
             return grouped
 
-        # Rename aggregated columns to the name of their statistic
+        # Name the aggregated columns <value_col>_<statistic>, so that several parameters cannot collide on merge
         grouped = grouped.copy()
         grouped.columns = [
-            c[0] if c[0] != value_col else c[1]
+            c[0] if c[0] != value_col else f"{value_col}_{c[1]}"
             for c in grouped.columns.to_flat_index()
         ]
 
         # Rename the first requested stat's column back to value_col
         first_stat = agg[0] if isinstance(agg[0], str) else agg[0].__name__
-        return grouped.rename(columns={first_stat: value_col})
+        return grouped.rename(columns={f"{value_col}_{first_stat}": value_col})
 
     def bin_space(self, df: pd.DataFrame, value_col: str | None = None, agg: Aggregation | None = None) -> pd.DataFrame:
         """Bin LONGITUDE/LATITUDE/LEV_M in *df* onto this grid's cell centres.
@@ -333,7 +333,9 @@ class Grid:
                 snapped to the grid (e.g. to run a custom aggregation like
                 ``seasonal_mean`` before further binning).
             agg: Aggregation passed to ``DataFrame.agg``. A string ("mean"),
-                a list of strings/callables, or a callable.
+                a list of strings/callables, or a callable. A list gives one
+                column per statistic: the first keeps the name of *value_col*,
+                the others are named ``<value_col>_<statistic>``.
         Returns:
             pandas.DataFrame: One row per occupied cell if *agg* is given,
                 otherwise one row per input row.
@@ -374,8 +376,9 @@ class Grid:
             agg: Aggregation passed to ``self.bin(df, value_col, agg=agg)`` for
                 every parameter. A string ("mean"), a list, a callable, or
                 (on a grid with time axis) ``"seasonal_mean"`` for monthly-first annual
-                averaging before binning onto the grid's time steps. Ignored
-                when *bin_fn* is given.
+                averaging before binning onto the grid's time steps. With a list,
+                the first statistic is ``P_<name>``, the others ``P_<name>_<statistic>``
+                (e.g. ``P_OXYGEN_std``). Ignored when *bin_fn* is given.
             bin_fn (callable): ``(df, value_col) -> DataFrame`` used instead of
                 the default ``self.bin(df, value_col, agg=agg)``, for any
                 per-parameter aggregation not expressible via *agg*.
@@ -497,7 +500,8 @@ class Grid:
         Args:
             df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M, DATEANDTIME and *value_col*.
             value_col (str): Column to aggregate.
-            agg: Aggregation passed to ``DataFrame.agg``.
+            agg: Aggregation passed to ``DataFrame.agg``. A list gives one column per statistic: The first keeps
+            the name of *value_col*, the others are named ``<value_col>_<statistic>``.
         Returns:
             pandas.DataFrame: One row per occupied cell and time step.
         """
@@ -533,7 +537,9 @@ class Grid:
             agg: Aggregation passed to ``DataFrame.agg``. The special
                 value ``"seasonal_mean"`` (grid with time axis only) runs
                 monthly-first annual averaging before binning onto this
-                grid's time steps (common for yearly gridding).
+                grid's time steps (common for yearly gridding). A list gives one
+                column per statistic: the first keeps the name of *value_col*,
+                the others are named ``<value_col>_<statistic>``.
         Returns:
             pandas.DataFrame: One row per occupied cell (and time step).
         """
