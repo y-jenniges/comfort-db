@@ -488,6 +488,22 @@ class TestRegionBbox:
         result = region_bbox({"pacific_strip": pacific_strip})
         assert result == (170.0, -170.0, -10.0, 10.0)
 
+    # A wide region that does not cross the antimeridian is not reported as wrapping
+    def test_wide_region_does_not_wrap(self):
+        result = region_bbox({"atlantic": [(-100, 0), (100, 0), (100, 10), (-100, 10)]})
+        assert result == (-100.0, 100.0, 0.0, 10.0)
+
+    # A circumpolar region covers all longitudes
+    def test_circumpolar_region_covers_all_longitudes(self):
+        ring = [(-180, -70), (0, -70), (180, -70), (180, -90), (-180, -90)]
+        result = region_bbox({"southern_ocean": ring})
+        assert result == (-180.0, 180.0, -90.0, -70.0)
+
+    # A region on 0..360 is rejected
+    def test_region_east_of_180_raises(self):
+        with pytest.raises(ValueError, match="-180, 180"):
+            region_bbox({"strip": [(190, 0), (200, 0), (200, 10), (190, 10)]})
+
 
 @pytest.mark.skipif(not _has_shapely, reason="shapely not installed ([geo] extra)")
 class TestSelectRegions:
