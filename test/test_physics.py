@@ -254,6 +254,35 @@ class TestComputeBuoyancyFrequency:
         assert result.empty
         assert list(result.columns) == ["ID", "PROFILE_NUMBER", "pressure_mid", "N2"]
 
+    # Repeated pressures give no NaN/inf row and the same N2 as the de-duplicated profile
+    def test_repeated_pressure_no_nan_rows(self):
+        df = pd.concat([self._stable_df(), self._stable_df().iloc[[1]]], ignore_index=True)
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        assert np.isfinite(result["N2"]).all()
+        assert np.allclose(result["N2"], compute_buoyancy_frequency(self._stable_df(), "SA", "CT")["N2"])
+
+    # Repeated pressures with differing values are averaged, no inf
+    def test_repeated_pressure_values_averaged(self):
+        dup = self._stable_df().iloc[[1]].assign(SA=34.6, CT=14.0)
+        df = pd.concat([self._stable_df(), dup], ignore_index=True)
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        expected = self._stable_df().assign(SA=[34.0, 34.55, 35.0], CT=[20.0, 14.5, 10.0])
+        assert len(result) == 2
+        assert np.allclose(result["N2"], compute_buoyancy_frequency(expected, "SA", "CT")["N2"])
+
+    # A profile with a single distinct pressure has no gradient
+    def test_single_distinct_pressure_skipped(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1], "LEV_DBAR": [10.0, 10.0], "SA": [34.0, 34.1], "CT": [20.0, 19.9]})
+        assert compute_buoyancy_frequency(df, "SA", "CT").empty
+
+    # max_gap drops level pairs that are too far apart
+    def test_max_gap_drops_wide_pairs(self):
+        df = self._stable_df().assign(LEV_DBAR=[0.0, 100.0, 600.0])
+        assert len(compute_buoyancy_frequency(df, "SA", "CT")) == 2
+        result = compute_buoyancy_frequency(df, "SA", "CT", max_gap=200)
+        assert len(result) == 1
+        assert result["pressure_mid"].iloc[0] < 100
+
 
 class TestComputePotentialVorticity:
     # Output is a pandas Series

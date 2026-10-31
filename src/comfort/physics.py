@@ -185,11 +185,15 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
                                pressure_col: str = "LEV_DBAR",
                                lat_col: str = "LATITUDE",
                                profile_col: str | list[str] | None = None,
+                               max_gap: float | None = None,
                                ) -> pd.DataFrame:
     """Compute Brunt-Vaisala (buoyancy) frequency N2 for each profile.
 
     N2 > 0 indicates stable stratification.
     N2 < 0 indicates gravitational instability.
+
+    Rows with a missing value are dropped and repeated pressures within a
+    profile are averaged before N2 is computed.
 
     Args:
         df (pandas.DataFrame): Wide-format DataFrame with SA and CT columns.
@@ -199,6 +203,8 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
         profile_col (str | list[str] | None): Column(s) identifying individual profiles.
         lat_col (str): Latitude column [°N] for gravitational
             acceleration correction. Falls back to 0 if absent.
+        max_gap (float | None): Maximum pressure distance [dbar] between two
+            levels. Wider pairs are skipped. Default is None (no limit).
     Returns:
         pandas.DataFrame: One row per consecutive level pair per profile
             with the profile key columns (``ID`` and ``PROFILE_NUMBER``
@@ -220,21 +226,31 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
     for pid, group in df.groupby(group_cols):
         # Check if profile has min. 2 levels
         cols = [pressure_col, sa_col, ct_col] + ([lat_col] if lat_available else [])
-        valid = group[cols].dropna().sort_values(pressure_col)
+
+        # Average repeated pressures and sort by pressure
+        valid = group[cols].dropna().groupby(pressure_col, as_index=False).mean()
         if len(valid) < 2:
-            logger.debug("compute_buoyancy_frequency: profile %s has < 2 levels, skipped", pid)
+            logger.debug("compute_buoyancy_frequency: Profile %s has < 2 distinct levels, skipped", pid)
             continue
 
         # Fall back to equatorial gravity if latitude not available
         lat = valid[lat_col].values if lat_available else np.zeros(len(valid))
 
         # N2 is computed at mid-depth pressure levels between consecutive pairs
+        p = valid[pressure_col].values  # valid pressures
         n2, p_mid = gsw.Nsquared(
             SA=valid[sa_col].values,
             CT=valid[ct_col].values,
-            p=valid[pressure_col].values,
+            p=p,
             lat=lat,
         )
+
+        # Drop level pairs further apart than max_gap
+        if max_gap is not None:
+            keep = np.diff(p) <= max_gap
+            n2, p_mid = n2[keep], p_mid[keep]
+
+        # Assemble results
         for val, pmid in zip(n2, p_mid):
             rows.append({**_profile_key_dict(profile_col=group_cols, pid=pid), "pressure_mid": float(pmid), "N2": float(val)})
 
