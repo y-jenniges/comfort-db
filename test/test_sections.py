@@ -54,6 +54,16 @@ class TestBinSection:
                              along_bins=[-1, 5, 11], depth_bins=[-1, 50, 101])
         assert len(result) == 4
 
+    # Bins are left-closed like the gridding: Lowest edge kept, interior edge goes up, maximum included
+    def test_edge_convention_matches_gridding(self):
+        df = pd.DataFrame({
+            "ALONG": [0.0, 0.0, 0.0],
+            "LEV_M": [0.0, 10.0, 20.0],
+            "VAL": [2.0, 4.0, 9.0],
+        })
+        result = bin_section(df, "VAL", "LEV_M", "ALONG", along_bins=[-1, 1], depth_bins=[0, 10, 20])
+        assert result.set_index("LEV_M")["VAL"].to_dict() == {5.0: 2.0, 15.0: 6.5}
+
 
 class TestSectionDifference:
     @staticmethod

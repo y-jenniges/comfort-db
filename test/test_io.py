@@ -301,8 +301,22 @@ class TestSubsetRegion:
 
     # date_min/date_max filter rows outside the time window
     def test_date_filter(self):
-        r = subset_region(self._df(), date_min="2005-01-01", date_max="2008-01-01")
+        r = subset_region(self._df(), date_min="2005-01-01 00:00:00", date_max="2008-01-01 00:00:00")
         assert list(r["LATITUDE"]) == [20.0]
+
+    # Both date bounds are inclusive instants
+    def test_date_bounds_are_inclusive_instants(self):
+        df = self._df()
+        df["DATEANDTIME"] = ["2000-12-30 23:00:00", "2000-12-31 14:00:00", "2001-01-01 00:00:00"]
+        assert len(subset_region(df, date_max="2000-12-31 14:00:00")) == 2
+        assert len(subset_region(df, date_max="2000-12-31 13:59:59")) == 1
+        assert len(subset_region(df, date_min="2000-12-31 14:00:00")) == 2
+
+    # A date-only bound (no time of day) is rejected
+    @pytest.mark.parametrize("kwargs", [{"date_min": "2000-01-01"}, {"date_max": "2000-12-31"}])
+    def test_date_only_bound_raises(self, kwargs):
+        with pytest.raises(ValueError, match="date_m"):
+            subset_region(self._df(), **kwargs)
 
     # No filters given returns every row unchanged
     def test_no_filters_returns_all(self):
@@ -318,7 +332,7 @@ class TestSubsetRegion:
         ("LATITUDE", {"lat_min": 15.0}),
         ("LONGITUDE", {"lon_max": 12.0}),
         ("LEV_M", {"depth_max": 200.0}),
-        ("DATEANDTIME", {"date_min": "2005-01-01"}),
+        ("DATEANDTIME", {"date_min": "2005-01-01 00:00:00"}),
     ])
     def test_missing_column_raises(self, column, kwargs):
         df = self._df().drop(columns=column)
@@ -328,7 +342,7 @@ class TestSubsetRegion:
     # Column names are looked up insensitive to casing
     def test_column_names_case_insensitive(self):
         df = self._df().rename(columns=str.lower)
-        r = subset_region(df, lat_min=15.0, lat_max=25.0, depth_max=200.0, date_min="2001-01-01")
+        r = subset_region(df, lat_min=15.0, lat_max=25.0, depth_max=200.0, date_min="2001-01-01 00:00:00")
         assert list(r["latitude"]) == [20.0]
 
     # The returned DataFrame is independent of the input
@@ -458,7 +472,7 @@ class TestLoadComfort:
 
     # date_min restricts the returned data to rows within the date bound
     def test_date_filter(self, comfort_db):
-        result = load_comfort(comfort_db, date_min="2003-01-01", output="dict")
+        result = load_comfort(comfort_db, date_min="2003-01-01 00:00:00", output="dict")
         # Only station 2's profile (2005) survives
         assert result["NITRATE"]["PROFILE_NUMBER"].nunique() == 1
 
@@ -723,7 +737,7 @@ class TestReadParameter:
     # date_min restricts rows to the matching station's profile
     def test_date_filter(self, comfort_db):
         conn = sqlite3.connect(comfort_db)
-        df = read_parameter(conn, "NITRATE", date_min="2003-01-01")
+        df = read_parameter(conn, "NITRATE", date_min="2003-01-01 00:00:00")
         conn.close()
         assert len(df) > 0
         assert df["PROFILE_NUMBER"].nunique() == 1
@@ -770,6 +784,24 @@ class TestReadParameter:
         assert "s.LONGITUDE <= ?" in conditions
         assert "(s.LONGITUDE >= ? OR s.LONGITUDE <= ?)" in conditions
         assert params == [-180.0, 0.0, 170.0, -170.0, -10.0, 10.0]
+
+    # The SQL date bounds are inclusive, a date-only value is rejected
+    @pytest.mark.parametrize("date_max, param", [("2000-12-31 14:00:00", "2000-12-31 14:00:00"), ("2000-12-31", None)])
+    def test_sql_date_max_bound(self, date_max, param):
+        from comfort.io import _append_geo_conditions
+        conditions, params = [], []
+        kwargs = dict(lon_min=None, lon_max=None, lat_min=None, lat_max=None,
+                      depth_min=None, depth_max=None, date_min=None, date_max=date_max)
+        if param is None:
+            # Date-only value raises
+            with pytest.raises(ValueError, match="date_max"):
+                _append_geo_conditions(conditions, params, "s.", "s.", "p.", "s.", **kwargs)
+            return
+
+        # Inclusive SQL date bounds
+        _append_geo_conditions(conditions, params, "s.", "s.", "p.", "s.", **kwargs)
+        assert conditions == ["s.DATEANDTIME <= ?"]
+        assert params == [param]
 
     # extra_station_cols pulls additional station columns (e.g. CRUISE_ID)
     def test_extra_station_cols(self, comfort_db):

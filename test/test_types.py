@@ -1,6 +1,10 @@
 import pytest
 
-from comfort.util.types import GridMode, InterpMethod, LoadOutput, check_choice
+import datetime
+
+import pandas as pd
+
+from comfort.util.types import GridMode, InterpMethod, LoadOutput, check_choice, check_timestamp
 
 
 class TestCheckChoice:
@@ -22,3 +26,18 @@ class TestCheckChoice:
     def test_interp_method_options(self):
         check_choice("pchip", InterpMethod, "method")
         check_choice("linear", InterpMethod, "method")
+
+
+class TestCheckTimestamp:
+    # The long format and datetime objects pass
+    @pytest.mark.parametrize("value", ["2020-12-31 23:59:59",
+                                       datetime.datetime(2020, 12, 31), pd.Timestamp("2020-12-31")])
+    def test_explicit_instants_pass(self, value):
+        check_timestamp(value, "date_max")
+
+    # Date-only strings, partial times and plain dates are rejected
+    @pytest.mark.parametrize("value", ["2020-12-31", "2020-12", "2020-12-31 23:59", "31.12.2020 23:59:59",
+                                       datetime.date(2020, 12, 31)])
+    def test_other_values_raise(self, value):
+        with pytest.raises(ValueError, match="date_max must be given as 'YYYY-MM-DD HH:MM:SS'"):
+            check_timestamp(value, "date_max")

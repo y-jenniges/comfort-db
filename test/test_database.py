@@ -3,10 +3,7 @@ import sqlite3
 import pytest
 
 from comfort.database.information import does_table_exist, get_table_as_df
-from comfort.database.structure import (
-    create_combined_parameter_table,
-    remove_tables_like,
-)
+from comfort.database.structure import create_combined_parameter_table
 
 
 @pytest.fixture
@@ -45,47 +42,6 @@ def comfort_conn():
     conn.commit()
     yield conn
     conn.close()
-
-
-class TestRemoveTablesLike:
-    @staticmethod
-    def _create_views(conn):
-        for param in ("NITRATE", "OXYGEN"):
-            conn.execute(f"CREATE VIEW V_{param} AS SELECT * FROM P_{param}")
-
-    # Drop every view matching the LIKE pattern
-    def test_removes_views(self, comfort_conn):
-        self._create_views(comfort_conn)
-        assert does_table_exist(comfort_conn, "V_NITRATE", "view")
-
-        remove_tables_like(comfort_conn, like_pattern="V|_%", escape_char="|", table_type="view")
-        assert not does_table_exist(comfort_conn, "V_NITRATE", "view")
-        assert not does_table_exist(comfort_conn, "V_OXYGEN", "view")
-
-    # tables_except protects named views from removal
-    def test_tables_except(self, comfort_conn):
-        self._create_views(comfort_conn)
-        remove_tables_like(
-            comfort_conn, like_pattern="V|_%", escape_char="|",
-            table_type="view", tables_except=["V_NITRATE"],
-        )
-        # V_NITRATE should survive, V_OXYGEN should be dropped
-        assert does_table_exist(comfort_conn, "V_NITRATE", "view")
-        assert not does_table_exist(comfort_conn, "V_OXYGEN", "view")
-
-    # table_type="table" drops tables (as GridManager.remove_grid does) and leaves parameter tables alone
-    def test_removes_tables(self, comfort_conn):
-        comfort_conn.execute("CREATE TABLE grid_1 (idx INTEGER)")
-        comfort_conn.execute("CREATE TABLE P_NITRATE_1 AS SELECT * FROM P_NITRATE")
-        remove_tables_like(comfort_conn, like_pattern="%|_1", escape_char="|", table_type="table")
-        assert not does_table_exist(comfort_conn, "grid_1", "table")
-        assert not does_table_exist(comfort_conn, "P_NITRATE_1", "table")
-        assert does_table_exist(comfort_conn, "P_NITRATE", "table")
-
-    # The pattern is required: there is no default that could drop unrelated views
-    def test_pattern_is_required(self, comfort_conn):
-        with pytest.raises(TypeError):
-            remove_tables_like(comfort_conn)
 
 
 class TestCreateCombinedParameterTable:

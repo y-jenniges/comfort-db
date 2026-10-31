@@ -14,7 +14,8 @@ Steps:
   4. Average params over identical (lat, lon, depth, time)
   5. Convert in-situ T to potential temperature
   6. Grid: 1° x 1° x 12 depth layers (0-5000 m) x 13 20-year time means
-  7. Remove empty land cells (using GEBCO)
+  7. Remove empty land cells (using GEBCO) and save the gridded table as CSV
+     (inspect it in the CSV tab of the explorer: python -m comfort.app.explorer)
   8. Diagnostic plots
 
 Requires:
@@ -36,7 +37,7 @@ import seaborn as sns
 from dotenv import load_dotenv
 
 from comfort import connect
-from comfort.gridding import Grid, average_duplicate_locations
+from comfort.gridding import Grid, average_duplicate_locations, get_missing_value_info
 from comfort.io import load_comfort
 from comfort.physics import convert_to_potential_temperature
 from comfort.plot import (
@@ -163,8 +164,8 @@ def main():
             lat_min=LAT_MIN, lat_max=LAT_MAX, dlat=GRID_DEG,
             z_array=DEPTH_INTERVALS,
             bathymetry_grid_path=bathy_path,
-            time_min=f"{START_YEAR}-01-01",
-            time_max=f"{END_YEAR}-12-31",
+            time_min=f"{START_YEAR}-01-01 00:00:00",
+            time_max=f"{END_YEAR}-12-31 23:59:59",
             mode="Y", dtime=DTIME,
         )
         log.info("  Grid template: %d cells", len(grid.grid))
@@ -180,6 +181,12 @@ def main():
             "Done. Final grid: %d rows, %d years, %d parameters",
             len(df_wide), n_years, len(param_cols),
         )
+
+        # Save the gridded table (loadable in the CSV tab of the explorer)
+        sp = _save_path(output_dir, "gridded_table.csv")
+        if sp:
+            df_wide.to_csv(sp, index=False)
+            log.info("Saved gridded table to %s", sp)
 
         # ------------------------------------------------------------------ #
         # Step 8: Diagnostic plots                                           #
@@ -242,11 +249,7 @@ def main():
             plt.close()
 
         # Missingness bar chart
-        n_total = len(df_wide)
-        miss = pd.DataFrame({
-            "parameter": [c.replace("P_", "") for c in param_cols],
-            "relative": [df_wide[c].isna().sum() / n_total * 100 for c in param_cols],
-        })
+        miss = get_missing_value_info(df_wide, parameters=PARAMETERS)
         plot_missing_value_info(miss, save_as=_save_path(output_dir, "missingness_bar.png"))
         plt.close()
 

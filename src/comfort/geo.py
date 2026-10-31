@@ -310,22 +310,23 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     xr = import_optional("xarray", "grid", "load_biomes")
 
     # Read NetCDF file
-    ds = xr.open_dataset(path)
+    with xr.open_dataset(path) as ds:
+        # Filter for the requested biome data
+        if biome_var not in ds.data_vars:
+            raise ValueError(
+                f"biome_var {biome_var!r} not found in {list(ds.data_vars)}. "
+                "Pass one of these explicitly."
+            )
+        da = ds[biome_var]
 
-    # Filter for the requested biome data
-    if biome_var not in ds.data_vars:
-        raise ValueError(
-            f"biome_var {biome_var!r} not found in {list(ds.data_vars)}. "
-            "Pass one of these explicitly."
-        )
-    da = ds[biome_var]
+        # Extract time dimension
+        extra_dims = [d for d in da.dims if d not in ("lat", "lon")]
+        time_dim = extra_dims[0] if extra_dims else None
 
-    # Extract time dimension
-    extra_dims = [d for d in da.dims if d not in ("lat", "lon")]
-    time_dim = extra_dims[0] if extra_dims else None
+        # Read the data into a DataFrame
+        df = da.to_dataframe(name="label").reset_index()
 
     # Formatting
-    df = da.to_dataframe(name="label").reset_index()  # to df
     df = df.rename(columns={"lat": "LATITUDE", "lon": "LONGITUDE"})  # rename to library convention
     df = df.dropna(subset=["label"])  # drop land/no-biome cells
     out_cols = ["LONGITUDE", "LATITUDE", "label"]
@@ -450,8 +451,8 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
     Intended to derive a bounding box for a cheap SQL query before an exact polygon refined region search,
     see ``region=`` on :func:`comfort.io.load_comfort`/:func:`~comfort.io.read_parameter`/:func:`~comfort.io.subset_region`.
 
-    A region whose polygon crosses the antimeridian (+-180°) is inidcted by returning a lon_min that is
-    bigger than lon_max.
+    A region that crosses the antimeridian (+-180°) must be split as one polygon per side.
+    The return value indicates antimeridian-crossing by lon_min > than lon_max.
 
     Args:
         regions: Region definition(s), same formats as water_mass_masks.
@@ -459,32 +460,33 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
     Returns:
         tuple[float, float, float, float]: ``(lon_min, lon_max, lat_min, lat_max)``.
     """
-    # Get a dict of (region_name, polygon)
+    # Get a list of (region_name, polygon)
     named_regions = _parse_regions(regions, region_name_col)
 
-    # Collect every vertex longitude/latitude per region (handles Multi* parts too)
-    per_region_lons = []
-    all_lats = []
-    for _, poly in named_regions:
-        coords = []
-        _extract_coords(poly, coords)  # get coords of the polygon
-        per_region_lons.append([c[0] for c in coords])  # store lons as a list per region
-        all_lats.extend(c[1] for c in coords)  # store all lats as a simple list
+    # Bounds (lon_min, lat_min, lon_max, lat_max) of every polygon part of every region
+    from shapely import get_parts
+    bounds = [part.bounds for _, poly in named_regions for part in get_parts(poly)]
 
-    # A vertex span > 180 degrees signals the polygon includes the antimeridian
-    includes_antimeridian = any(max(lons) - min(lons) > 180 for lons in per_region_lons)
-    if not includes_antimeridian:
-        # Take min/max longitude first per region, then across regions
-        lon_min = min(min(lons) for lons in per_region_lons)
-        lon_max = max(max(lons) for lons in per_region_lons)
-    else:
-        # Shift negative longitudes to [0,360] before taking min/max
-        shifted = [lon + 360 if lon < 0 else lon for lons in per_region_lons for lon in lons]
-        s_min, s_max = min(shifted), max(shifted)
-        lon_min = s_min if s_min <= 180 else s_min - 360  # project back to [-180, 180]
-        lon_max = s_max if s_max <= 180 else s_max - 360
+    # Longitude intervals of the parts, sorted west to east
+    intervals = sorted((b[0], b[2]) for b in bounds)
 
-    return lon_min, lon_max, min(all_lats), max(all_lats)
+    # Find longitude range (find the widest empty gap between the regions and leave it out -> the shortest range remains)
+    hi = intervals[0][1]  # eastern end of the intervals merged so far
+    lon_min, lon_max = intervals[0][0], max(h for _, h in intervals)  # plain range
+    widest = lon_min + 360 - lon_max  # gap from the easternmost end around to the westernmost start
+    for lo, h in intervals[1:]:  # walk the intervals west to east
+        # Gap between the merged intervals so far and this one (<= 0 if they overlap)
+        if lo - hi > widest:
+            widest = lo - hi  # new widest gap
+            lon_min, lon_max = lo, hi
+        hi = max(hi, h)  # extend the merged intervals
+
+    # Find latitude range (plain min/max over all parts)
+    lat_min = min(b[1] for b in bounds)
+    lat_max = max(b[3] for b in bounds)
+
+    # Return ranges
+    return lon_min, lon_max, lat_min, lat_max
 
 
 def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
@@ -529,11 +531,11 @@ def _check_lonlat(named_regions):
         lon_min, lat_min, lon_max, lat_max = poly.bounds
 
         # Check if bounds are valid
-        if lon_min < -180 or lon_max > 360 or lat_min < -90 or lat_max > 90:
+        if lon_min < -180 or lon_max > 180 or lat_min < -90 or lat_max > 90:
             raise ValueError(
                 f"Region {region_name!r} has coordinates outside lon/lat range (bounds "
-                f"{poly.bounds}); regions must be in degrees. For a GeoDataFrame with an "
-                "unknown CRS, set it first with gdf.set_crs(...)."
+                f"{poly.bounds}); regions must be in degrees, longitude in [-180, 180]. For a "
+                "GeoDataFrame with an unknown CRS, set it first with gdf.set_crs(...)."
             )
     return named_regions
 
@@ -647,8 +649,8 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
                        grid_time_col: str | None = None) -> pd.DataFrame:
     """Classify observations against a labelled grid by nearest-neighbour lookup.
 
-    Finds the closest grid point (Euclidean distance on radian-converted
-    coordinates) and copies its label.
+    Finds the closest grid point (unit-sphere k-d tree, works at any latitude
+    and across +-180°) and copies its label.
 
     If *time_col* is given, each sample is first matched to its nearest
     time step in *grid_time_col*. Then, spatial neighbours are searched
@@ -722,16 +724,12 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
 
 
 def _nearest_labels(obs_lon, obs_lat, grid_lon, grid_lat, grid_labels):
-    """Nearest-neighbour label lookup (Euclidean distance on radian-converted coordinates)."""
+    """Nearest-neighbour label lookup on the unit sphere (works at any latitude and across +-180°)."""
     from scipy.spatial import cKDTree
 
-    # Convert to radians
-    grid_coords = np.column_stack([np.radians(grid_lon.astype(float)), np.radians(grid_lat.astype(float))])
-    obs_coords = np.column_stack([np.radians(obs_lon.astype(float)), np.radians(obs_lat.astype(float))])
-
-    # Construct neighbourhood graph
-    tree = cKDTree(grid_coords)
+    # Construct neighbourhood graph on unit sphere coordinates
+    tree = cKDTree(_to_unit_sphere(grid_lon.astype(float), grid_lat.astype(float)))
 
     # Return the one nearest neighbour for each observation
-    _, idxs = tree.query(obs_coords, k=1)
+    _, idxs = tree.query(_to_unit_sphere(obs_lon.astype(float), obs_lat.astype(float)), k=1)
     return grid_labels[idxs]

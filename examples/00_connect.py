@@ -50,7 +50,7 @@ dfs = comfort.load_comfort(
     parameters=["NITRATE", "DIC"],
     quality_flags=QC_GOOD,
     lat_min=30, lat_max=70,
-    date_min="2000-01-01",
+    date_min="2000-01-01 00:00:00",
     output="dict",
 )
 for parameter, df in dfs.items():
@@ -81,11 +81,10 @@ if BATHYMETRY_PATH:
         lat_min=30, lat_max=70, dlat=5,
         bathymetry_grid_path=BATHYMETRY_PATH,
         z_array=[0, 100, 500, 1000],
-        time_min="2000-01-01", time_max="2020-12-31",
+        time_min="2000-01-01 00:00:00", time_max="2020-12-31 23:59:59",
         mode="Y", dtime=5,
     )
     print("--- Grid ---")
-    print(f"Grid ID:    {grid.grid_id}")
     print(f"Cells:      {grid.grid.shape}")
     print(f"Time steps: {len(grid.time_array)}")
 else:

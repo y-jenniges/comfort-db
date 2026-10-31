@@ -14,7 +14,7 @@ from .io import (
     subset_region,
 )
 from .qc import QC_ALL, QC_GOOD, QCFilter
-from .gridding import Grid, GridManager
+from .gridding import Grid
 from .units import UnitsConverter
 
 __all__ = [
@@ -31,6 +31,5 @@ __all__ = [
     "QC_GOOD",
     "QCFilter",
     "Grid",
-    "GridManager",
     "UnitsConverter",
 ]

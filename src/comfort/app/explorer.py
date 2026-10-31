@@ -1,9 +1,8 @@
 """Dash application for exploring COMFORT parameter data.
 
-Three modes:
+Two modes:
     - **Scatter**: browse raw observations with spatial, depth and temporal filters.
-    - **Grid**: inspect an existing wide grid table (produced by GridManager).
-    - **CSV**: inspect an existing gridded table form a CSV.
+    - **CSV**: inspect a gridded table from a CSV, e.g. saved from ``Grid.map_dataframes``.
 
 Set environment variables before launching:
     COMFORT_DB_PATH - path to the COMFORT SQLite database
@@ -42,7 +41,6 @@ try:
 except ImportError:
     load_dotenv = None
 
-from ..database.information import get_names_of_all_parameter_tables
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
@@ -65,7 +63,6 @@ def _register_callback(*args, **kwargs):
 
 # Server-side caches (single-user local app)
 _scatter_cache: dict = {"df": None, "bounds": None, "unit_note": ""}
-_grid_cache: dict = {"depths": [], "times": []}
 _csv_cache: dict = {"df": None, "depths": [], "times": []}
 
 
@@ -105,18 +102,6 @@ def _query_parameters() -> list[str]:
     conn = _get_conn()
     try:
         return list_parameters(conn)
-    finally:
-        conn.close()
-
-
-def _query_wide_tables() -> list[str]:
-    """Return names of existing wide grid tables."""
-    conn = _get_conn()
-    try:
-        return get_names_of_all_parameter_tables(
-            conn, like_pattern="wide|_%", escape_char="|",
-            include_digits=True, table_type="table",
-        )
     finally:
         conn.close()
 
@@ -174,7 +159,7 @@ _COLOUR_BY_LABELS = {
 
 
 def _build_layout(all_params: list[str]) -> dbc.Container:
-    """Construct the Dash layout with scatter and grid tabs."""
+    """Construct the Dash layout with scatter and CSV tabs."""
     return dbc.Container([
         dbc.Row(dbc.Col(
             html.H2("COMFORT Data Explorer", className="text-center my-3"),
@@ -186,7 +171,6 @@ def _build_layout(all_params: list[str]) -> dbc.Container:
             dbc.Col([
                 dbc.Tabs(id="tabs", active_tab="scatter", children=[
                     _scatter_tab(all_params),
-                    _grid_tab(),
                     _csv_tab(),
                 ]),
             ], md=5, lg=4),
@@ -320,87 +304,6 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
             # Global vs cropped checkbox
             dbc.Checkbox(
                 id="sc-global-map",
-                value=False,
-                label="Show global",
-            )
-        ]),
-    ])
-
-
-def _grid_tab() -> dbc.Tab:
-    """Build the Grid tab layout."""
-    return dbc.Tab(label="Grid", tab_id="grid", children=[
-        html.Div(className="pt-3", children=[
-
-            # Wide table selector
-            dbc.Card([
-                dbc.CardHeader("Wide table"),
-                dbc.CardBody([
-                    dbc.Select(id="grid-table", options=[]),
-                    dbc.Button(
-                        "Refresh", id="btn-refresh-grid",
-                        size="sm", color="secondary", className="mt-2",
-                    ),
-                ]),
-            ], className="mb-3"),
-
-            # Parameter column
-            dbc.Card([
-                dbc.CardHeader("Parameter column"),
-                dbc.CardBody(dbc.Select(id="grid-param", options=[])),
-            ], className="mb-3"),
-
-            # Depth range slider, a widened range averages on the map
-            dbc.Card([
-                dbc.CardHeader("Depth range (m)"),
-                dbc.CardBody([
-                    dcc.RangeSlider(
-                        id="grid-depth-slider",
-                        min=0, max=1, value=[0, 1], step=None,
-                        marks=None,
-                        tooltip={"placement": "bottom", "always_visible": False},
-                    ),
-                    html.Div(
-                        id="grid-depth-display",
-                        className="text-center text-muted mt-1"
-                    )
-                ])
-            ], className="mb-3"),
-
-            # Time range slider (discrete steps, index-based)
-            dbc.Card([
-                dbc.CardHeader("Time range"),
-                dbc.CardBody([
-                    dcc.RangeSlider(
-                        id="grid-time-slider",
-                        min=0, max=1, value=[0, 1], step=None,
-                        marks=None,
-                        tooltip={"placement": "bottom", "always_visible": False},
-                    ),
-                    html.Div(
-                        id="grid-time-display",
-                        className="text-center text-muted mt-1"
-                    )
-                ])
-            ], className="mb-3"),
-
-            # Plot type
-            dbc.Card([
-                dbc.CardHeader("Plot type"),
-                dbc.CardBody(dbc.RadioItems(
-                    id="grid-plot-type",
-                    options=[
-                        {"label": "Map (lat/lon)", "value": "map"},
-                        {"label": "Histogram", "value": "hist"},
-                        {"label": "Missing values", "value": "missing"},
-                    ],
-                    value="map", inline=True,
-                )),
-            ], className="mb-3"),
-
-            # Global vs cropped checkbox
-            dbc.Checkbox(
-                id="grid-global-map",
                 value=False,
                 label="Show global",
             )
@@ -793,223 +696,11 @@ def _scatter_figure(df, param, plot_type, bounds, show_global=False, colour_by="
     return fig
 
 
-# --- Grid callbacks ----------------------------------------------------
-
-
-# Refresh grid table dropdown
-@_register_callback(
-    Output("grid-table", "options"),
-    Output("grid-table", "value"),
-    Input("tabs", "active_tab"),
-    Input("btn-refresh-grid", "n_clicks"),
-)
-def _refresh_wide_tables(_tab, _n):
-    """Populate the wide table dropdown with available grid tables."""
-    tables = _query_wide_tables()
-    options = [{"label": t, "value": t} for t in tables]
-    return options, None
-
-
-# Configure grid sliders when a wide table is selected
-@_register_callback(
-    Output("grid-param", "options"),
-    Output("grid-param", "value"),
-    Output("grid-depth-slider", "min"),
-    Output("grid-depth-slider", "max"),
-    Output("grid-depth-slider", "value"),
-    Output("grid-depth-slider", "marks"),
-    Output("grid-depth-slider", "step"),
-    Output("grid-depth-slider", "disabled"),
-    Output("grid-time-slider", "min"),
-    Output("grid-time-slider", "max"),
-    Output("grid-time-slider", "value"),
-    Output("grid-time-slider", "marks"),
-    Output("grid-time-slider", "step"),
-    Output("grid-time-slider", "disabled"),
-    Input("grid-table", "value"),
-)
-def _populate_grid_controls(table_name):
-    """Read the wide table structure and configure depth and time range sliders."""
-    if not table_name:
-        return (
-            [], None,
-            0, 1, [0, 1], {0: "-"}, None, True,
-            0, 1, [0, 1], {0: "-"}, None, True,
-        )
-
-    conn = _get_conn()
-    try:
-        # Read column names and distinct depth/time values
-        cur = conn.execute(f"PRAGMA table_info({table_name})")
-        all_cols = [row[1] for row in cur.fetchall()]
-
-        depths = [row[0] for row in conn.execute(
-            f"SELECT DISTINCT LEV_M FROM {table_name} ORDER BY LEV_M"
-        ).fetchall() if row[0] is not None]
-
-        times = [row[0] for row in conn.execute(
-            f"SELECT DISTINCT DATEANDTIME FROM {table_name} "
-            f"ORDER BY DATEANDTIME"
-        ).fetchall() if row[0] is not None]
-    finally:
-        conn.close()
-
-    # Cache for the render callback
-    _grid_cache["depths"] = [float(d) for d in depths]
-    _grid_cache["times"] = [str(t) for t in times]
-
-    # Identify parameter columns
-    meta_cols = {"idx", "LATITUDE", "LONGITUDE", "LEV_M",
-                 "DATEANDTIME", "water"}
-    param_cols = [c for c in all_cols if c not in meta_cols]
-    p_opts = [{"label": c, "value": c} for c in param_cols]
-
-    # Depth range slider: Tick at every level, label only first and last
-    if len(depths) > 1:
-        d_marks = _make_slider_marks(
-            [float(d) for d in depths],
-            f"{float(depths[0]):.0f}m", f"{float(depths[-1]):.0f}m",
-        )
-        d_min, d_max = float(depths[0]), float(depths[-1])
-        d_val = [d_min, d_min]
-        d_step, d_disabled = None, False
-    elif len(depths) == 1:
-        d_marks = _make_slider_marks(
-            [float(depths[0])],
-            f"{float(depths[0]):.0f}m", f"{float(depths[0]):.0f}m",
-        )
-        d_min = d_max = float(depths[0])
-        d_val = [d_min, d_min]
-        d_step, d_disabled = None, True
-    else:
-        d_marks, d_min, d_max = {0: "-"}, 0, 1
-        d_val = [0, 1]
-        d_step, d_disabled = None, True
-
-    # Time range slider: Index-based, snap to marks only
-    if len(times) > 1:
-        t_marks = _make_slider_marks(
-            list(range(len(times))),
-            str(times[0])[:10], str(times[-1])[:10],
-        )
-        t_min, t_max = 0, len(times) - 1
-        t_val = [0, 0]
-        t_step, t_disabled = None, False
-    elif len(times) == 1:
-        t_marks = {0: str(times[0])[:10]}
-        t_min = t_max = 0
-        t_val = [0, 0]
-        t_step, t_disabled = None, True
-    else:
-        t_marks, t_min, t_max = {0: "-"}, 0, 1
-        t_val = [0, 1]
-        t_step, t_disabled = None, True
-
-    return (
-        p_opts, param_cols[0] if param_cols else None,
-        d_min, d_max, d_val, d_marks, d_step, d_disabled,
-        t_min, t_max, t_val, t_marks, t_step, t_disabled,
-    )
-
-
-# Render grid chart
-@_register_callback(
-    Output("chart", "figure", allow_duplicate=True),
-    Output("status", "children", allow_duplicate=True),
-    Output("alert", "children", allow_duplicate=True),
-    Output("alert", "is_open", allow_duplicate=True),
-    Input("grid-param", "value"),
-    Input("grid-depth-slider", "value"),
-    Input("grid-time-slider", "value"),
-    Input("grid-plot-type", "value"),
-    Input("grid-global-map", "value"),
-    State("grid-table", "value"),
-    prevent_initial_call=True,
-)
-def _render_grid(value_col, depth_range, time_idx_range, plot_type, show_global, table_name):
-    """Query a depth/time range from the wide table and render."""
-    if not table_name or not value_col:
-        raise PreventUpdate
-
-    depths = _grid_cache.get("depths", [])
-    times = _grid_cache.get("times", [])
-
-    # Resolve time slider index range to actual time values
-    time_range = None
-    if times and time_idx_range is not None:
-        lo, hi = int(time_idx_range[0]), int(time_idx_range[1])
-        time_range = (times[lo], times[hi])
-
-    # Query only the selected depth/time range
-    try:
-        conn = _get_conn()
-        conditions = []
-        params = []
-        if depth_range is not None and depths:
-            conditions.append("LEV_M >= ? AND LEV_M <= ?")
-            params.extend([float(depth_range[0]), float(depth_range[1])])
-        if time_range is not None:
-            conditions.append("DATEANDTIME >= ? AND DATEANDTIME <= ?")
-            params.extend([time_range[0], time_range[1]])
-
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        df = pd.read_sql_query(
-            f"SELECT * FROM {table_name} {where}", conn, params=params,
-        )
-        conn.close()
-    except Exception as e:
-        logger.exception("Grid query failed")
-        return no_update, no_update, str(e), True
-
-    if df.empty:
-        return no_update, "0 rows", "No data for this selection.", True
-
-    # Build status text
-    n_total = len(df)
-    n_valid = df[value_col].notna().sum()
-    depth_label = (
-        _format_range_label(depth_range[0], depth_range[1], "{:.0f}") + " m"
-        if depth_range is not None else "all"
-    )
-    time_label = (
-        _format_range_label(str(time_range[0])[:10], str(time_range[1])[:10])
-        if time_range is not None else "all"
-    )
-    status = (f"{n_valid:,} / {n_total:,} cells - "
-              f"{value_col}  |  depth: {depth_label}  |  time: {time_label}")
-
-    label = f"depth {depth_label}" + (f", time {time_label}" if time_range is not None else "")
-    fig = _grid_figure(df, value_col, label, plot_type, show_global)
-    return fig, status, "", False
-
-
-@_register_callback(
-    Output("grid-depth-display", "children"),
-    Input("grid-depth-slider", "value"),
-)
-def _show_grid_depth(val):
-    if not val:
-        return ""
-    return f"Depth: {_format_range_label(val[0], val[1], '{:.0f}')}m"
-
-
-@_register_callback(
-    Output("grid-time-display", "children"),
-    Input("grid-time-slider", "value"),
-)
-def _show_grid_time(idx_range):
-    times = _grid_cache.get("times", [])
-    if not times or not idx_range:
-        return ""
-    try:
-        lo, hi = int(idx_range[0]), int(idx_range[1])
-        return f"Datetime: {_format_range_label(str(times[lo]), str(times[hi]))}"
-    except Exception:
-        return ""
+# --- Gridded figure ----------------------------------------------------
 
 
 def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
-    """Build a Plotly figure for the grid tab."""
+    """Build a Plotly figure for a gridded table (CSV tab)."""
     if plot_type == "map":
         # Show only cells with data, aggregated to one value per lat/lon (mean)
         valid = df[df[value_col].notna()]
@@ -1242,7 +933,6 @@ def _show_csv_depth(val):
     Input("csv-time-slider", "value"),
 )
 def _show_csv_time(idx_range):
-    # Use csv cache, not grid cache
     times = _csv_cache.get("times", [])
     if not times or not idx_range:
         return ""
