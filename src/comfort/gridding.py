@@ -47,6 +47,11 @@ def _inclusive_last_edge(edges: np.ndarray) -> np.ndarray:
     return edges
 
 
+def _cut_cells(values: pd.Series, edges: np.ndarray, labels: np.ndarray) -> pd.Series:
+    """Bin *values* into left-closed cells ``[a, b)`` between *edges*, the maximum edge included and label them."""
+    return pd.cut(values, bins=_inclusive_last_edge(edges), right=False, labels=labels)
+
+
 class Grid:
     """A grid based on a bathymetry file, with or without a time axis.
     Lat/lon are cell-centred, time and depth are node-centred.
@@ -283,18 +288,18 @@ class Grid:
         """Bin LONGITUDE, LATITUDE and LEV_M columns in df to grid cell centres."""
         # Map longitude values into grid cells (labels = cell centres, maximum included)
         lon_edges, lon_centres = _axis_cells(self.lon_min, self.lon_max, self.dlon)
-        df["LONGITUDE"] = pd.cut(df["LONGITUDE"], bins=_inclusive_last_edge(lon_edges), right=False, labels=lon_centres)
+        df["LONGITUDE"] = _cut_cells(df["LONGITUDE"], lon_edges, lon_centres)
 
         # Map latitude values
         lat_edges, lat_centres = _axis_cells(self.lat_min, self.lat_max, self.dlat)
-        df["LATITUDE"] = pd.cut(df["LATITUDE"], bins=_inclusive_last_edge(lat_edges), right=False, labels=lat_centres)
+        df["LATITUDE"] = _cut_cells(df["LATITUDE"], lat_edges, lat_centres)
 
         # Map depth values (labels = the node at the top of each depth bin, maximum included)
         if self.z_array is not None:
             z_edges = self.z_array.astype(float)
         else:
             z_edges = _axis_cells(self.z_min, self.z_max, self.dz)[0]
-        df["LEV_M"] = pd.cut(df["LEV_M"], bins=_inclusive_last_edge(z_edges), right=False, labels=z_edges[:-1])
+        df["LEV_M"] = _cut_cells(df["LEV_M"], z_edges, z_edges[:-1])
 
         return df
 

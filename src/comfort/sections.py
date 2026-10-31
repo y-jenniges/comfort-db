@@ -9,6 +9,7 @@ __all__ = [
 import pandas as pd
 from numpy.typing import ArrayLike
 
+from .gridding import _cut_cells
 from .util.columns import find_col
 
 
@@ -28,14 +29,16 @@ def bin_section(df: pd.DataFrame,
         depth_col (str): Column with depth [m].
         along_col (str): Column with along-track position, e.g. the output
             of :func:`~comfort.geo.along_track_distance`.
-        along_bins (int or array-like): Number of equal-width bins, or
-            explicit bin edges, along *along_col*.
+        along_bins (int or array-like): Number of equal-width bins or
+            explicit bin edges, along *along_col*. Bins are left-closed,
+            ``[a, b)``, with the maximum edge included (as in gridding).
         depth_bins (int or array-like): Same as *along_bins*, for *depth_col*.
+            Unlike :class:`~comfort.gridding.Grid`, the bin is labelled by its centre here (not by top node).
         agg (str): Aggregation applied to *value_col* within each cell.
     Returns:
         pandas.DataFrame: One row per (along, depth) cell with columns
             [*along_col*, *depth_col*, *value_col*], holding the bin centres
-            and aggregated value. Cells with no observations get NaN.
+            (also for depth, see *depth_bins*) and aggregated value. Cells with no observations get NaN.
     """
     # Resolve column names (insensitive to casing)
     value_col = find_col(df, value_col)
@@ -47,9 +50,9 @@ def bin_section(df: pd.DataFrame,
     if plot_df.empty:
         return pd.DataFrame(columns=[along_col, depth_col, value_col])
 
-    # Binning
-    along_bin = pd.cut(plot_df[along_col], bins=along_bins)
-    depth_bin = pd.cut(plot_df[depth_col], bins=depth_bins)
+    # Binning (left-closed like the gridding), labelled by bin centre
+    along_bin = _cut_to_centres(plot_df[along_col], along_bins)
+    depth_bin = _cut_to_centres(plot_df[depth_col], depth_bins)
     binned = (
         plot_df.assign(_along_bin=along_bin, _depth_bin=depth_bin)
         .groupby(["_along_bin", "_depth_bin"], observed=False)[value_col]
@@ -57,10 +60,17 @@ def bin_section(df: pd.DataFrame,
         .reset_index()
     )
 
-    # Over-write old along and depth columns with the binned ones
-    binned[along_col] = binned["_along_bin"].apply(lambda iv: iv.mid).astype(float)
-    binned[depth_col] = binned["_depth_bin"].apply(lambda iv: iv.mid).astype(float)
+    # Over-write old along and depth columns with the bin centres
+    binned[along_col] = binned["_along_bin"].astype(float)
+    binned[depth_col] = binned["_depth_bin"].astype(float)
     return binned[[along_col, depth_col, value_col]]
+
+
+def _cut_to_centres(values: pd.Series, bins: int | ArrayLike) -> pd.Series:
+    """Bin *values* into left-closed bins ``[a, b)`` and label each bin by its centre."""
+    _, edges = pd.cut(values, bins=bins, right=False, retbins=True)  # get bin edges
+    centres = (edges[:-1] + edges[1:]) / 2  # define centres
+    return _cut_cells(values, edges, centres)  # map the values
 
 
 def section_difference(section_a: pd.DataFrame,
