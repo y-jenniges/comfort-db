@@ -1,4 +1,4 @@
-"""Database communication, querying and schema management for COMFORT."""
+"""Database access, querying and schema management for COMFORT."""
 from __future__ import annotations
 
 from .information import (

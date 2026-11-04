@@ -193,7 +193,7 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     # Suspect rows: Oxygen equals the salinity value
     mask = (df[oxy] - df[sal]).abs() <= tol
     if mask.any():
-        # Print how common the issue is in this DataFrame
+        # Log how common the issue is in this DataFrame
         logger.warning(
             "flag_salinity_like_oxygen: %d of %d rows (%.2f%%) look like mislabelled salinity",
             int(mask.sum()), len(df), 100 * mask.mean(),

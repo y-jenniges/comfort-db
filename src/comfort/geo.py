@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Mean Earth radius for haversine distance calculations
+# Mean Earth radius, converts arc lengths on the unit sphere to distances
 _EARTH_RADIUS_KM = 6371.0
 
 

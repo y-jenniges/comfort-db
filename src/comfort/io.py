@@ -224,13 +224,15 @@ def describe_variables(conn: sqlite3.Connection,
         conn (sqlite3.Connection): Connection to the database.
         parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
             ``None`` describes all available parameters.
-        quality_flags (list[list[str, str]]): Optional QC filters applied
+        quality_flags (QualityFlags): Optional QC filters applied
             when counting samples and computing ranges.
     Returns:
         pandas.DataFrame: One row per parameter with columns
             ``[parameter, n_samples, n_stations, n_profiles, n_instruments,
             depth_min_m, depth_max_m, val_min, val_max,
             units, instruments, platforms]``.
+    Raises:
+        ValueError: If a requested parameter has no table in the database.
     """
     # Get a list of all parameters
     all_params = list_parameters(conn)
@@ -553,6 +555,10 @@ def load_comfort(
         target_depths=None``), each parameter's coordinates are prefixed
         with its name (e.g. ``NITRATE_depth``, ``NITRATE_latitude``) since
         different parameters have independent observation dimensions.
+    Raises:
+        ValueError: If a parameter is unknown, an option or date string is invalid or a
+            conversion fails with ``on_missing='raise'`` or ``density_fallback='raise'``.
+        ImportError: If ``output="xarray"`` and xarray is not installed (extra ``[grid]``).
     """
     # Fail early on unknown options
     check_choice(output, LoadOutput, "output")
