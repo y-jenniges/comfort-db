@@ -455,6 +455,17 @@ class TestPlotSpatialDistribution:
         assert ax is not None
         plt.close()
 
+    # conn + parameter reads the coordinates from the station table, not from P_<parameter>
+    def test_from_database(self, demo_conn):
+        ax = plot_spatial_distribution(conn=demo_conn, parameter="temperature")
+        assert ax is not None
+        plt.close()
+
+    # Passing neither df nor conn + parameter raises an error
+    def test_without_data_raises(self):
+        with pytest.raises(ValueError):
+            plot_spatial_distribution()
+
 
 @pytest.mark.skipif(not _has_cartopy, reason="cartopy not installed ([geo] extra)")
 class TestPlotLatLonRange:

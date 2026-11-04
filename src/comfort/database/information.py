@@ -82,7 +82,7 @@ def does_table_exist(conn: sqlite3.Connection, table_name: str, table_type: str 
     return bool(result)
 
 
-def get_min_max_dates(conn: sqlite3.Connection, table_name: str = "e_combined",
+def get_min_max_dates(conn: sqlite3.Connection, table_name: str = "station",
                       time_column: str = "DATEANDTIME") -> tuple[pd.Timestamp, pd.Timestamp]:
     """Fetch minimum and maximum dates from a table.
 

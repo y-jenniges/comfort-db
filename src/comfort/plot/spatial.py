@@ -10,11 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ..database.information import param_table_name
-from ..qc import build_where_clause
 from ..util.columns import find_col, resolve_param_columns
-from ..util.sqlite_utils import validate_identifier
-from ._helpers import _finish, _get_or_create_ax, _require_cartopy
+from ._helpers import _finish, _get_or_create_ax, _require_cartopy, _resolve_data
 
 if TYPE_CHECKING:
     import sqlite3
@@ -66,20 +63,8 @@ def plot_spatial_distribution(
     """
     ccrs, cfeature = _require_cartopy()
 
-    # Load lat/lon from the database when no DataFrame is given
-    if df is None:
-        if conn is None or parameter is None:
-            raise ValueError(
-                "Provide either a DataFrame (df) or conn + parameter"
-            )
-        table = param_table_name(parameter)
-        validate_identifier(table)
-        quality_statement = build_where_clause(quality_flags)
-        cursor = conn.cursor()
-        ex = cursor.execute(
-            f"SELECT LONGITUDE, LATITUDE FROM {table} {quality_statement};"
-        )
-        df = pd.DataFrame(ex.fetchall(), columns=np.array([x[0] for x in cursor.description]))
+    # Coordinates live in the station table, so read through the joined reader
+    df = _resolve_data(df, conn, parameter, quality_flags)
 
     # Resolve column names (insensitive to casing)
     lon_col = find_col(df, lon_col)
