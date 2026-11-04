@@ -48,7 +48,7 @@ class UnitsConverter:
         Args:
             conn (sqlite3.Connection): COMFORT database connection.
         Returns:
-            UnitsConverter
+            UnitsConverter: Converter with the default units and unit names of the database.
         Raises:
             ValueError: If required tables are not found.
         """
@@ -103,7 +103,7 @@ class UnitsConverter:
         # Nothing to convert to without a default unit
         target = self.default_unit_id(parameter)
         if target is None:
-            logger.warning("convert_dataframe: no default unit for %s", parameter)
+            logger.warning("convert_dataframe: No default unit for %s", parameter)
             return df
 
         # Get used unit IDs
@@ -268,7 +268,7 @@ class UnitsConverter:
         new_tables = {}
         for table in tables:
             validate_identifier(table)
-            logger.info("UnitsConverter: converting %s", table)
+            logger.info("UnitsConverter: Converting %s", table)
 
             # Get data as df
             ex = self.connection.cursor().execute(f"SELECT * FROM {table};")

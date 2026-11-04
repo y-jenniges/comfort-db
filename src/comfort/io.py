@@ -90,7 +90,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
     try:
         params = list_parameters(conn)
         if not params:
-            logger.warning("info: no parameter tables found")
+            logger.warning("info: No parameter tables found")
             return pd.DataFrame(columns=_INFO_COLUMNS)
 
         # Collect sample count and depth/date range per parameter
@@ -180,7 +180,8 @@ def read_parameter(conn: sqlite3.Connection, parameter: str, *,
         extra_station_cols (list[str]): Additional ``station`` columns to
             include (e.g. ``["CRUISE_ID", "ST_NUMBER_ORIGIN"]``).
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: One row per sample with columns ``P_*``, ``LONGITUDE``, ``LATITUDE``,
+            ``DATEANDTIME`` (and *extra_station_cols*).
     """
     # Bounding box of the region (ANDed with the explicit bounds in the SQL query)
     region_box = region_bbox(region, region_name_col) if region is not None else None
@@ -202,7 +203,7 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
     Args:
         conn (sqlite3.Connection): Connection to the database.
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: One row per station, ``DATEANDTIME`` cut to seconds.
     """
     df = pd.read_sql_query("SELECT * FROM STATION;", conn)
     if "DATEANDTIME" in df.columns:
@@ -251,7 +252,7 @@ def describe_variables(conn: sqlite3.Connection,
 
     # Warn if no parameter left
     if not params:
-        logger.warning("describe_variables: no parameter tables found")
+        logger.warning("describe_variables: No parameter tables found")
         return pd.DataFrame(columns=_DESCRIBE_COLUMNS)
 
     # Compute aggregate statistics per parameter
@@ -694,7 +695,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
                                          density_fallback=density_fallback)
         # Warn and skip when no rows are left
         if df.empty:
-            logger.warning("load_comfort: no %s rows left after unit conversion", param)
+            logger.warning("load_comfort: No %s rows left after unit conversion", param)
             return None
 
         # Update unit IDs

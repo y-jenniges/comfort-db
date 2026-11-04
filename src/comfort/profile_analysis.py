@@ -79,7 +79,7 @@ def _detect_value_col(df, value_col):
     known = {c.upper() for c in _KNOWN_NON_VALUE_COLS}
     candidates = [c for c in df.columns if str(c).upper() not in known]
     if len(candidates) == 1:
-        logger.debug("_detect_value_col: auto-detected %r", candidates[0])
+        logger.debug("_detect_value_col: Auto-detected %r", candidates[0])
         return candidates[0]
 
     # Value column is missing and cannot be inferred
@@ -348,7 +348,7 @@ def mixed_layer_depth(df: pd.DataFrame,
         # Average duplicate depths, drop NaNs
         depths, vals = _profile_levels(group, depth_col, col)
         if len(depths) < 2:
-            logger.debug("mixed_layer_depth: profile %s has < 2 valid levels, skipped", pid)
+            logger.debug("mixed_layer_depth: Profile %s has < 2 valid levels, skipped", pid)
             continue
 
         # Find reference value at nearest depth
@@ -429,7 +429,7 @@ def pycnocline_depth(df: pd.DataFrame,
         # Average duplicate depths, drop NaNs
         depths, rho = _profile_levels(group, depth_col, density_col)
         if len(depths) < 2:
-            logger.debug("pycnocline_depth: profile %s has < 2 valid levels, skipped", pid)
+            logger.debug("pycnocline_depth: Profile %s has < 2 valid levels, skipped", pid)
             continue
 
         # Pycnocline = depth of maximum d(density)/dz (strongest increase with depth)
@@ -532,7 +532,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
         # Average duplicate depths, drop NaNs (both interpolants need strictly increasing x)
         depths, vals = _profile_levels(group, depth_col, value_col)
         if len(depths) < 2:
-            logger.debug("interpolate_depth_levels: profile %s has < 2 valid levels, skipped", pid)
+            logger.debug("interpolate_depth_levels: Profile %s has < 2 valid levels, skipped", pid)
             continue
 
         # Only work with depths in the given range

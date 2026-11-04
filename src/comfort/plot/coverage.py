@@ -159,7 +159,7 @@ def plot_counts_bar(
 
     # Check input df
     if df_count is None or df_count.empty:
-        logger.warning("plot_counts_bar: passed dataframe is empty")
+        logger.warning("plot_counts_bar: Passed dataframe is empty")
         return None
 
     ax, standalone = _get_or_create_ax(ax)

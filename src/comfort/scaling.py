@@ -80,7 +80,7 @@ class ParamScaler:
         for col in columns:
             # Check if column is in the df
             if col not in df.columns:
-                logger.warning(f"scale_columns: column {col!r} not found in dataframe")
+                logger.warning(f"scale_columns: Column {col!r} not found in dataframe")
                 continue
 
             # Scale
@@ -183,7 +183,7 @@ class DBParamScaler:
         for table, param in tables_params.items():
             # Validate table name
             validate_identifier(table)
-            logger.info(f"DBParamScaler: scaling {table} ({param})")
+            logger.info(f"DBParamScaler: Scaling {table} ({param})")
 
             # Get min/max values
             param_min, param_max = self.get_min_max(table, self.value_column)

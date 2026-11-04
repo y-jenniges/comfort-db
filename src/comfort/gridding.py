@@ -416,7 +416,7 @@ class Grid:
             # Drop cells that are on land and have no data for any parameter
             n_before = len(df_wide)
             df_wide = _drop_land_cells(df_wide).reset_index(drop=True)
-            logger.info("map_dataframes: dropped %d empty land cells (%d -> %d rows)",
+            logger.info("map_dataframes: Dropped %d empty land cells (%d -> %d rows)",
                         n_before - len(df_wide), n_before, len(df_wide))
         return df_wide
 
@@ -695,7 +695,7 @@ def _drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
     Args:
         df_wide (pandas.DataFrame): Wide grid table with a 'water' column.
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: *df_wide* without the empty land cells.
     """
     temp = df_wide.copy()
 

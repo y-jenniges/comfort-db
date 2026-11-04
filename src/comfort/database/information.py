@@ -143,7 +143,7 @@ def get_table_as_df(conn: sqlite3.Connection, table_name: str,
         table_name (str): Name of the table to fetch.
         columns (list[str]): Columns to query. ``None`` means all.
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: The table or only the selected *columns*.
     """
     # Validate identifiers
     validate_identifier(table_name)
@@ -222,7 +222,7 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
     # Determine how to convert the raw SQL result to the requested type
     converters = {"float": float, "int": int, "datetime64": np.datetime64}
     if column_type not in converters:
-        logger.error(f"get_minmax: conversion to {column_type} is not implemented")
+        logger.error(f"get_minmax: Conversion to {column_type} is not implemented")
         return None, None
     convert = converters[column_type]
 

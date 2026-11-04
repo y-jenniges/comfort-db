@@ -67,7 +67,7 @@ def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     # Load coastline vertices
     coast_pts = _get_coast_points(resolution, coastline_geom)
     if coast_pts is None or len(coast_pts) == 0:
-        logger.error("distance_to_coast: no coastline points could be loaded")
+        logger.error("distance_to_coast: No coastline points could be loaded")
         return pd.Series(np.nan, index=df.index)
 
     # Get observed lon/lat
@@ -615,7 +615,8 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
             are returned. Uses closest available level if exact match
             is unavailable.
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: The grid cells with ``LONGITUDE``, ``LATITUDE``, ``LEV_M`` and ``label``
+            (one depth level if *depth* is given).
     """
     # Check if file exists
     path = Path(path)
@@ -632,7 +633,7 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
         closest = float(available[np.abs(available - depth).argmin()])
         if closest != depth:
             logger.info(
-                "load_jenniges_provinces: requested depth %.1f m, "
+                "load_jenniges_provinces: Requested depth %.1f m, "
                 "using closest available %.1f m", depth, closest,
             )
         df = df[df["LEV_M"] == closest].copy()

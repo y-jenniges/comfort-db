@@ -85,7 +85,7 @@ def plot_profile(
     if profiles is not None and user_df is not None:
         df = df[df[profile_col].isin(profiles)]
     if df.empty:
-        logger.warning("plot_profile: no data to plot")
+        logger.warning("plot_profile: No data to plot")
         return None
 
     ax, standalone = _get_or_create_ax(ax)
@@ -101,7 +101,7 @@ def plot_profile(
         missing = [c for c in group_cols if c not in depth_markers.columns]
         if missing:
             logger.warning(
-                "plot_profile: depth_markers missing columns %s; skipping markers", missing
+                "plot_profile: Depth_markers missing columns %s; skipping markers", missing
             )
         else:
             marker_lookup = depth_markers.set_index(group_cols)[find_col(depth_markers, depth_marker_col)]
@@ -230,7 +230,7 @@ def plot_section(
     # Drop NaNs
     plot_df = df[[value_col, depth_col, along_col]].dropna()
     if plot_df.empty:
-        logger.warning("plot_section: no valid data after dropping NaNs")
+        logger.warning("plot_section: No valid data after dropping NaNs")
         return None
 
     ax, standalone = _get_or_create_ax(ax)

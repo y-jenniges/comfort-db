@@ -121,7 +121,7 @@ def convert_temperature(t_insitu: float | np.ndarray | pd.Series,
             ``"CT"`` - Conservative temperature [°C];
             ``"pt0"`` - Potential temperature ref. 0 dbar [°C].
     Returns:
-        pandas.Series
+        pandas.Series: Temperature [°C] of the type given by *to*.
     Raises:
         ValueError: If ``to`` is not ``'CT'`` or ``'pt0'``.
     """
@@ -155,7 +155,7 @@ def compute_density(sa: float | np.ndarray | pd.Series,
             ``"sigma2"`` - [kg/m3], ref. 2000 dbar;
             ``"rho"`` - in-situ density [kg/m3].
     Returns:
-        pandas.Series
+        pandas.Series: Density [kg/m3] of the type given by *quantity*.
     Raises:
         ValueError: If ``quantity`` is unknown or pressure is missing
             for ``'rho'``.

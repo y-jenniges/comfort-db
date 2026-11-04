@@ -207,7 +207,7 @@ def plot_joint(
     # Drop rows with missing values
     valid = df[[x_col, y_col]].dropna()
     if valid.empty:
-        logger.warning("plot_joint: no valid data after dropping NaNs")
+        logger.warning("plot_joint: No valid data after dropping NaNs")
         return None
 
     # Joint plot
