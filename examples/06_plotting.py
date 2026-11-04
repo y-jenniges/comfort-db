@@ -6,7 +6,7 @@ Requires:
     COMFORT_DB_PATH - path to the COMFORT SQLite database
 
 Install extras:
-    pip install "comfort-db[plot]"
+    pip install "comfort-db[plot,scale]"
 """
 from __future__ import annotations
 
