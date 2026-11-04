@@ -30,9 +30,10 @@ class TestConversionFormulas:
         assert list(result["VAL"]) == [1_000_000.0, 2_000_000.0]
         assert list(result["UNITS_ID"]) == [19, 19]
 
-    # Molar mass lookup succeeds for a known parameter table
-    def test_get_molar_mass_known(self, formulas):
-        mass = formulas.get_molar_mass("P_NITRATE")
+    # Molar mass lookup succeeds for a known parameter table, in any casing and with or without P_
+    @pytest.mark.parametrize("spelling", ["P_NITRATE", "p_nitrate", "NITRATE", "nitrate"])
+    def test_get_molar_mass_known(self, formulas, spelling):
+        mass = formulas.get_molar_mass(spelling)
         assert abs(mass - 14.00672) < 1e-5
 
     # An unregistered parameter table raises
