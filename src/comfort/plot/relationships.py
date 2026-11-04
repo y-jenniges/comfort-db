@@ -213,7 +213,7 @@ def plot_joint(
     # Joint plot
     g = sns.jointplot(x=x_col, y=y_col, data=valid, kind=kind)
     plt.tight_layout()
-    _save_fig(save_as, dpi)
+    _save_fig(g.figure, save_as, dpi)
     return g
 
 

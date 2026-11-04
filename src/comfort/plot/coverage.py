@@ -136,7 +136,7 @@ def plot_counts_bar(
     *tick_style* to ``'year'`` or ``'month'``),
     :func:`~comfort.database.count_samples_per_parameter` and
     :func:`~comfort.database.count_negative_samples` (select the ``parameter`` and
-    ``proportion of negative samples`` columns first; *tick_style* ``None``).
+    ``percentage of negative samples`` columns first; *tick_style* ``None``).
 
     Args:
         df_count: First column is the category (year, month, parameter, ...),
@@ -236,31 +236,31 @@ def plot_duplicates(
         plt.xticks(rotation=90)
         plt.tight_layout()
         if save_as_prefix:
-            _save_fig(f"{save_as_prefix}_{parameter}_number_of_duplicates.png", dpi)
+            _save_fig(fig, f"{save_as_prefix}_{parameter}_number_of_duplicates.png", dpi)
         plt.close()
 
         sns.scatterplot(data=dups_time_loc, x="size", y="mean", size="std", hue="std")
         plt.title(f"{parameter} - time/loc duplicate statistics")
         plt.tight_layout()
         if save_as_prefix:
-            _save_fig(f"{save_as_prefix}_{parameter}_duplicates_statistics.png", dpi)
+            _save_fig(plt.gcf(), f"{save_as_prefix}_{parameter}_duplicates_statistics.png", dpi)
         plt.close()
 
         sns.boxplot(data=dups_time_loc, x="size", y="std")
         plt.title(f"{parameter} - time/loc duplicate std")
         plt.tight_layout()
         if save_as_prefix:
-            _save_fig(f"{save_as_prefix}_{parameter}_duplicates_std.png", dpi)
+            _save_fig(plt.gcf(), f"{save_as_prefix}_{parameter}_duplicates_std.png", dpi)
         plt.close()
 
     # Summary bar chart comparing both duplicate types
     width = 0.35
     x = np.arange(len(summary))
     fig, ax = plt.subplots()
-    b0 = ax.bar(x - width / 2, summary["proportion of row duplicates"], width, label="Row duplicates")
-    b1 = ax.bar(x + width / 2, summary["proportion of time loc duplicates"], width, label="Time/location duplicates")
+    b0 = ax.bar(x - width / 2, summary["percentage of row duplicates"], width, label="Row duplicates")
+    b1 = ax.bar(x + width / 2, summary["percentage of time loc duplicates"], width, label="Time/location duplicates")
     ax.set_ylabel("%")
-    ax.set_title("Proportion of duplicates per parameter")
+    ax.set_title("Percentage of duplicates per parameter")
     ax.set_xticks(x)
     ax.set_xticklabels(summary["parameter"], rotation=90)
     ax.bar_label(b0, padding=3)
@@ -268,7 +268,7 @@ def plot_duplicates(
     ax.legend()
     plt.tight_layout()
     if save_as_prefix:
-        _save_fig(f"{save_as_prefix}_duplicates_summary.png", dpi)
+        _save_fig(fig, f"{save_as_prefix}_duplicates_summary.png", dpi)
 
     return ax
 

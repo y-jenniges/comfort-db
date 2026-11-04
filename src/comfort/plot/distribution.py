@@ -178,7 +178,7 @@ def plot_monthly_histogram(
     fig.supylabel("Count")
     fig.supxlabel(value_col)
     plt.tight_layout()
-    _save_fig(save_as, dpi)
+    _save_fig(fig, save_as, dpi)
     return fig
 
 

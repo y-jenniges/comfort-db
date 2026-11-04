@@ -531,6 +531,20 @@ class TestPlotMissingValueInfoMapOverDepth:
                                                savefig_folder=str(tmp_path))
         assert list(tmp_path.iterdir())
 
+    # The figures are closed after plotting
+    def test_closes_figures(self):
+        plt.close("all")
+        plot_missing_value_info_map_over_depth(_missing_value_wide_df(), ["P_NITRATE"])
+        assert plt.get_fignums() == []
+
+    # Absolute counts use a colour scale from 0 to the largest count, not the fixed 0-100 of percent
+    def test_absolute_counts_scale(self, monkeypatch):
+        norms = []
+        original = plt.Normalize
+        monkeypatch.setattr(plt, "Normalize", lambda *a, **k: norms.append(a) or original(*a, **k))
+        plot_missing_value_info_map_over_depth(_missing_value_wide_df(), ["P_NITRATE"], relative=False)
+        assert norms == [(0, 1)]
+
 
 @pytest.mark.skipif(not _has_cartopy, reason="cartopy not installed ([geo] extra)")
 class TestPlotMissingValueInfoMapJoint:
@@ -580,3 +594,17 @@ class TestColumnCasing:
         df = pd.DataFrame({"X": [1.0], "Y": [2.0]})
         with pytest.raises(KeyError, match="Available columns"):
             plot_correlation(df, "x", "z")
+
+
+class TestSaveFigure:
+    # The figure of the passed ax is saved, not the current figure
+    def test_saves_figure_of_ax(self, tmp_path):
+        import matplotlib.image as mpimg
+        plt.close("all")
+        fig1, ax1 = plt.subplots(figsize=(2, 2))
+        plt.figure(figsize=(8, 6))  # Current figure, different size
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0], "Y": [2.0, 4.0, 7.0]})
+        plot_correlation(df, "X", "Y", ax=ax1, save_as=str(tmp_path / "a.png"), dpi=50)
+        height, width = mpimg.imread(tmp_path / "a.png").shape[:2]
+        assert width < 150 and height < 150  # 2x2 inch at 50 dpi, not 8x6
+        plt.close("all")

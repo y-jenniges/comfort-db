@@ -315,10 +315,10 @@ def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] 
 
 def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
                            quality_flags: QualityFlags | None = None) -> pd.DataFrame:
-    """Count the proportion of negative values per parameter.
+    """Count the percentage of negative values per parameter.
 
-    Plot the proportions with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``)
-    on ``df[["parameter", "proportion of negative samples"]]``.
+    Plot the percentages with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``)
+    on ``df[["parameter", "percentage of negative samples"]]``.
 
     Args:
         conn: Connection to the database.
@@ -326,7 +326,7 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
         quality_flags: Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[parameter, number of samples, number of negative samples,
-        proportion of negative samples]``, sorted by the proportion.
+        percentage of negative samples]``, sorted by the percentage.
     """
     cursor = conn.cursor()
     quality_statement = build_where_clause(quality_flags)
@@ -348,10 +348,10 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
             "number of negative samples": negative_count,
         })
 
-    # Compute proportions and sort for display
+    # Compute percentages and sort for display
     df = pd.DataFrame(rows, columns=["parameter", "number of samples", "number of negative samples"])
-    df["proportion of negative samples"] = df["number of negative samples"] / df["number of samples"]
-    return df.sort_values("proportion of negative samples")
+    df["percentage of negative samples"] = df["number of negative samples"] / df["number of samples"] * 100
+    return df.sort_values("percentage of negative samples")
 
 
 def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[str], *,
@@ -368,7 +368,7 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
     Returns:
         tuple: ``(summary, details)``. *summary* is a DataFrame with columns ``[parameter,
         number of samples, number of row duplicates, number of time loc duplicates,
-        proportion of row duplicates, proportion of time loc duplicates]`` (the proportions in
+        percentage of row duplicates, percentage of time loc duplicates]`` (the percentages in
         percent).
         *details* maps each parameter in *summary* to ``{"time_loc": ..., "rows": ...}``.
         ``time_loc`` holds the duplicated (ID, LEV_M) groups, ``rows`` the exactly duplicated
@@ -415,11 +415,11 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
         })
         details[parameter] = {"time_loc": dups_time_loc, "rows": dups_row}
 
-    # Compute duplicate proportions (an empty summary keeps the documented columns)
+    # Compute duplicate percentages (an empty summary keeps the documented columns)
     columns = ["parameter", "number of samples", "number of row duplicates", "number of time loc duplicates"]
     summary = pd.DataFrame(rows, columns=columns)
-    summary["proportion of row duplicates"] = summary["number of row duplicates"] / summary["number of samples"] * 100
-    summary["proportion of time loc duplicates"] = (
+    summary["percentage of row duplicates"] = summary["number of row duplicates"] / summary["number of samples"] * 100
+    summary["percentage of time loc duplicates"] = (
         summary["number of time loc duplicates"] / summary["number of samples"] * 100
     )
     return summary, details

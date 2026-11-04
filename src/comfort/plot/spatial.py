@@ -231,10 +231,17 @@ def plot_missing_value_info_map_over_depth(
 
     # Colour settings
     cmap = plt.colormaps["viridis"]
-    norm = plt.Normalize(0, 100)
 
     parameters = resolve_param_columns(df_wide, parameters)
     for param in parameters:
+        # Shared colour norm for all times of a parameter
+        if relative:
+            # Percent
+            norm = plt.Normalize(0, 100)
+        else:
+            # 0 to the largest count of depth levels with data
+            max_count = df_wide.groupby(["DATEANDTIME", "LATITUDE", "LONGITUDE"])[param].count().max()
+            norm = plt.Normalize(0, max(max_count, 1))
         for t in times:
             dft = df_wide[df_wide["DATEANDTIME"] == t]
 
@@ -264,6 +271,7 @@ def plot_missing_value_info_map_over_depth(
             if savefig_folder:
                 os.makedirs(savefig_folder, exist_ok=True)
                 plt.savefig(f"{savefig_folder}/{param}_time{t.year}.png", dpi=dpi)
+            plt.close()
 
 
 def plot_missing_value_info_map_joint(
