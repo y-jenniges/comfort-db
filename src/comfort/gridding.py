@@ -80,7 +80,7 @@ class Grid:
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
             z_array (array-like): Explicit depth nodes [m]. Mutually exclusive with dz.
             time_min, time_max (str): Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
-            mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
+            mode: Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
             dtime (int): Number of time units per cell.
                 time_min, time_max, mode and dtime must be given together, or all be
                 None for a grid without time axis.
@@ -331,8 +331,8 @@ class Grid:
         Works on data already in memory (e.g. after ``load_comfort``).
 
         Args:
-            df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M.
-            value_col (str): Column to aggregate. Required if *agg* is given;
+            df: Must contain LATITUDE, LONGITUDE, LEV_M.
+            value_col: Column to aggregate. Required if *agg* is given;
                 omit both to get back every row of *df* with its coordinates
                 snapped to the grid (e.g. to run a custom aggregation like
                 ``seasonal_mean`` before further binning).
@@ -373,7 +373,7 @@ class Grid:
             df_wide = grid.map_dataframes(raw)
 
         Args:
-            dfs (dict[str, pandas.DataFrame]): Parameter name -> DataFrame,
+            dfs: Parameter name -> DataFrame,
                 Each DataFrame must contain LATITUDE, LONGITUDE, LEV_M
                 (+ DATEANDTIME for a grid with time axis) and a value column named
                 after its parameter key. Insensitive to casing and ``P_`` prefix.
@@ -386,7 +386,7 @@ class Grid:
             bin_fn (callable): ``(df, value_col) -> DataFrame`` used instead of
                 the default ``self.bin(df, value_col, agg=agg)``, for any
                 per-parameter aggregation not expressible via *agg*.
-            dropping_land_cells (bool): Drop grid cells that are on land and
+            dropping_land_cells: Drop grid cells that are on land and
                 never carry a value for any parameter. Default True.
         Returns:
             pandas.DataFrame: This grid's template merged with one ``P_<name>``
@@ -505,8 +505,8 @@ class Grid:
         Rows are then grouped by cell + time bin together.
 
         Args:
-            df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M, DATEANDTIME and *value_col*.
-            value_col (str): Column to aggregate.
+            df: Must contain LATITUDE, LONGITUDE, LEV_M, DATEANDTIME and *value_col*.
+            value_col: Column to aggregate.
             agg: Aggregation passed to ``DataFrame.agg``. A list gives one column per statistic: The first keeps
             the name of *value_col*, the others are named ``<value_col>_<statistic>``.
         Returns:
@@ -539,8 +539,8 @@ class Grid:
         *value_col* per cell. Usable for data already in memory (e.g. after ``load_comfort``).
 
         Args:
-            df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M, *value_col* (+ DATEANDTIME for a grid with time axis).
-            value_col (str): Column to aggregate.
+            df: Must contain LATITUDE, LONGITUDE, LEV_M, *value_col* (+ DATEANDTIME for a grid with time axis).
+            value_col: Column to aggregate.
             agg: Aggregation passed to ``DataFrame.agg``. The special
                 value ``"seasonal_mean"`` (grid with time axis only) runs
                 monthly-first annual averaging before binning onto this
@@ -602,11 +602,11 @@ def average_duplicate_locations(
     Locations are matched by exact equality of the *loc_cols* values (no tolerance, time is matched to the second).
 
     Args:
-        raw (dict[str, pandas.DataFrame]): Per-parameter DataFrames.
-        other_params (list[str]): Parameters to average over identical locations
+        raw: Per-parameter DataFrames.
+        other_params: Parameters to average over identical locations
             (simple mean). Defaults to all keys in *raw* other than *temperature_col*.
-        temperature_col (str): Column for temperature. Default ``"TEMPERATURE"``.
-        loc_cols (list[str]): Columns identifying a unique location. Default
+        temperature_col: Column for temperature. Default ``"TEMPERATURE"``.
+        loc_cols: Columns identifying a unique location. Default
             ``["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]``.
     Returns:
         dict[str, pandas.DataFrame]: One DataFrame per parameter (plus
@@ -648,10 +648,10 @@ def seasonal_mean(
     """Annual mean with monthly averaging to correct seasonal sampling bias.
 
     Args:
-        df (pandas.DataFrame): with value, date and spatial/group columns.
-        value_col (str): Column containing measured values.
-        date_col (str): Column containing datetime values.
-        group_cols (list<str>): Columns that identify spatial cells. Defaults to
+        df: with value, date and spatial/group columns.
+        value_col: Column containing measured values.
+        date_col: Column containing datetime values.
+        group_cols: Columns that identify spatial cells. Defaults to
             ``["LATITUDE", "LONGITUDE", "LEV_M"]``.
 
     Returns:
@@ -693,7 +693,7 @@ def _drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
     is kept in all time steps.
 
     Args:
-        df_wide (pandas.DataFrame): Wide grid table with a 'water' column.
+        df_wide: Wide grid table with a 'water' column.
     Returns:
         pandas.DataFrame: *df_wide* without the empty land cells.
     """
@@ -721,8 +721,8 @@ def get_missing_value_info(df_wide: pd.DataFrame, parameters: list[str] | None =
     :meth:`Grid.map_dataframes`).
 
     Args:
-        df_wide (pandas.DataFrame): Wide grid table with ``P_*`` columns.
-        parameters (list[str]): Parameters to report, insensitive to casing and ``P_`` prefix.
+        df_wide: Wide grid table with ``P_*`` columns.
+        parameters: Parameters to report, insensitive to casing and ``P_`` prefix.
             Default ``None`` reports every ``P_*`` column.
     Returns:
         pandas.DataFrame: Columns ``'parameter'`` (without ``P_``),

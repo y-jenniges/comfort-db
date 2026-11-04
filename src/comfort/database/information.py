@@ -38,7 +38,7 @@ def param_label(parameter: str) -> str:
     Use it for dictionary keys, column names and plot labels.
 
     Args:
-        parameter (str): Parameter name or ``P_*`` table name, any casing.
+        parameter: Parameter name or ``P_*`` table name, any casing.
     Returns:
         str: Canonical parameter name.
     """
@@ -53,7 +53,7 @@ def param_table_name(parameter: str) -> str:
     See :func:`param_label` for the inverse.
 
     Args:
-        parameter (str): Parameter name or ``P_*`` table name, any casing.
+        parameter: Parameter name or ``P_*`` table name, any casing.
     Returns:
         str: Table name.
     """
@@ -64,9 +64,9 @@ def does_table_exist(conn: sqlite3.Connection, table_name: str, table_type: str 
     """Check if a table/view exists (case-sensitive).
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        table_name (str): Table name to check.
-        table_type (str): 'table' or 'view'. Default is 'table'.
+        conn: Connection to the database.
+        table_name: Table name to check.
+        table_type: 'table' or 'view'. Default is 'table'.
     Returns:
         bool: True if the table/view exists.
     """
@@ -87,9 +87,9 @@ def get_min_max_dates(conn: sqlite3.Connection, table_name: str = "station",
     """Fetch minimum and maximum dates from a table.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        table_name (str): Table or view to query.
-        time_column (str): Column containing date/time values.
+        conn: Connection to the database.
+        table_name: Table or view to query.
+        time_column: Column containing date/time values.
     Returns:
         tuple[pandas.Timestamp, pandas.Timestamp]: (min_date, max_date).
     """
@@ -111,10 +111,10 @@ def get_num_samples(conn: sqlite3.Connection, table_name: str, table_type: str =
     """Get the number of samples in the given table.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        table_name (str): Table or view name.
-        table_type (str): 'table' or 'view'. Default is 'table'.
-        quality_flags (QualityFlags): Optional quality flag filters.
+        conn: Connection to the database.
+        table_name: Table or view name.
+        table_type: 'table' or 'view'. Default is 'table'.
+        quality_flags: Optional quality flag filters.
     Returns:
         int: Number of samples, or 0 if the table does not exist.
     """
@@ -139,9 +139,9 @@ def get_table_as_df(conn: sqlite3.Connection, table_name: str,
     """Fetch a table from the database as a DataFrame.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        table_name (str): Name of the table to fetch.
-        columns (list[str]): Columns to query. ``None`` means all.
+        conn: Connection to the database.
+        table_name: Name of the table to fetch.
+        columns: Columns to query. ``None`` means all.
     Returns:
         pandas.DataFrame: The table or only the selected *columns*.
     """
@@ -167,11 +167,11 @@ def get_names_of_all_parameter_tables(conn: sqlite3.Connection, like_pattern: st
     """Get all table/view names matching the given LIKE pattern.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        like_pattern (str): SQLite LIKE pattern.
-        escape_char (str): Escape character for the LIKE pattern.
-        include_digits (bool): Include tables with numeric suffixes.
-        table_type (str): ``'table'`` or ``'view'``. Default is 'table'.
+        conn: Connection to the database.
+        like_pattern: SQLite LIKE pattern.
+        escape_char: Escape character for the LIKE pattern.
+        include_digits: Include tables with numeric suffixes.
+        table_type: ``'table'`` or ``'view'``. Default is 'table'.
     Returns:
         list[str]: Matching table/view names.
     """
@@ -202,10 +202,10 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
     """Get the global min and max of a column across all parameter tables.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        column (str): Column name to aggregate.
-        column_type (str): ``'float'``, ``'int'`` or ``'datetime64'``.
-        parameters (list[str]): Tables to query. ``None`` means all.
+        conn: Connection to the database.
+        column: Column name to aggregate.
+        column_type: ``'float'``, ``'int'`` or ``'datetime64'``.
+        parameters: Tables to query. ``None`` means all.
     Returns:
         tuple: (minimum, maximum), or (None, None) on error.
     """
@@ -250,11 +250,11 @@ def count_samples_over_time(conn: sqlite3.Connection, parameter: str, *, time_mo
     Plot the result with :func:`comfort.plot.plot_counts_bar` (``tick_style`` set to *time_mode*).
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-        time_mode (str): ``'year'`` (every year between first and last, empty years
+        conn: Connection to the database.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+        time_mode: ``'year'`` (every year between first and last, empty years
             counted as 0) or ``'month'`` (1 to 12).
-        quality_flags (QualityFlags): Optional quality flag filters.
+        quality_flags: Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[YEAR|MONTH, COUNT]``.
     """
@@ -293,9 +293,9 @@ def count_samples_per_parameter(conn: sqlite3.Connection, parameters: list[str] 
     Plot the result with :func:`comfort.plot.plot_counts_bar` (``tick_style=None``).
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix. ``None`` means all.
-        quality_flags (QualityFlags): Optional quality flag filters.
+        conn: Connection to the database.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix. ``None`` means all.
+        quality_flags: Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[parameter, count]``.
     """
@@ -321,9 +321,9 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
     on ``df[["parameter", "proportion of negative samples"]]``.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
-        quality_flags (QualityFlags): Optional quality flag filters.
+        conn: Connection to the database.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
+        quality_flags: Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[parameter, number of samples, number of negative samples,
         proportion of negative samples]``, sorted by the proportion.
@@ -362,9 +362,9 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
     Plot the result with :func:`comfort.plot.plot_duplicates`.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
-        quality_flags (QualityFlags): Optional quality flag filters.
+        conn: Connection to the database.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
+        quality_flags: Optional quality flag filters.
     Returns:
         tuple: ``(summary, details)``. *summary* is a DataFrame with columns ``[parameter,
         number of samples, number of row duplicates, number of time loc duplicates,

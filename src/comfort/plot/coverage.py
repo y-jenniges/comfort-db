@@ -35,7 +35,7 @@ def plot_annual_coverage(
     :func:`plot_counts_bar`.
 
     Args:
-        dfs (dict): Dictionary mapping parameter names to DataFrames, each containing
+        dfs: Dictionary mapping parameter names to DataFrames, each containing
             a datetime column.
         date_col: Column name containing datetime values.
         normalise: If ``True`` show counts relative to the per-parameter

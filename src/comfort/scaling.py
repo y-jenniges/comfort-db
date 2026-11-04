@@ -51,7 +51,7 @@ class ParamScaler:
         """Scale the VAL column. df must have a single PARAM_NAME value.
 
         Args:
-            df (pandas.DataFrame): Contains ``VAL`` and ``PARAM_NAME`` columns.
+            df: Contains ``VAL`` and ``PARAM_NAME`` columns.
         Returns:
             pandas.DataFrame: Copy of *df* with the added column ``VAL_SCALED``.
         """
@@ -69,8 +69,8 @@ class ParamScaler:
         """Scale the given columns (one parameter per column).
 
         Args:
-            columns (list[str]): Columns to scale.
-            df (pandas.DataFrame): Source data.
+            columns: Columns to scale.
+            df: Source data.
         Returns:
             pandas.DataFrame: Copy of *df* with one added ``<column>_SCALED`` column per scaled column.
         """
@@ -95,8 +95,8 @@ class ParamScaler:
         """Scale a single value using the already-fitted scaler for parameter.
 
         Args:
-            parameter (str): Parameter name.
-            value (float): Value to scale.
+            parameter: Parameter name.
+            value: Value to scale.
         Returns:
             float: The scaled value.
         Raises:
@@ -113,11 +113,11 @@ class DBParamScaler:
     """Scale parameters to [lower, upper] by operating directly on the database via SQL.
 
     Args:
-        connection (sqlite3.Connection): Must hold one table per parameter.
-        lower (float): Minimum after scaling. Default is 0.
-        upper (float): Maximum after scaling. Default is 1.
-        value_column (str): Value column name. Default is ``'VAL'``.
-        depth_column (str): Depth column name. Default is ``'LEV_M'``.
+        connection: Must hold one table per parameter.
+        lower: Minimum after scaling. Default is 0.
+        upper: Maximum after scaling. Default is 1.
+        value_column: Value column name. Default is ``'VAL'``.
+        depth_column: Depth column name. Default is ``'LEV_M'``.
     """
 
     def __init__(self, connection: sqlite3.Connection, lower: float = 0, upper: float = 1,
@@ -163,7 +163,7 @@ class DBParamScaler:
         """Create a ``scaled_<table>`` table with VAL and depth scaled to [lower, upper].
 
         Args:
-            tables_params (dict): Maps table names to parameter names.
+            tables_params: Maps table names to parameter names.
         Returns:
             dict[str, str]: Maps each new ``scaled_<table>`` table to its parameter name.
         """

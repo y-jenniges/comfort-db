@@ -52,7 +52,7 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
     """Open a connection to the COMFORT SQLite database and close it on exit.
 
     Args:
-        db_path (str or Path): Path to the COMFORT SQLite database.
+        db_path: Path to the COMFORT SQLite database.
     Yields:
         sqlite3.Connection
     """
@@ -79,7 +79,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
     Shows parameter names, row counts, depth range and date range.
 
     Args:
-        db_path_or_conn (str, Path or sqlite3.Connection): Path to the
+        db_path_or_conn: Path to the
             COMFORT SQLite database or an existing open connection.
     Returns:
         pandas.DataFrame: Summary table (one row per parameter).
@@ -134,7 +134,7 @@ def list_parameters(conn: sqlite3.Connection) -> list[str]:
     """Return the names of all ``P_*`` parameter tables (without the ``P_`` prefix).
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
+        conn: Connection to the database.
     Returns:
         list[str]: Parameter names, e.g. ``['NITRATE', 'OXYGEN', ...]``.
     """
@@ -158,26 +158,26 @@ def read_parameter(conn: sqlite3.Connection, parameter: str, *,
     and ``DATEANDTIME`` columns are always included.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-        quality_flags (QualityFlags): QC filters, e.g. ``QC_GOOD``.
-        profiles (list[int]): Profile numbers to load. ``None`` loads all.
-        lon_min (float): Minimum longitude [degrees E].
-        lon_max (float): Maximum longitude [degrees E].
-        lat_min (float): Minimum latitude [degrees N].
-        lat_max (float): Maximum latitude [degrees N].
-        depth_min (float): Minimum depth [m].
-        depth_max (float): Maximum depth [m].
-        date_min (str or datetime-like): Start (inclusive) as 'YYYY-MM-DD HH:MM:SS'.
-        date_max (str or datetime-like): End (inclusive) as 'YYYY-MM-DD HH:MM:SS'.
+        conn: Connection to the database.
+        parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+        quality_flags: QC filters, e.g. ``QC_GOOD``.
+        profiles: Profile numbers to load. ``None`` loads all.
+        lon_min: Minimum longitude [degrees E].
+        lon_max: Maximum longitude [degrees E].
+        lat_min: Minimum latitude [degrees N].
+        lat_max: Maximum latitude [degrees N].
+        depth_min: Minimum depth [m].
+        depth_max: Maximum depth [m].
+        date_min: Start (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
+        date_max: End (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
             Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
-        region_name_col (str): Region name column for *region*.
-        limit (int): Maximum number of rows to return (the first rows in
+        region_name_col: Region name column for *region*.
+        limit: Maximum number of rows to return (the first rows in
             table order). ``None`` returns all. Useful as a safeguard for
             large tables.
-        extra_station_cols (list[str]): Additional ``station`` columns to
+        extra_station_cols: Additional ``station`` columns to
             include (e.g. ``["CRUISE_ID", "ST_NUMBER_ORIGIN"]``).
     Returns:
         pandas.DataFrame: One row per sample with columns ``P_*``, ``LONGITUDE``, ``LATITUDE``,
@@ -201,7 +201,7 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
     """Read the station metadata table as a DataFrame.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
+        conn: Connection to the database.
     Returns:
         pandas.DataFrame: One row per station, ``DATEANDTIME`` cut to seconds.
     """
@@ -222,10 +222,10 @@ def describe_variables(conn: sqlite3.Connection,
     Parameters with multiple distinct values show all names separated by ``/``.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+        conn: Connection to the database.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
             ``None`` describes all available parameters.
-        quality_flags (QualityFlags): Optional QC filters applied
+        quality_flags: Optional QC filters applied
             when counting samples and computing ranges.
     Returns:
         pandas.DataFrame: One row per parameter with columns
@@ -408,19 +408,19 @@ def subset_region(df: pd.DataFrame, *,
     Columns are looked up insensitive to casing: LONGITUDE, LATITUDE, LEV_M, DATEANDTIME.
 
     Args:
-        df (pandas.DataFrame): Parameter or station DataFrame.
-        lon_min (float): Minimum longitude in degrees E.
-        lon_max (float): Maximum longitude in degrees E.
-        lat_min (float): Minimum latitude in degrees N.
-        lat_max (float): Maximum latitude in degrees N.
-        depth_min (float): Minimum depth in metres.
-        depth_max (float): Maximum depth in metres.
-        date_min (str or datetime-like): Start (inclusive) as 'YYYY-MM-DD HH:MM:SS'.
-        date_max (str or datetime-like): End (inclusive) as 'YYYY-MM-DD HH:MM:SS'.
+        df: Parameter or station DataFrame.
+        lon_min: Minimum longitude in degrees E.
+        lon_max: Maximum longitude in degrees E.
+        lat_min: Minimum latitude in degrees N.
+        lat_max: Maximum latitude in degrees N.
+        depth_min: Minimum depth in metres.
+        depth_max: Maximum depth in metres.
+        date_min: Start (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
+        date_max: End (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
             Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
-        region_name_col (str): Region name column for *region*.
+        region_name_col: Region name column for *region*.
     Returns:
         pandas.DataFrame: Filtered copy.
     Raises:
@@ -495,57 +495,57 @@ def load_comfort(
     and a maximum gap between depth *max_gap*.
 
     Args:
-        db_path_or_conn (str, Path or sqlite3.Connection): Path to the COMFORT
+        db_path_or_conn: Path to the COMFORT
             SQLite database or an existing open connection. When a path is
             given, the connection is opened and closed automatically. When a
             connection is passed, it is left open.
-        parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
             The result uses the upper case name without prefix.
             ``None`` loads all available parameters.
         quality_flags: QC filter preset, e.g. :data:`comfort.qc.QC_GOOD`.
             ``None`` means no filtering.
-        lon_min (float): Minimum longitude [degrees E].
-        lon_max (float): Maximum longitude [degrees E].
-        lat_min (float): Minimum latitude [degrees N].
-        lat_max (float): Maximum latitude [degrees N].
-        depth_min (float): Minimum depth [m].
-        depth_max (float): Maximum depth [m].
-        date_min (str or datetime-like): Start (inclusive) as 'YYYY-MM-DD HH:MM:SS'.
-        date_max (str or datetime-like): End (inclusive) as 'YYYY-MM-DD HH:MM:SS'.
+        lon_min: Minimum longitude [degrees E].
+        lon_max: Maximum longitude [degrees E].
+        lat_min: Minimum latitude [degrees N].
+        lat_max: Maximum latitude [degrees N].
+        depth_min: Minimum depth [m].
+        depth_max: Maximum depth [m].
+        date_min: Start (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
+        date_max: End (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
             Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
-        region_name_col (str): Region name column for *region*. See
+        region_name_col: Region name column for *region*. See
             :func:`comfort.geo.water_mass_masks`.
-        target_depths (array-like): Depth levels [m] to interpolate onto.
+        target_depths: Depth levels [m] to interpolate onto.
             ``None`` (default) skips interpolation.
-        max_gap (float): Maximum allowed distance [m] between the two
+        max_gap: Maximum allowed distance [m] between the two
             measured depths bracketing a target depth, forwarded to
             :func:`~comfort.profile_analysis.interpolate_depth_levels`.
             ``None`` (default) disables the check. Ignored when
             *target_depths* is ``None``.
-        interp_method (str): Depth-interpolation method forwarded to
+        interp_method: Depth-interpolation method forwarded to
             :func:`~comfort.profile_analysis.interpolate_depth_levels`:
             ``"pchip"`` (default) or ``"linear"``. Ignored when
             *target_depths* is ``None``.
-        output (str): ``"xarray"`` (default) returns an ``xr.Dataset``, ``"dict"``
+        output: ``"xarray"`` (default) returns an ``xr.Dataset``, ``"dict"``
             returns ``dict[parameter, pandas.DataFrame]``.
-        convert_units (bool): When ``True``, convert each parameter's values
+        convert_units: When ``True``, convert each parameter's values
             to its default unit using :class:`comfort.units.UnitsConverter`.
-        use_density (bool): When ``True`` and ``convert_units=True``, use
+        use_density: When ``True`` and ``convert_units=True``, use
             computed density for volumetric conversions instead of the
             constant 1.025 kg/L (COMFORT report Appendix C conventions:
             lab density at 22 °C for most parameters, in-situ-temperature
             density for chlorophyll and oxygen mL/L, both at atmospheric
             pressure. Needs temperature/salinity).
-        on_missing (str): Policy for rows that cannot be converted when
+        on_missing: Policy for rows that cannot be converted when
             ``convert_units=True``: ``'drop'`` (default),
             ``'keep'`` (retain original value and UNITS_ID) or ``'raise'``.
-        density_fallback (str): With ``use_density=True``, policy for rows whose
+        density_fallback: With ``use_density=True``, policy for rows whose
             density cannot be computed (missing/NaN salinity, temperature or
             position): ``'constant'`` (default, use 1.025 kg/L), ``'drop'`` or
             ``'raise'``. Counts are logged.
-        limit (int): Maximum number of rows to return (the first rows in
+        limit: Maximum number of rows to return (the first rows in
             table order). ``None`` returns all. Useful as a safeguard for
             large tables. Applied to each parameter separately.
     Returns:

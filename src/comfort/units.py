@@ -30,9 +30,9 @@ class UnitsConverter:
                  units: pd.DataFrame) -> None:
         """
         Args:
-            connection (sqlite3.Connection): Database connection.
-            default_units (pandas.DataFrame): Must have columns NAME_TABLE and UNITS_ID_DEFAULT.
-            units (pandas.DataFrame): Must have column ID (and NAME_SHORT for unit names).
+            connection: Database connection.
+            default_units: Must have columns NAME_TABLE and UNITS_ID_DEFAULT.
+            units: Must have column ID (and NAME_SHORT for unit names).
         """
         self.connection = connection
         self.df_default_units = default_units
@@ -46,7 +46,7 @@ class UnitsConverter:
         Create a UnitsConverter by reading DATABASE_TABLES and UNITS automatically.
 
         Args:
-            conn (sqlite3.Connection): COMFORT database connection.
+            conn: COMFORT database connection.
         Returns:
             UnitsConverter: Converter with the default units and unit names of the database.
         Raises:
@@ -75,14 +75,14 @@ class UnitsConverter:
         to *on_missing*. Counts are always logged.
 
         Args:
-            df (pandas.DataFrame): Must contain ``VAL`` and ``UNITS_ID``.
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-            use_density (bool): Use computed density instead of the
+            df: Must contain ``VAL`` and ``UNITS_ID``.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+            use_density: Use computed density instead of the
                 constant 1.025 kg/L.
-            on_missing (str): Policy for unconvertible rows: ``'drop'``
+            on_missing: Policy for unconvertible rows: ``'drop'``
                 (default) removes them, ``'keep'`` retains them with their
                 original VAL and UNITS_ID, ``'raise'`` raises ValueError.
-            density_fallback (str): With ``use_density=True``, policy for rows whose
+            density_fallback: With ``use_density=True``, policy for rows whose
                 density cannot be computed (missing/NaN salinity, temperature or
                 position): ``'constant'`` (default, use 1.025 kg/L), ``'drop'`` or
                 ``'raise'``. Counts are logged.
@@ -191,7 +191,7 @@ class UnitsConverter:
         """Return the ID of a parameter's default unit.
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             int or None: Unit ID, or ``None`` when no default unit is
                 registered for *parameter*.
@@ -209,8 +209,8 @@ class UnitsConverter:
         (see :meth:`ConversionFormulas.is_allowed`).
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-            use_density (bool): If densities are computed (``True``) or the constant is used.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+            use_density: If densities are computed (``True``) or the constant is used.
         Returns:
             tuple[bool, bool]: ``(needs_temperature, needs_salinity)``.
         """
@@ -231,7 +231,7 @@ class UnitsConverter:
         """Return the human-readable name of a parameter's default unit.
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             str or None: Unit name (e.g. ``'µmol/kg'``), or ``None`` when
                 no default unit is registered for *parameter*.
@@ -252,13 +252,13 @@ class UnitsConverter:
         """Convert units for the given parameter tables to their default unit.
 
         Args:
-            tables (list[str]): Table names to convert.
-            use_density (bool): Use computed density (lab or in-situ, see :class:`ConversionFormulas`)
+            tables: Table names to convert.
+            use_density: Use computed density (lab or in-situ, see :class:`ConversionFormulas`)
                 instead of the constant 1.025 kg/L.
-            override_old_tables (bool): Replace the original table.
-            on_missing (str): Policy for unconvertible rows
+            override_old_tables: Replace the original table.
+            on_missing: Policy for unconvertible rows
                 (``'drop'``, ``'keep'`` or ``'raise'``). Default ``'drop'``.
-            density_fallback (str): Policy for rows without computable density
+            density_fallback: Policy for rows without computable density
                 (``'constant'``, ``'drop'`` or ``'raise'``). Default ``'constant'``.
         Returns:
             dict[str, str]: Maps each input table name to the table holding
@@ -347,10 +347,10 @@ class ConversionFormulas:
         Depends on whether density should be used (lab_dens needs salinity, real_dens needs both)
 
         Args:
-            source_unit_id (int): Unit ID of the values.
-            target_unit_id (int): Unit ID to convert to.
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-            use_density (bool): Whether densities are computed (``True``) or the constant is used.
+            source_unit_id: Unit ID of the values.
+            target_unit_id: Unit ID to convert to.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+            use_density: Whether densities are computed (``True``) or the constant is used.
         Returns:
             set[str]: Subset of ``{'temperature', 'salinity'}``.
         """
@@ -373,9 +373,9 @@ class ConversionFormulas:
         """Check if a registered conversion may be applied to a parameter.
 
         Args:
-            source_unit_id (int): Unit ID of the values.
-            target_unit_id (int): Unit ID to convert to.
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            source_unit_id: Unit ID of the values.
+            target_unit_id: Unit ID to convert to.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             bool: ``True`` if the conversion has no parameter restriction or lists *parameter*.
         """
@@ -386,7 +386,7 @@ class ConversionFormulas:
         """Return the molar mass of the element (N, P, Si, Ba), not of the ion.
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             float: Molar mass.
         Raises:

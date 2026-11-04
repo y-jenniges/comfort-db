@@ -93,8 +93,8 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
     """Return a valid depth column name, falling back between LEV_M and LEV_DBAR.
 
     Args:
-        df (pandas.DataFrame): DataFrame to inspect.
-        depth_col (str): Preferred depth column. Default is ``"LEV_M"``.
+        df: DataFrame to inspect.
+        depth_col: Preferred depth column. Default is ``"LEV_M"``.
     Returns:
         str: The depth column name that exists in *df*.
     """
@@ -130,13 +130,13 @@ def average_duplicate_records_per_profile(
     Depths are matched by exact equality (no tolerance).
 
     Args:
-        raw (dict[str, pandas.DataFrame]): Per-parameter DataFrames, as
+        raw: Per-parameter DataFrames, as
             returned by ``load_comfort(output="dict")``.
-        depth_col (str): Column with depth. Default ``"LEV_M"``.
-        profile_col (str or list<str>): Column(s) identifying a profile.
+        depth_col: Column with depth. Default ``"LEV_M"``.
+        profile_col: Column(s) identifying a profile.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both are present
             in the first DataFrame, else ``"PROFILE_NUMBER"``.
-        station_cols (list[str]): Station-level metadata columns to keep.
+        station_cols: Station-level metadata columns to keep.
             Defaults to whichever of ``["LATITUDE", "LONGITUDE", "DATEANDTIME", "LEV_DBAR"]``
             are present in the first DataFrame.
     Returns:
@@ -182,10 +182,10 @@ def vertical_gradient(df: pd.DataFrame,
     with depth.
 
     Args:
-        df (pandas.DataFrame): Input DataFrame.
-        value_col (str): Column with measured values.
-        depth_col (str): Column with depth [m].
-        profile_col (str or list<str>): Column(s) identifying individual profiles.
+        df: Input DataFrame.
+        value_col: Column with measured values.
+        depth_col: Column with depth [m].
+        profile_col: Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
             ``"PROFILE_NUMBER"``.
     Returns:
@@ -228,15 +228,15 @@ def profile_completeness(df: pd.DataFrame,
     """Assess vertical sampling completeness of each profile.
 
     Args:
-        df (pandas.DataFrame): Input DataFrame.
-        depth_col (str): Column with depth [m].
-        profile_col (str or list<str>): Column(s) identifying individual profiles.
+        df: Input DataFrame.
+        depth_col: Column with depth [m].
+        profile_col: Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
             ``"PROFILE_NUMBER"``.
-        reference_depths (array-like): Standard depth levels to measure
+        reference_depths: Standard depth levels to measure
             coverage against. When provided, a ``coverage_fraction``
             column (0-1) is added.
-        tolerance (float): Tolerance [m] for matching observed
+        tolerance: Tolerance [m] for matching observed
             depths to reference levels. Default is 5m.
     Returns:
         pandas.DataFrame: One row per profile with columns
@@ -301,24 +301,24 @@ def mixed_layer_depth(df: pd.DataFrame,
     109, C12003. https://doi.org/10.1029/2004JC002378
 
     Args:
-        df (pandas.DataFrame): Input DataFrame with density or
+        df: Input DataFrame with density or
             temperature and depth columns.
-        density_col (str): Column with potential density anomaly [kg/m3].
-        temperature_col (str): Column with temperature [°C]. Used only
+        density_col: Column with potential density anomaly [kg/m3].
+        temperature_col: Column with temperature [°C]. Used only
             when ``density_col`` is ``None``.
-        depth_col (str): Column with depth [m].
-        profile_col (str or list<str>): Column(s) identifying individual profiles.
+        depth_col: Column with depth [m].
+        profile_col: Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
             ``"PROFILE_NUMBER"``.
-        delta_density (float): Density threshold [kg/m3]. Default 0.03.
-        delta_temp (float): Temperature threshold [°C]. Default 0.2.
-        reference_depth (float): Reference depth [m]. The nearest
+        delta_density: Density threshold [kg/m3]. Default 0.03.
+        delta_temp: Temperature threshold [°C]. Default 0.2.
+        reference_depth: Reference depth [m]. The nearest
             measured depth is used when no exact match exists.
             Default 10.0m.
-        max_ref_distance (float or None): Maximum allowed distance [m] between
+        max_ref_distance: Maximum allowed distance [m] between
             ``reference_depth`` and the nearest measured depth. ``None`` disables
             the check. Default 5.0m.
-        max_gap (float or None): Maximum allowed distance [m] between the two
+        max_gap: Maximum allowed distance [m] between the two
             measured depths bracketing the threshold crossing. The crossing
             depth is interpolated linearly between them, so a wider bracket
             gives ``NaN``. ``None`` (default) disables the check.
@@ -402,15 +402,15 @@ def pycnocline_depth(df: pd.DataFrame,
     smaller than ``min_gradient`` do not have a valid pycnocline and get ``pycnocline_depth_m = NaN``.
 
     Args:
-        df (pandas.DataFrame): Input DataFrame with density and depth columns.
-        density_col (str): Column with potential density anomaly [kg/m3].
-        depth_col (str): Column with depth [m].
-        profile_col (str or list<str>): Column(s) identifying individual profiles.
+        df: Input DataFrame with density and depth columns.
+        density_col: Column with potential density anomaly [kg/m3].
+        depth_col: Column with depth [m].
+        profile_col: Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
             ``"PROFILE_NUMBER"``.
-        min_gradient (float): Minimum gradient [kg/m3 per metre] to be
+        min_gradient: Minimum gradient [kg/m3 per metre] to be
             considered a pycnocline. Default 0.0 (no filtering).
-        max_gap (float or None): Maximum allowed distance [m] between a depth level
+        max_gap: Maximum allowed distance [m] between a depth level
             and each of its neighbouring depth levels. The gradients at levels next to a wider
             gap are ignored. ``None`` (default) disables the check.
     Returns:
@@ -494,18 +494,18 @@ def interpolate_depth_levels(df: pd.DataFrame,
     measurements are skipped.
 
     Args:
-        df (pandas.DataFrame): Input DataFrame.
-        target_depths (array-like): Target depth levels [m].
-        value_col (str): Column with measured values.
-        depth_col (str): Column with depth [m].
-        profile_col (str or list<str>): Column(s) identifying individual profiles.
+        df: Input DataFrame.
+        target_depths: Target depth levels [m].
+        value_col: Column with measured values.
+        depth_col: Column with depth [m].
+        profile_col: Column(s) identifying individual profiles.
             Defaults to ``["ID", "PROFILE_NUMBER"]`` when both exist, else
             ``"PROFILE_NUMBER"``.
-        max_gap (float): Maximum allowed distance [m] between the two
+        max_gap: Maximum allowed distance [m] between the two
             measured depths bracketing a target depth. Target depths whose
             bracket is wider than this are dropped.
             ``None`` (default) disables the check.
-        method (str): Interpolation method: ``"pchip"`` (default) is a
+        method: Interpolation method: ``"pchip"`` (default) is a
             piecewise cubic Hermite interpolant (smoother
             than linear, no overshoot between measured levels), ``"linear"``
             is piecewise-linear interpolation.

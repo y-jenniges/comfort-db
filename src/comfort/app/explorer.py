@@ -952,7 +952,7 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
     """Create the COMFORT dataset Explorer app.
 
     Args:
-        db_path (str or Path): Path to the COMFORT SQLite database. ``None``
+        db_path: Path to the COMFORT SQLite database. ``None``
             reads the ``COMFORT_DB_PATH`` environment variable (a ``.env``
             file is loaded if python-dotenv is installed).
     Returns:

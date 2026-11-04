@@ -51,8 +51,8 @@ def _parse_flag(column: str, condition: str) -> tuple[str, str, str]:
     """Validate one quality flag and split its condition into operator and number.
 
     Args:
-        column (str): Name of the flag column, e.g. ``"PQF1"``.
-        condition (str): Operator followed by a number, e.g. ``">0"``.
+        column: Name of the flag column, e.g. ``"PQF1"``.
+        condition: Operator followed by a number, e.g. ``">0"``.
             Supported operators: ``>=``, ``<=``, ``>``, ``<``, ``==``, ``!=``.
     Returns:
         tuple[str, str, str]: Column name, operator and number.
@@ -129,8 +129,8 @@ def apply_qc_flags(df: pd.DataFrame,
     :func:`comfort.io.read_parameter`, but on an already-loaded DataFrame.
 
     Args:
-        df (pandas.DataFrame): DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
-        quality_flags (QualityFlags): Quality flag filters, e.g. :data:`QC_GOOD`.
+        df: DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
+        quality_flags: Quality flag filters, e.g. :data:`QC_GOOD`.
             ``None`` or ``[]`` returns an unfiltered copy.
     Returns:
         pandas.DataFrame: Filtered copy.
@@ -167,12 +167,12 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     in the default unit (umol/kg), so the check is reliable on ``load_comfort`` output.
 
     Args:
-        df (pandas.DataFrame): Must contain *oxygen_col* and a Practical
+        df: Must contain *oxygen_col* and a Practical
             Salinity column (``SALINITY``/``salinity``), not Absolute Salinity.
-        oxygen_col (str): Oxygen value column. Default ``'OXYGEN'``.
-        salinity_col (str): Practical Salinity column to compare against.
+        oxygen_col: Oxygen value column. Default ``'OXYGEN'``.
+        salinity_col: Practical Salinity column to compare against.
             ``None`` auto-detects ``SALINITY``/``salinity``.
-        tol (float): Maximum absolute difference between oxygen and salinity
+        tol: Maximum absolute difference between oxygen and salinity
             for a row to be flagged. Default 0 flags exact copies only.
     Returns:
         pandas.Series: Bool mask aligned with df (True = suspect row).

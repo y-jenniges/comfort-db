@@ -48,10 +48,10 @@ def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     out-of-range coordinates get NaN.
 
     Args:
-        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
-        lon_col (str): Longitude column [°E].
-        lat_col (str): Latitude column [°N].
-        resolution (str): Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
+        df: DataFrame with longitude and latitude columns.
+        lon_col: Longitude column [°E].
+        lat_col: Latitude column [°N].
+        resolution: Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
             Ignored when ``coastline_geom`` is provided.
         coastline_geom: Pre-loaded coastline as a shapely geometry, list
             of geometries or geopandas GeoSeries/GeoDataFrame.
@@ -111,12 +111,12 @@ def along_track_distance(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     ``gsw.distance`` between consecutive stations.
 
     Args:
-        df (pandas.DataFrame): DataFrame with longitude/latitude columns.
-        lon_col (str): Longitude column [°E].
-        lat_col (str): Latitude column [°N].
-        order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``).
+        df: DataFrame with longitude/latitude columns.
+        lon_col: Longitude column [°E].
+        lat_col: Latitude column [°N].
+        order_col: Column to sort stations by (e.g. ``DATEANDTIME``).
             Defaults to first-appearance order.
-        station_col (str or list[str]): Column(s) identifying a station
+        station_col: Column(s) identifying a station
             (e.g. ``"ID"``). Defaults to ``None``, i.e. stations at identical
             ``(lon_col, lat_col)`` are treated as one.
     Returns:
@@ -225,9 +225,9 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     Requires geopandas (``pip install "comfort-db[geo]"``).
 
     Args:
-        path (str or Path): Path to the Longhurst ``.shp`` file.
-        code_col (str): Province code column. Auto-detected when ``None``.
-        region_name_col (str): Province description column. Auto-detected when ``None``.
+        path: Path to the Longhurst ``.shp`` file.
+        code_col: Province code column. Auto-detected when ``None``.
+        region_name_col: Province description column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Standardised province boundaries.
     """
@@ -269,8 +269,8 @@ def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.Geo
     Requires geopandas (``pip install "comfort-db[geo]"``).
 
     Args:
-        path (str or Path): Path to the basins ``.shp`` file.
-        region_name_col (str): Basin name column. Auto-detected when ``None``.
+        path: Path to the basins ``.shp`` file.
+        region_name_col: Basin name column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Basin boundaries with columns ``basin_name`` and ``geometry``.
     """
@@ -300,8 +300,8 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     Requires xarray (``pip install "comfort-db[grid]"``).
 
     Args:
-        path (str or Path): Path to the biomes NetCDF file.
-        biome_var (str): Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
+        path: Path to the biomes NetCDF file.
+        biome_var: Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
             ``"TimeVaryingBiomes"``).
     Returns:
         pandas.DataFrame: Columns ``LONGITUDE``, ``LATITUDE``, ``label``
@@ -358,13 +358,13 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``. A GeoSeries names its regions by its index.
 
     Args:
-        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
+        df: DataFrame with longitude and latitude columns.
         regions: Region definitions in any format listed above.
-        lon_col (str): Longitude column [°E].
-        lat_col (str): Latitude column [°N].
-        region_name_col (str): Region name column in GeoDataFrame / CSV.
+        lon_col: Longitude column [°E].
+        lat_col: Latitude column [°N].
+        region_name_col: Region name column in GeoDataFrame / CSV.
             Ignored for dict input. Default ``"name"``.
-        output_col (str): Name of the new column. Default ``"region"``.
+        output_col: Name of the new column. Default ``"region"``.
     Returns:
         pandas.DataFrame: Copy of df with an added ``output_col`` column.
     """
@@ -432,10 +432,10 @@ def water_mass_statistics(df: pd.DataFrame, parameters: list[str] | str,
     """Compute per-region descriptive statistics for one or more parameters.
 
     Args:
-        df (pandas.DataFrame): DataFrame with region assignments
+        df: DataFrame with region assignments
             (from :func:`water_mass_masks`) and parameter columns.
-        parameters (list[str] or str): Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
-        region_col (str): Region column. Default ``"region"``.
+        parameters: Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
+        region_col: Region column. Default ``"region"``.
     Returns:
         pandas.DataFrame: MultiIndex columns ``(parameter, statistic)``
             with count, mean, std, min, max. Rows are regions.
@@ -456,7 +456,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
 
     Args:
         regions: Region definition(s), same formats as water_mass_masks.
-        region_name_col (str): Region name column. See water_mass_masks.
+        region_name_col: Region name column. See water_mass_masks.
     Returns:
         tuple[float, float, float, float]: ``(lon_min, lon_max, lat_min, lat_max)``.
     """
@@ -495,8 +495,8 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
 
     Args:
         regions: Region definition(s), same format as water_mass_masks.
-        names (str or list[str]): Region name(s) to keep.
-        region_name_col (str): Region name column. See water_mass_masks.
+        names: Region name(s) to keep.
+        region_name_col: Region name column. See water_mass_masks.
     Returns:
         dict[str, shapely.Polygon]: Only the requested region(s).
     Raises:
@@ -610,8 +610,8 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
     from `Zenodo record 15201767 <https://zenodo.org/records/15201767>`_.
 
     Args:
-        path (str or Path): Path to the cluster CSV file.
-        depth (float): Depth level [m] to select. When ``None`` all depths
+        path: Path to the cluster CSV file.
+        depth: Depth level [m] to select. When ``None`` all depths
             are returned. Uses closest available level if exact match
             is unavailable.
     Returns:
@@ -658,18 +658,18 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
     only in that time step.
 
     Args:
-        df (pandas.DataFrame): Observation DataFrame with lon/lat columns.
-        grid_df (pandas.DataFrame): Labelled grid (e.g. from
+        df: Observation DataFrame with lon/lat columns.
+        grid_df: Labelled grid (e.g. from
             :func:`load_jenniges_provinces` or :func:`load_biomes`).
-        lon_col (str): Longitude column in *df*.
-        lat_col (str): Latitude column in *df*.
-        grid_lon_col (str): Longitude column in *grid_df*.
-        grid_lat_col (str): Latitude column in *grid_df*.
-        label_col (str): Label column in *grid_df*.
-        output_col (str): Name of the new column added to the result.
-        time_col (str): Time column in *df* (e.g. year) to match against
+        lon_col: Longitude column in *df*.
+        lat_col: Latitude column in *df*.
+        grid_lon_col: Longitude column in *grid_df*.
+        grid_lat_col: Latitude column in *grid_df*.
+        label_col: Label column in *grid_df*.
+        output_col: Name of the new column added to the result.
+        time_col: Time column in *df* (e.g. year) to match against
             *grid_time_col*. Omit for a purely spatial grid.
-        grid_time_col (str): Time column in *grid_df*. Defaults to
+        grid_time_col: Time column in *grid_df*. Defaults to
             *time_col* if *time_col* is given.
     Returns:
         pandas.DataFrame: Copy of *df* with an added *output_col* column.

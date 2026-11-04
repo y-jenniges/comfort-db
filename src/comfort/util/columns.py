@@ -10,10 +10,10 @@ def find_col(df: pd.DataFrame, name_to_check: str | list[str] | None, *, require
     An exact match wins. Otherwise, the one column that matches ignoring case is returned.
 
     Args:
-        df (pandas.DataFrame): DataFrame to search.
-        name_to_check (str or list[str]): Column name to look for. A list is resolved element by element.
+        df: DataFrame to search.
+        name_to_check: Column name to look for. A list is resolved element by element.
             ``None`` is returned as ``None``, so optional column arguments can be passed through.
-        required (bool): If ``True``, a missing column raises. Otherwise, ``None`` is returned.
+        required: If ``True``, a missing column raises. Otherwise, ``None`` is returned.
     Returns:
         str or None: The column name as it is spelled in *df*.
     Raises:
@@ -50,8 +50,8 @@ def resolve_param_columns(df: pd.DataFrame, parameters: list[str] | str) -> list
     find the column ``P_NITRATE``.
 
     Args:
-        df (pandas.DataFrame): DataFrame with one column per parameter.
-        parameters (list[str] or str): Parameter names. Insensitive to casing and ``P_`` prefix.
+        df: DataFrame with one column per parameter.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
     Returns:
         list[str]: The matching column names, in the order of *parameters*.
     Raises:

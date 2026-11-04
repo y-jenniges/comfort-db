@@ -25,11 +25,11 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
     The result is named ``P_COMBINED`` and only created if it does not exist yet.
 
     Args:
-        conn (sqlite3.Connection): Connection to the database.
-        parameters (list[str]): Parameter names to combine.
-        quality_flags (QualityFlags): Quality flag filters.
-        columns (list[str]): Columns to include. Defaults to the standard COMFORT parameter columns.
-        table_type (str): 'view' or 'table'. Default is 'view'.
+        conn: Connection to the database.
+        parameters: Parameter names to combine.
+        quality_flags: Quality flag filters.
+        columns: Columns to include. Defaults to the standard COMFORT parameter columns.
+        table_type: 'view' or 'table'. Default is 'view'.
     """
     # Define columns to include
     if columns is None:
