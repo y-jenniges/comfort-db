@@ -315,6 +315,44 @@ class TestCounting:
         assert len(ax.patches) == len(counts)
         plt.close()
 
+    # Year ticks sit on the category axis: First year, decades, last year
+    def test_year_ticks_on_category_axis(self):
+        counts = pd.DataFrame({"YEAR": range(1998, 2013), "COUNT": range(15)})
+        ax = plot_counts_bar(counts, tick_style="year")
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["1998", "2000", "2010", "2012"]
+        # The count axis is not stretched to the year values
+        assert ax.get_xlim()[1] < 100
+        assert ax.get_xlabel() == "COUNT"
+        plt.close()
+
+    # A first year on a decade is labelled once
+    def test_year_ticks_no_duplicate(self):
+        counts = pd.DataFrame({"YEAR": range(2000, 2021), "COUNT": 1})
+        ax = plot_counts_bar(counts, tick_style="year")
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["2000", "2010", "2020"]
+        plt.close()
+
+    # Month numbers become month names, January on top
+    def test_month_ticks(self):
+        counts = pd.DataFrame({"MONTH": range(1, 13), "COUNT": range(12)})
+        ax = plot_counts_bar(counts, tick_style="month")
+        labels = [t.get_text() for t in ax.get_yticklabels()]
+        assert labels[0] == "Jan" and labels[-1] == "Dec" and len(labels) == 12
+        assert ax.yaxis_inverted()
+        plt.close()
+
+    # Without tick style every category is labelled; float values are shortened
+    def test_no_tick_style(self):
+        data = pd.DataFrame({"parameter": ["OXYGEN", "NITRATE"], "proportion": [0.123456, 0.5]})
+        ax = plot_counts_bar(data, tick_style=None)
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["OXYGEN", "NITRATE"]
+        assert [t.get_text() for t in ax.texts] == ["0.123", "0.5"]
+        plt.close()
+
+    # An empty table returns None
+    def test_empty_returns_none(self):
+        assert plot_counts_bar(pd.DataFrame(columns=["YEAR", "COUNT"])) is None
+
 
 #--- Annual coverage -------------------------------------------------#
 

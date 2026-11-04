@@ -141,8 +141,9 @@ def plot_counts_bar(
     Args:
         df_count: First column is the category (year, month, parameter, ...),
             second is the count.
-        tick_style: ``'year'``, ``'month'`` or ``None`` (no special tick
-            formatting, e.g. for per-parameter counts).
+        tick_style: ``'year'`` (label the first and last year and every full
+            decade), ``'month'`` (month numbers 1 to 12 become *month_ticks*) or
+            ``None`` (label every category, e.g. for per-parameter counts).
         title: Plot title.
         month_ticks: 12 month labels.
         ax: Axes to draw into.
@@ -154,8 +155,7 @@ def plot_counts_bar(
     """
     # Define months labels
     if month_ticks is None:
-        month_ticks = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        month_ticks = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
     # Check input df
     if df_count is None or df_count.empty:
@@ -164,32 +164,34 @@ def plot_counts_bar(
 
     ax, standalone = _get_or_create_ax(ax)
 
-    # Determine x and y
-    cols = df_count.columns
-    x = df_count[cols[0]].map(str).tolist()
-    y = df_count[cols[1]].tolist()
+    category_col, value_col = df_count.columns[:2]
+    categories = df_count[category_col].tolist()
+    values = df_count[value_col].tolist()
+    positions = np.arange(len(categories))
 
     # Barplot
-    ax.barh(x, y)
-    for i, (xi, yi) in enumerate(zip(x, y)):
-        ax.text(yi, i, str(yi), ha="left", va="center")
+    ax.barh(positions, values)
+    for pos, value in zip(positions, values):
+        text = str(value) if isinstance(value, int) else f"{value:.3g}"
+        ax.text(value, pos, text, ha="left", va="center")
     ax.set_title(title)
-    ax.set_ylabel("Count")
+    ax.set_xlabel(str(value_col))
 
-    # Draw ticks and labels
-    if tick_style == "year" and len(df_count) > 0:
-        min_y = df_count.iloc[0, 0]
-        max_y = df_count.iloc[-1, 0]
-        min_y_rounded = np.round(min_y, -1)
-        min_tick = min_y_rounded if min_y_rounded >= min_y else min_y_rounded + 10
-        ticks = ([str(min_y)]
-                 + [str(t) for t in range(int(min_tick), int(max_y), 10)]
-                 + [str(max_y)])
-        ax.set_xticks([float(t) for t in ticks])
-        ax.set_xticklabels(ticks, rotation=90)
+    # Set tick labels
+    labels = [str(c) for c in categories]
+    shown = positions
+    if tick_style == "year":
+        # Years: Label the first, the last and every full decade
+        years = df_count[category_col].astype(int).to_numpy()
+        shown = positions[(years % 10 == 0) | (positions == 0) | (positions == len(years) - 1)]
     elif tick_style == "month":
-        ax.set_yticks(range(len(month_ticks)))
-        ax.set_yticklabels(month_ticks)
+        # Month: Use the 12 month_ticks
+        labels = [month_ticks[int(c) - 1] for c in categories]
+    ax.set_yticks(shown)
+    ax.set_yticklabels([labels[i] for i in shown])
+
+    # First time category on top
+    ax.invert_yaxis()
 
     return _finish(ax, standalone, save_as, dpi)
 
