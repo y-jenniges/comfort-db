@@ -379,19 +379,22 @@ def convert_to_potential_temperature(
 ) -> dict[str, pd.DataFrame]:
     """Convert in-situ temperature to potential temperature (gsw).
 
-    Needs co-located salinity and pressure (``LEV_DBAR``).
+    Needs co-located salinity and pressure. Pressure comes from
+    :func:`resolve_pressure` (measured ``LEV_DBAR``, else computed from
+    ``LEV_M`` and ``LATITUDE``). Temperature rows without salinity or pressure
+    become NaN and are counted in a warning.
 
     Args:
         averaged (dict[str, pandas.DataFrame]): Per-parameter DataFrames. Must
-            contain *temperature_col* (with a ``LEV_DBAR`` column) and
-            *salinity_col*.
+            contain *temperature_col* and *salinity_col*.
         temperature_col (str): Key for temperature. Default ``"TEMPERATURE"``.
         salinity_col (str): Key for salinity. Default ``"SALINITY"``.
         loc_cols (list[str]): Columns identifying a unique location. Default
             ``["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]``.
     Returns:
         dict[str, pandas.DataFrame]: Copy of *averaged* with *temperature_col*
-            replaced by potential temperature.
+            replaced by a DataFrame of *loc_cols* and potential temperature
+            (no pressure column).
     Raises:
         KeyError: If *temperature_col* or *salinity_col* is missing from *averaged*.
     """
@@ -407,18 +410,26 @@ def convert_to_potential_temperature(
         )
 
     # Merge temperature and salinity DataFrames
-    df_t = averaged[temperature_col].merge(
-        averaged[salinity_col][loc_cols + [salinity_col]], on=loc_cols, how="left",
-    )
+    df_t = averaged[temperature_col].merge(averaged[salinity_col][loc_cols + [salinity_col]], on=loc_cols, how="left")
+
+    # Resolve pressure (measured, else from depth and latitude)
+    pressure = resolve_pressure(df_t).to_numpy()
 
     # Convert to absolute salinity
-    pressure = df_t["LEV_DBAR"].values
     sa = convert_salinity(df_t[salinity_col], pressure, df_t["LONGITUDE"], df_t["LATITUDE"])
 
     # Convert to potential temperature
-    df_t[temperature_col] = convert_temperature(df_t[temperature_col], sa, pressure, to="pt0").values
+    pt0 = convert_temperature(df_t[temperature_col], sa, pressure, to="pt0").values
+
+    # Log temperature rows that cannot be converted
+    n_nan = int(np.isnan(pt0).sum() - df_t[temperature_col].isna().sum())
+    if n_nan:
+        logger.warning("convert_to_potential_temperature: %d of %d %s rows have no potential temperature "
+                       "(%d without salinity)", n_nan, len(df_t), temperature_col,
+                       int((df_t[salinity_col].isna() & df_t[temperature_col].notna()).sum()))
+    df_t[temperature_col] = pt0
 
     # Assemble and return results
     result = dict(averaged)
-    result[temperature_col] = df_t[loc_cols + ["LEV_DBAR", temperature_col]]
+    result[temperature_col] = df_t[loc_cols + [temperature_col]]
     return result
