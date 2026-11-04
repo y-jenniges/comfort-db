@@ -150,7 +150,8 @@ def apply_qc_flags(df: pd.DataFrame,
         # A missing flag column would silently leave the data unfiltered (raises)
         column = find_col(df, column)
 
-        mask &= _OP_MAP[operator](df[column], float(number))
+        # Assemble mask and drop NaNs (so comparison possible for such entries)
+        mask &= df[column].notna() & _OP_MAP[operator](df[column], float(number))
 
     return df[mask].copy()
 
