@@ -203,6 +203,23 @@ class TestMixedLayerDepth:
         result = mixed_layer_depth(df, density_col="sigma0", max_ref_distance=None)
         assert not pd.isna(result["MLD_m"].iloc[0])
 
+    # A crossing inside a gap wider than max_gap gives no MLD
+    def test_max_gap_crossing_in_wide_gap_gives_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 3,
+                           "LEV_DBAR": [10.0, 20.0, 170.0],
+                           "sigma0": [25.0, 25.0, 25.2]})
+        assert not pd.isna(mixed_layer_depth(df, density_col="sigma0")["MLD_m"].iloc[0])
+        assert pd.isna(mixed_layer_depth(df, density_col="sigma0", max_gap=100)["MLD_m"].iloc[0])
+
+    # A wide gap that does not contain the crossing does not matter
+    def test_max_gap_wide_gap_without_crossing_is_ignored(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 4,
+                           "LEV_DBAR": [10.0, 20.0, 30.0, 130.0],
+                           "sigma0": [25.0, 25.0, 25.1, 25.3]})
+        # Crossing is between 20 m and 30 m, the 100 m gap lies below it
+        result = mixed_layer_depth(df, density_col="sigma0", max_gap=50)
+        assert result["MLD_m"].iloc[0] == pytest.approx(20.0 + 0.03 / 0.1 * 10.0)
+
     # When both are given, density_col takes priority over temperature_col
     def test_density_preferred_over_temp(self):
         df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
@@ -331,6 +348,33 @@ class TestPycnoclineDepth:
         result = pycnocline_depth(df, density_col="sigma0")
         assert len(result) == 2
         assert (result["pycnocline_depth_m"] == 100.0).all()
+
+    # Levels next to a wide gap are skipped, the next-best level wins
+    def test_max_gap_skips_levels_next_to_gap(self):
+        # Levels 0, 50, 100, 400, 450: the gap 100-400 invalidates the gradients at 100 and 400
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 100.0, 400.0, 450.0],
+                           "sigma0": [25.0, 25.1, 25.2, 27.0, 27.2]})
+        assert pycnocline_depth(df, density_col="sigma0")["pycnocline_depth_m"].iloc[0] == 400.0
+        result = pycnocline_depth(df, density_col="sigma0", max_gap=100)
+        assert result["pycnocline_depth_m"].iloc[0] == 450.0
+        assert result["max_gradient"].iloc[0] == pytest.approx(0.004)
+
+    # All levels excluded by max_gap gives NaN depth and gradient
+    def test_max_gap_excluding_all_levels_gives_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 3,
+                           "LEV_DBAR": [0.0, 200.0, 400.0],
+                           "sigma0": [25.0, 26.0, 27.0]})
+        result = pycnocline_depth(df, density_col="sigma0", max_gap=100)
+        assert len(result) == 1
+        assert pd.isna(result["pycnocline_depth_m"].iloc[0])
+        assert pd.isna(result["max_gradient"].iloc[0])
+
+    # max_gap larger than every spacing changes nothing
+    def test_max_gap_large_is_noop(self):
+        df = self._profile_with_pycno_at_100()
+        pd.testing.assert_frame_equal(pycnocline_depth(df, density_col="sigma0", max_gap=1000),
+                                      pycnocline_depth(df, density_col="sigma0"))
 
 
 class TestProfileCompleteness:
