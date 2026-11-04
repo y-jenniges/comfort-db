@@ -1,4 +1,6 @@
 """Tests for comfort.profile_analysis, i.e. profile-level analysis functions."""
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -410,6 +412,15 @@ class TestProfileCompleteness:
         assert abs(result["coverage_fraction"].iloc[0] - 3/5) < 1e-9
 
 
+    # Repeated readings at one depth count as one level
+    def test_duplicate_depths_counted_once(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1], "LEV_DBAR": [0, 100, 100, 200],
+                           "VAL": [1.0, 2.0, 2.5, 3.0]})
+        result = profile_completeness(df)
+        assert result["n_levels"].iloc[0] == 3
+        assert result["depth_range"].iloc[0] == 200.0
+
+
 class TestInterpolateDepthLevels:
     # Values are interpolated onto the target depths with the default (pchip)
     # method; on perfectly linear data pchip reduces to the same result as linear
@@ -523,7 +534,47 @@ class TestDetectParamCol:
         assert "OXYGEN" in result.columns
 
 
+    # Two possible value columns cannot be told apart -> Raises
+    def test_ambiguous_columns_raise_clear_error(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [0.0, 100.0, 200.0],
+                           "TEMPERATURE": [10.0, 8.0, 6.0],
+                           "SALINITY": [35.0, 35.1, 35.2]})
+        with pytest.raises(KeyError, match="TEMPERATURE.*SALINITY|SALINITY.*TEMPERATURE"):
+            vertical_gradient(df)
+
+    # An explicit value_col still works when the frame carries other measured columns
+    def test_explicit_value_col_with_other_measured_columns(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [0.0, 100.0, 200.0],
+                           "TEMPERATURE": [10.0, 8.0, 6.0],
+                           "SALINITY": [35.0, 35.1, 35.2]})
+        assert "TEMPERATURE_gradient" in vertical_gradient(df, value_col="TEMPERATURE").columns
+
+
 class TestDetectDepthCol:
+    # A substituted depth column is reported, an explicitly requested one is not
+    def test_fallback_is_logged(self, caplog):
+        df = pd.DataFrame({"LEV_DBAR": [0.0], "VAL": [1.0]})
+
+        # LEV_M requested
+        with caplog.at_level(logging.WARNING):
+            detect_depth_col(df)
+        assert "'LEV_M' not found, using 'LEV_DBAR' (dbar treated as m)" in caplog.text
+        caplog.clear()
+
+        # LEV_DBAR requested (no warning since it is given)
+        with caplog.at_level(logging.WARNING):
+            detect_depth_col(df, "LEV_DBAR")
+        assert caplog.text == ""
+
+    # The note names the substitution in the right direction
+    def test_fallback_to_lev_m_is_logged(self, caplog):
+        df = pd.DataFrame({"LEV_M": [0.0], "VAL": [1.0]})
+        with caplog.at_level(logging.WARNING):
+            detect_depth_col(df, "LEV_DBAR")
+        assert "'LEV_DBAR' not found, using 'LEV_M' (m treated as dbar)" in caplog.text
+
     # LEV_M is used when present
     def test_lev_m_found(self):
         df = pd.DataFrame({"LEV_M": [0.0], "VAL": [1.0]})

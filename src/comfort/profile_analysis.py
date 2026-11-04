@@ -82,8 +82,11 @@ def _detect_value_col(df, value_col):
         logger.debug("_detect_value_col: auto-detected %r", candidates[0])
         return candidates[0]
 
-    # Fallback
-    return value_col
+    # Value column is missing and cannot be inferred
+    raise KeyError(
+        f"Value column {value_col!r} not found and cannot be auto-detected "
+        f"(candidates: {candidates}). Pass value_col explicitly."
+    )
 
 
 def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
@@ -103,7 +106,9 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
     # Use fallback (if depth_col does not exist)
     fallback = find_col(df, "LEV_DBAR" if depth_col.upper() == "LEV_M" else "LEV_M", required=False)
     if fallback is not None:
-        logger.debug("detect_depth_col: %r not found, using %r", depth_col, fallback)
+        # Pressure [dbar] used to instead of depth [m] (or the other way round)
+        unit_note = "dbar treated as m" if fallback.upper() == "LEV_DBAR" else "m treated as dbar"
+        logger.warning("detect_depth_col: %r not found, using %r (%s)", depth_col, fallback, unit_note)
         return fallback
 
     # Raise error if no depth column was found
@@ -244,8 +249,8 @@ def profile_completeness(df: pd.DataFrame,
     # Iterate over profiles
     rows = []
     for pid, group in df.groupby(profile_col):
-        # Drop nans
-        depths = group[depth_col].dropna().values
+        # Drop nans and repeated depths
+        depths = np.unique(group[depth_col].dropna().to_numpy())
 
         # Assemble output row
         row = {
