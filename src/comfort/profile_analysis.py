@@ -82,8 +82,11 @@ def _detect_value_col(df, value_col):
         logger.debug("_detect_value_col: auto-detected %r", candidates[0])
         return candidates[0]
 
-    # Fallback
-    return value_col
+    # Value column is missing and cannot be inferred
+    raise KeyError(
+        f"Value column {value_col!r} not found and cannot be auto-detected "
+        f"(candidates: {candidates}). Pass value_col explicitly."
+    )
 
 
 def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
@@ -103,7 +106,9 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
     # Use fallback (if depth_col does not exist)
     fallback = find_col(df, "LEV_DBAR" if depth_col.upper() == "LEV_M" else "LEV_M", required=False)
     if fallback is not None:
-        logger.debug("detect_depth_col: %r not found, using %r", depth_col, fallback)
+        # Pressure [dbar] used to instead of depth [m] (or the other way round)
+        unit_note = "dbar treated as m" if fallback.upper() == "LEV_DBAR" else "m treated as dbar"
+        logger.warning("detect_depth_col: %r not found, using %r (%s)", depth_col, fallback, unit_note)
         return fallback
 
     # Raise error if no depth column was found
@@ -173,6 +178,9 @@ def vertical_gradient(df: pd.DataFrame,
                       ) -> pd.DataFrame:
     """Compute the vertical gradient of a parameter within each profile.
 
+    The gradient is d(value)/d(depth), positive means that the value increases
+    with depth.
+
     Args:
         df (pandas.DataFrame): Input DataFrame.
         value_col (str): Column with measured values.
@@ -191,10 +199,12 @@ def vertical_gradient(df: pd.DataFrame,
     sort_cols = (profile_col if isinstance(profile_col, list) else [profile_col]) + [depth_col]
     df_out = df.copy().sort_values(sort_cols)
     grad_col = f"{value_col}_gradient"
-    df_out[grad_col] = np.nan
+    grad = np.full(len(df_out), np.nan)
 
-    # Compute gradient per profile using central differences
-    for _, group in df_out.groupby(profile_col, sort=False):
+    # Compute gradient per profile using central differences (positional, so a non-unique index is safe)
+    for pos in df_out.groupby(profile_col, sort=False).indices.values():
+        group = df_out.iloc[pos]
+
         # Average duplicate depths, drop NaNs
         depths, vals = _profile_levels(group, depth_col, value_col)
         if len(depths) < 2:
@@ -202,9 +212,10 @@ def vertical_gradient(df: pd.DataFrame,
 
         # Compute gradient and map it back to every row at that depth
         dv = pd.Series(np.gradient(vals, depths), index=depths)
-        valid = group[[depth_col, value_col]].dropna()
-        df_out.loc[valid.index, grad_col] = valid[depth_col].map(dv).values
+        valid = group[[depth_col, value_col]].notna().all(axis=1).to_numpy()
+        grad[pos[valid]] = group[depth_col].iloc[np.flatnonzero(valid)].map(dv).to_numpy()
 
+    df_out[grad_col] = grad
     return df_out
 
 
@@ -238,8 +249,8 @@ def profile_completeness(df: pd.DataFrame,
     # Iterate over profiles
     rows = []
     for pid, group in df.groupby(profile_col):
-        # Drop nans
-        depths = group[depth_col].dropna().values
+        # Drop nans and repeated depths
+        depths = np.unique(group[depth_col].dropna().to_numpy())
 
         # Assemble output row
         row = {
@@ -276,7 +287,8 @@ def mixed_layer_depth(df: pd.DataFrame,
                       delta_density: float = 0.03,
                       delta_temp: float = 0.2,
                       reference_depth: float = 10.0,
-                      max_ref_distance: float | None = 5.0
+                      max_ref_distance: float | None = 5.0,
+                      max_gap: float | None = None
                       ) -> pd.DataFrame:
     """Estimate mixed layer depth (MLD) using the threshold method.
     If the threshold is not exceeded within the profile or no level lies close enough to the reference depth,
@@ -306,10 +318,15 @@ def mixed_layer_depth(df: pd.DataFrame,
         max_ref_distance (float or None): Maximum allowed distance [m] between
             ``reference_depth`` and the nearest measured depth. ``None`` disables
             the check. Default 5.0m.
+        max_gap (float or None): Maximum allowed distance [m] between the two
+            measured depths bracketing the threshold crossing. The crossing
+            depth is interpolated linearly between them, so a wider bracket
+            gives ``NaN``. ``None`` (default) disables the check.
     Returns:
         pandas.DataFrame: One row per profile with columns
             [profile_col, ``'MLD_m'``] (``NaN`` when the threshold is never
-            exceeded or the reference level is too far from ``reference_depth``).
+            exceeded, the reference level is too far from ``reference_depth``
+            or the crossing bracket is wider than ``max_gap``).
     """
     # Get column names
     if density_col is None and temperature_col is None:
@@ -354,6 +371,12 @@ def mixed_layer_depth(df: pd.DataFrame,
                 # Determine the crossed threshold (upper or lower)
                 target = v_ref + delta if vals[i] > v_ref else v_ref - delta
 
+                # No valid MLD if the crossing lies in a too wide gap
+                if max_gap is not None and depths[i] - depths[i - 1] > max_gap:
+                    logger.debug("mixed_layer_depth: Profile %s crosses the threshold in a gap wider than %s m",
+                                 pid, max_gap)
+                    break
+
                 # Linear interpolation to estimate exact crossing depth
                 mld = float(depths[i - 1] + (target - vals[i - 1]) * (depths[i] - depths[i - 1]) / (vals[i] - vals[i - 1]))
                 break
@@ -370,7 +393,8 @@ def pycnocline_depth(df: pd.DataFrame,
                      density_col: str,
                      depth_col: str = "LEV_M",
                      profile_col: str | list[str] | None = None,
-                     min_gradient: float = 0.0
+                     min_gradient: float = 0.0,
+                     max_gap: float | None = None
                      ) -> pd.DataFrame:
     """Find the depth of maximum density increase with depth (pycnocline depth).
 
@@ -386,6 +410,9 @@ def pycnocline_depth(df: pd.DataFrame,
             ``"PROFILE_NUMBER"``.
         min_gradient (float): Minimum gradient [kg/m3 per metre] to be
             considered a pycnocline. Default 0.0 (no filtering).
+        max_gap (float or None): Maximum allowed distance [m] between a depth level
+            and each of its neighbouring depth levels. The gradients at levels next to a wider
+            gap are ignored. ``None`` (default) disables the check.
     Returns:
         pandas.DataFrame: One row per profile with columns
             [profile_col, ``'pycnocline_depth_m'``, ``'max_gradient'``].
@@ -407,8 +434,22 @@ def pycnocline_depth(df: pd.DataFrame,
 
         # Pycnocline = depth of maximum d(density)/dz (strongest increase with depth)
         grad = np.gradient(rho, depths)
-        idx = int(np.argmax(grad))
 
+        # Ignore depth levels next to a gap wider than max_gap
+        if max_gap is not None:
+            wide = np.diff(depths) > max_gap
+            grad[:-1][wide] = np.nan
+            grad[1:][wide] = np.nan
+            if np.isnan(grad).all():
+                # All depth levels are too far apart
+                rows.append({**_profile_key_dict(profile_col, pid),
+                             "pycnocline_depth_m": np.nan, "max_gradient": np.nan})
+                continue
+
+        # Max. gradient
+        idx = int(np.nanargmax(grad))
+
+        # Check if gradient is significant (>0 and >min_gradient)
         significant = grad[idx] > 0 and grad[idx] >= min_gradient
         rows.append({
             **_profile_key_dict(profile_col, pid),

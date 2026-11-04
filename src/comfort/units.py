@@ -377,7 +377,15 @@ class ConversionFormulas:
         return allowed is None or param_table_name(parameter) in allowed  # check if passed param is contained
 
     def get_molar_mass(self, parameter: str) -> float:
-        """Return the molar mass for parameter."""
+        """Return the molar mass of the element (N, P, Si, Ba), not of the ion.
+
+        Args:
+            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+        Returns:
+            float: Molar mass.
+        Raises:
+            ValueError: If no molar mass is defined for *parameter*.
+        """
         mask = self.molar_masses["NAME_TABLE"] == param_table_name(parameter)
         if not mask.any():
             raise ValueError(f"Molar mass not defined for {parameter}")

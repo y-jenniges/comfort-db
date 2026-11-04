@@ -1,6 +1,7 @@
 """Tests for comfort.qc."""
 import logging
 import sqlite3
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -97,6 +98,18 @@ class TestBuildWhereClause:
         assert [r[0] for r in rows] == apply_qc_flags(df, flags)["VAL"].tolist()
 
 
+    # Missing flags are dropped by both paths for every operator (SQL: NULL, pandas: NaN)
+    @pytest.mark.parametrize("op_", [">", ">=", "<", "<=", "==", "!="])
+    def test_sql_and_pandas_agree_on_nan_flag(self, op_):
+        df = pd.DataFrame({"PQF1": [0, 1, np.nan, 1, np.nan], "VAL": [10.0, 20.0, 30.0, 40.0, 50.0]})
+        flags = [("PQF1", f"{op_}1")]
+        conn = sqlite3.connect(":memory:")
+        df.to_sql("t", conn, index=False)
+        rows = conn.execute("SELECT VAL FROM t " + build_where_clause(flags) + " ORDER BY VAL").fetchall()
+        conn.close()
+        assert [r[0] for r in rows] == apply_qc_flags(df, flags)["VAL"].tolist()
+
+
 class TestQcConditions:
     # No flags yield no conditions
     @pytest.mark.parametrize("flags", [None, [], QC_ALL])
@@ -166,6 +179,12 @@ class TestApplyQcFlags:
     def test_ne_operator(self):
         result = apply_qc_flags(self._df(), [QCFilter("PQF1", "!=0")])
         assert (result["PQF1"] != 0).all()
+
+    # "!=" drops rows with a missing flag instead of keeping them
+    def test_ne_operator_drops_nan(self):
+        df = pd.DataFrame({"PQF1": [0, np.nan, 1]})
+        result = apply_qc_flags(df, [QCFilter("PQF1", "!=0")])
+        assert result["PQF1"].tolist() == [1.0]
 
     # The QC_GOOD preset combines both PQF1 and PQF2 thresholds
     def test_qc_good_preset(self):

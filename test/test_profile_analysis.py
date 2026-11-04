@@ -1,4 +1,6 @@
 """Tests for comfort.profile_analysis, i.e. profile-level analysis functions."""
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -131,6 +133,21 @@ class TestVerticalGradient:
         out = vertical_gradient(df)
         assert np.allclose(out["VAL_gradient"], -0.03)
 
+    # A non-unique index (e.g. concatenated frames) gives the same result as a unique one
+    @pytest.mark.parametrize("shuffle", [False, True])
+    def test_non_unique_index(self, shuffle):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 2, 2, 2],
+                           "LEV_DBAR": [0, 100, 200, 0, 100, 200],
+                           "VAL": [10.0, 8.0, 6.0, 5.0, 4.0, 1.0]})
+        expected = vertical_gradient(df)["VAL_gradient"].to_numpy()
+        # Same rows with repeated labels, as after pd.concat without ignore_index
+        dup = pd.concat([df.iloc[:3], df.iloc[3:]]).set_axis([0, 1, 2, 0, 1, 2])
+        if shuffle:
+            dup = dup.iloc[[4, 0, 5, 2, 3, 1]]
+            expected = vertical_gradient(df.iloc[[4, 0, 5, 2, 3, 1]].reset_index(drop=True))["VAL_gradient"].to_numpy()
+        out = vertical_gradient(dup)
+        assert np.allclose(out["VAL_gradient"].to_numpy(), expected)
+
 
 class TestMixedLayerDepth:
     @staticmethod
@@ -202,6 +219,23 @@ class TestMixedLayerDepth:
         assert pd.isna(mixed_layer_depth(df, density_col="sigma0")["MLD_m"].iloc[0])
         result = mixed_layer_depth(df, density_col="sigma0", max_ref_distance=None)
         assert not pd.isna(result["MLD_m"].iloc[0])
+
+    # A crossing inside a gap wider than max_gap gives no MLD
+    def test_max_gap_crossing_in_wide_gap_gives_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 3,
+                           "LEV_DBAR": [10.0, 20.0, 170.0],
+                           "sigma0": [25.0, 25.0, 25.2]})
+        assert not pd.isna(mixed_layer_depth(df, density_col="sigma0")["MLD_m"].iloc[0])
+        assert pd.isna(mixed_layer_depth(df, density_col="sigma0", max_gap=100)["MLD_m"].iloc[0])
+
+    # A wide gap that does not contain the crossing does not matter
+    def test_max_gap_wide_gap_without_crossing_is_ignored(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 4,
+                           "LEV_DBAR": [10.0, 20.0, 30.0, 130.0],
+                           "sigma0": [25.0, 25.0, 25.1, 25.3]})
+        # Crossing is between 20 m and 30 m, the 100 m gap lies below it
+        result = mixed_layer_depth(df, density_col="sigma0", max_gap=50)
+        assert result["MLD_m"].iloc[0] == pytest.approx(20.0 + 0.03 / 0.1 * 10.0)
 
     # When both are given, density_col takes priority over temperature_col
     def test_density_preferred_over_temp(self):
@@ -332,6 +366,33 @@ class TestPycnoclineDepth:
         assert len(result) == 2
         assert (result["pycnocline_depth_m"] == 100.0).all()
 
+    # Levels next to a wide gap are skipped, the next-best level wins
+    def test_max_gap_skips_levels_next_to_gap(self):
+        # Levels 0, 50, 100, 400, 450: the gap 100-400 invalidates the gradients at 100 and 400
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 5,
+                           "LEV_DBAR": [0.0, 50.0, 100.0, 400.0, 450.0],
+                           "sigma0": [25.0, 25.1, 25.2, 27.0, 27.2]})
+        assert pycnocline_depth(df, density_col="sigma0")["pycnocline_depth_m"].iloc[0] == 400.0
+        result = pycnocline_depth(df, density_col="sigma0", max_gap=100)
+        assert result["pycnocline_depth_m"].iloc[0] == 450.0
+        assert result["max_gradient"].iloc[0] == pytest.approx(0.004)
+
+    # All levels excluded by max_gap gives NaN depth and gradient
+    def test_max_gap_excluding_all_levels_gives_nan(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1] * 3,
+                           "LEV_DBAR": [0.0, 200.0, 400.0],
+                           "sigma0": [25.0, 26.0, 27.0]})
+        result = pycnocline_depth(df, density_col="sigma0", max_gap=100)
+        assert len(result) == 1
+        assert pd.isna(result["pycnocline_depth_m"].iloc[0])
+        assert pd.isna(result["max_gradient"].iloc[0])
+
+    # max_gap larger than every spacing changes nothing
+    def test_max_gap_large_is_noop(self):
+        df = self._profile_with_pycno_at_100()
+        pd.testing.assert_frame_equal(pycnocline_depth(df, density_col="sigma0", max_gap=1000),
+                                      pycnocline_depth(df, density_col="sigma0"))
+
 
 class TestProfileCompleteness:
     # Level count and depth range are computed per profile
@@ -349,6 +410,15 @@ class TestProfileCompleteness:
         result = profile_completeness(df, reference_depths=[0, 50, 100, 150, 200])
         # Covers 0, 100, 200 within ±5 dbar → 3/5
         assert abs(result["coverage_fraction"].iloc[0] - 3/5) < 1e-9
+
+
+    # Repeated readings at one depth count as one level
+    def test_duplicate_depths_counted_once(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 1], "LEV_DBAR": [0, 100, 100, 200],
+                           "VAL": [1.0, 2.0, 2.5, 3.0]})
+        result = profile_completeness(df)
+        assert result["n_levels"].iloc[0] == 3
+        assert result["depth_range"].iloc[0] == 200.0
 
 
 class TestInterpolateDepthLevels:
@@ -464,7 +534,47 @@ class TestDetectParamCol:
         assert "OXYGEN" in result.columns
 
 
+    # Two possible value columns cannot be told apart -> Raises
+    def test_ambiguous_columns_raise_clear_error(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [0.0, 100.0, 200.0],
+                           "TEMPERATURE": [10.0, 8.0, 6.0],
+                           "SALINITY": [35.0, 35.1, 35.2]})
+        with pytest.raises(KeyError, match="TEMPERATURE.*SALINITY|SALINITY.*TEMPERATURE"):
+            vertical_gradient(df)
+
+    # An explicit value_col still works when the frame carries other measured columns
+    def test_explicit_value_col_with_other_measured_columns(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1],
+                           "LEV_DBAR": [0.0, 100.0, 200.0],
+                           "TEMPERATURE": [10.0, 8.0, 6.0],
+                           "SALINITY": [35.0, 35.1, 35.2]})
+        assert "TEMPERATURE_gradient" in vertical_gradient(df, value_col="TEMPERATURE").columns
+
+
 class TestDetectDepthCol:
+    # A substituted depth column is reported, an explicitly requested one is not
+    def test_fallback_is_logged(self, caplog):
+        df = pd.DataFrame({"LEV_DBAR": [0.0], "VAL": [1.0]})
+
+        # LEV_M requested
+        with caplog.at_level(logging.WARNING):
+            detect_depth_col(df)
+        assert "'LEV_M' not found, using 'LEV_DBAR' (dbar treated as m)" in caplog.text
+        caplog.clear()
+
+        # LEV_DBAR requested (no warning since it is given)
+        with caplog.at_level(logging.WARNING):
+            detect_depth_col(df, "LEV_DBAR")
+        assert caplog.text == ""
+
+    # The note names the substitution in the right direction
+    def test_fallback_to_lev_m_is_logged(self, caplog):
+        df = pd.DataFrame({"LEV_M": [0.0], "VAL": [1.0]})
+        with caplog.at_level(logging.WARNING):
+            detect_depth_col(df, "LEV_DBAR")
+        assert "'LEV_DBAR' not found, using 'LEV_M' (m treated as dbar)" in caplog.text
+
     # LEV_M is used when present
     def test_lev_m_found(self):
         df = pd.DataFrame({"LEV_M": [0.0], "VAL": [1.0]})

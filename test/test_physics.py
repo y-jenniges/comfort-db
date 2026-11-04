@@ -254,6 +254,35 @@ class TestComputeBuoyancyFrequency:
         assert result.empty
         assert list(result.columns) == ["ID", "PROFILE_NUMBER", "pressure_mid", "N2"]
 
+    # Repeated pressures give no NaN/inf row and the same N2 as the de-duplicated profile
+    def test_repeated_pressure_no_nan_rows(self):
+        df = pd.concat([self._stable_df(), self._stable_df().iloc[[1]]], ignore_index=True)
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        assert np.isfinite(result["N2"]).all()
+        assert np.allclose(result["N2"], compute_buoyancy_frequency(self._stable_df(), "SA", "CT")["N2"])
+
+    # Repeated pressures with differing values are averaged, no inf
+    def test_repeated_pressure_values_averaged(self):
+        dup = self._stable_df().iloc[[1]].assign(SA=34.6, CT=14.0)
+        df = pd.concat([self._stable_df(), dup], ignore_index=True)
+        result = compute_buoyancy_frequency(df, "SA", "CT")
+        expected = self._stable_df().assign(SA=[34.0, 34.55, 35.0], CT=[20.0, 14.5, 10.0])
+        assert len(result) == 2
+        assert np.allclose(result["N2"], compute_buoyancy_frequency(expected, "SA", "CT")["N2"])
+
+    # A profile with a single distinct pressure has no gradient
+    def test_single_distinct_pressure_skipped(self):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1], "LEV_DBAR": [10.0, 10.0], "SA": [34.0, 34.1], "CT": [20.0, 19.9]})
+        assert compute_buoyancy_frequency(df, "SA", "CT").empty
+
+    # max_gap drops level pairs that are too far apart
+    def test_max_gap_drops_wide_pairs(self):
+        df = self._stable_df().assign(LEV_DBAR=[0.0, 100.0, 600.0])
+        assert len(compute_buoyancy_frequency(df, "SA", "CT")) == 2
+        result = compute_buoyancy_frequency(df, "SA", "CT", max_gap=200)
+        assert len(result) == 1
+        assert result["pressure_mid"].iloc[0] < 100
+
 
 class TestComputePotentialVorticity:
     # Output is a pandas Series
@@ -389,6 +418,15 @@ class TestConvertToPotentialTemperature:
         converted = convert_to_potential_temperature(averaged)
         assert converted["TEMPERATURE"]["TEMPERATURE"].iloc[0] < averaged["TEMPERATURE"]["TEMPERATURE"].iloc[0]
 
+    # The converted frame holds only the location columns and the potential temperature
+    def test_returns_only_location_and_temperature_columns(self):
+        averaged = {
+            "TEMPERATURE": pd.DataFrame([{**self._loc(), "TEMPERATURE": 4.0}]),
+            "SALINITY": pd.DataFrame([{**self._loc(), "SALINITY": 35.0}]),
+        }
+        converted = convert_to_potential_temperature(averaged)["TEMPERATURE"]
+        assert list(converted.columns) == ["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME", "TEMPERATURE"]
+
     # Parameters other than TEMPERATURE pass through unchanged
     def test_leaves_other_parameters_untouched(self):
         averaged = {
@@ -399,6 +437,31 @@ class TestConvertToPotentialTemperature:
         result = convert_to_potential_temperature(averaged)
         assert result["SALINITY"]["SALINITY"].iloc[0] == pytest.approx(35.0)
         assert result["OXYGEN"]["OXYGEN"].iloc[0] == pytest.approx(200.0)
+
+    # A NaN or absent LEV_DBAR is resolved from LEV_M and LATITUDE instead of giving NaN or a KeyError
+    @pytest.mark.parametrize("drop_column", [False, True])
+    def test_resolves_missing_pressure(self, drop_column):
+        t_ref = {"TEMPERATURE": pd.DataFrame([{**self._loc(LEV_DBAR=gsw.p_from_z(-1000.0, 10.0)), "TEMPERATURE": 4.0}]),
+                 "SALINITY": pd.DataFrame([{**self._loc(), "SALINITY": 35.0}])}
+        expected = convert_to_potential_temperature(t_ref)["TEMPERATURE"]["TEMPERATURE"].iloc[0]
+        t_df = pd.DataFrame([{**self._loc(LEV_DBAR=np.nan), "TEMPERATURE": 4.0}])  # set pressure to NaN
+        if drop_column:
+            t_df = t_df.drop(columns="LEV_DBAR")
+        averaged = {"TEMPERATURE": t_df, "SALINITY": t_ref["SALINITY"]}
+        result = convert_to_potential_temperature(averaged)["TEMPERATURE"]["TEMPERATURE"].iloc[0]
+        assert result == pytest.approx(expected)
+
+    # Temperature rows without co-located salinity become NaN and the loss is logged
+    def test_logs_rows_without_salinity(self, caplog):
+        averaged = {
+            "TEMPERATURE": pd.DataFrame([{**self._loc(), "TEMPERATURE": 4.0},
+                                         {**self._loc(LEV_M=500.0, LEV_DBAR=504.0), "TEMPERATURE": 6.0}]),
+            "SALINITY": pd.DataFrame([{**self._loc(), "SALINITY": 35.0}]),
+        }
+        with caplog.at_level(logging.WARNING):
+            result = convert_to_potential_temperature(averaged)["TEMPERATURE"]
+        assert result["TEMPERATURE"].isna().sum() == 1
+        assert "1 of 2" in caplog.text
 
     # SALINITY is required to convert TEMPERATURE
     def test_raises_when_salinity_missing(self):

@@ -150,7 +150,8 @@ def apply_qc_flags(df: pd.DataFrame,
         # A missing flag column would silently leave the data unfiltered (raises)
         column = find_col(df, column)
 
-        mask &= _OP_MAP[operator](df[column], float(number))
+        # Assemble mask and drop NaNs (so comparison possible for such entries)
+        mask &= df[column].notna() & _OP_MAP[operator](df[column], float(number))
 
     return df[mask].copy()
 
@@ -162,9 +163,12 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     (known COMFORT data issue, about 14% of oxygen rows are affected).
     See ``known_data_issues/known_data_issues.md``.
 
+    Values are compared as they are in *df*. The issue exists for rows that are already
+    in de default unit (umol/kg), so the check is reliable on ``load_comfort`` output.
+
     Args:
         df (pandas.DataFrame): Must contain *oxygen_col* and a Practical
-            Salinity column (``SALINITY``/``salinity``).
+            Salinity column (``SALINITY``/``salinity``), not Absolute Salinity.
         oxygen_col (str): Oxygen value column. Default ``'OXYGEN'``.
         salinity_col (str): Practical Salinity column to compare against.
             ``None`` auto-detects ``SALINITY``/``salinity``.
