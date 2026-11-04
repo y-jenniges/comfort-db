@@ -100,7 +100,7 @@ def plot_correlation(
     # Drop rows with missing values
     valid = df[[x_col, y_col]].dropna()
     if colour_col and colour_col in df.columns:
-        # Ensure colour_col is present
+        # Drop rows without a colour value
         valid = df[[x_col, y_col, colour_col]].dropna()
     if valid.empty:
         logger.warning("plot_correlation: No valid data after dropping NaNs")
@@ -117,7 +117,7 @@ def plot_correlation(
             reduce_C_function=np.mean, gridsize=gridsize, cmap=cmap, mincnt=1,
         )
 
-        # Colorbar
+        # Colour bar
         ax.figure.colorbar(hb, ax=ax, label=_pretty_label(colour_col) if has_color else "Count")
     else:
         # Scatter plot with optional colour coding
@@ -154,7 +154,7 @@ def plot_correlation(
     ax.set_xlabel(xlabel or x_col)
     ax.set_ylabel(ylabel or y_col)
 
-    # Legend
+    # Legend (only the regression line is labelled)
     if regression:
         ax.legend(loc="lower right")
 
@@ -258,6 +258,7 @@ _TEMP_LABELS: dict[str, str] = {
     "pt0": r"$\theta$ [°C]",
     "t": r"$T$ [°C]",
 }
+# Variable types for which the density contours are exact
 _TEOS10_SAL = {"SA"}
 _TEOS10_TEMP = {"CT"}
 
@@ -345,13 +346,13 @@ def plot_ts_diagram(
         # Use passed colour_col
         use_color = colour_col
     elif kind != "hexbin":
-        # Default (for scatter) is depth observation count
+        # Default for scatter: Colour by depth
         use_color = depth_col
     else:
-        # Default (for hexbin) is observation count
+        # Default for hexbin: Colour by observation count
         use_color = None
 
-    # Define which columns need full data
+    # Columns that must not contain NaNs
     needed = [temperature_col, salinity_col]
     if use_color in df.columns:
         needed.append(use_color)
@@ -362,7 +363,7 @@ def plot_ts_diagram(
         logger.warning("plot_ts_diagram: No valid data after dropping NaNs.")
         return None
 
-    # Warning if density contours need different sal/temp to be accurate
+    # Warn if the contours would be computed from the wrong variable types
     if density_contours and (salinity_type not in _TEOS10_SAL or temperature_type not in _TEOS10_TEMP):
         logger.warning(
             "Density contours use gsw.rho(SA, CT, 0) but salinity_type=%r, temperature_type=%r - "
@@ -379,6 +380,7 @@ def plot_ts_diagram(
         t_min = ylim[0] if ylim else valid[temperature_col].min()
         t_max = ylim[1] if ylim else valid[temperature_col].max()
 
+        # Pad the contour grid slightly (0.5 if all values are equal)
         s_pad = 0.01 * abs(s_max - s_min) or 0.5
         t_pad = 0.1 * abs(t_max - t_min) or 0.5
         s_min -= s_pad

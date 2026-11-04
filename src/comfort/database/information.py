@@ -175,7 +175,7 @@ def get_names_of_all_parameter_tables(conn: sqlite3.Connection, like_pattern: st
     Returns:
         list[str]: Matching table/view names.
     """
-    # Exclude tables with numeric suffixes (e.g. grid-mapped tables) unless requested
+    # Exclude tables with numeric suffixes (e.g. P_<parameter>_<id> tables) unless requested
     digits_filter = "" if include_digits else "and name not glob '*_[0-9]*'"
 
     # Build the query
@@ -233,7 +233,7 @@ def get_minmax(conn: sqlite3.Connection, column: str = "LATITUDE", column_type: 
         raw = cur.fetchone()
         res = [convert(x) for x in raw]
 
-        # Set the column minimum/maximum (use first when multiple entries are returned)
+        # Keep the global minimum and maximum across the tables
         if column_minimum is None or column_minimum > res[0]:
             column_minimum = res[0]
         if column_maximum is None or column_maximum < res[1]:
@@ -368,10 +368,11 @@ def find_spatiotemporal_duplicates(conn: sqlite3.Connection, parameters: list[st
     Returns:
         tuple: ``(summary, details)``. *summary* is a DataFrame with columns ``[parameter,
         number of samples, number of row duplicates, number of time loc duplicates,
-        proportion of row duplicates, proportion of time loc duplicates]``. *details* maps
-        each parameter in *summary* to ``{"time_loc": ..., "rows": ...}``, the duplicated
-        (ID, LEV_M) groups with ``size``, ``mean`` and ``std`` and the exactly duplicated
-        rows with ``size``.
+        proportion of row duplicates, proportion of time loc duplicates]`` (the proportions in
+        percent).
+        *details* maps each parameter in *summary* to ``{"time_loc": ..., "rows": ...}``.
+        ``time_loc`` holds the duplicated (ID, LEV_M) groups, ``rows`` the exactly duplicated
+        rows. Both have a ``size`` column (number of copies), ``time_loc`` also has ``mean`` and ``std``.
     """
     cursor = conn.cursor()
     quality_statement = build_where_clause(quality_flags)

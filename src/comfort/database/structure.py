@@ -21,7 +21,8 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
                                     table_type: str = "view") -> None:
     """Create a UNION ALL table/view combining multiple parameters.
 
-    Adds a PARAM_NAME column. Assumes P_* tables exist.
+    Adds a PARAM_NAME column. Parameters without a ``P_*`` table are skipped with a warning.
+    The result is named ``P_COMBINED`` and only created if it does not exist yet.
 
     Args:
         conn (sqlite3.Connection): Connection to the database.
@@ -52,7 +53,7 @@ def create_combined_parameter_table(conn: sqlite3.Connection, parameters: list[s
         view_exists = does_table_exist(conn, param_table_name(p), "view")
         table_exists = does_table_exist(conn, param_table_name(p), "table")
 
-        # Build data-fetching query
+        # One SELECT query per parameter table that exists
         if view_exists or table_exists:
             select_params.append(
                 f"SELECT '{p}' AS PARAM_NAME, {', '.join(columns)} "

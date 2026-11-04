@@ -52,7 +52,7 @@ def main():
         for param, df_param in raw.items():
             log.info("  %-12s %10d rows", param, len(df_param))
 
-        # Define plotting label (oxygen is converted to umol/kg on load; unit parts separated by a space like the SA label)
+        # Plotting label (oxygen is converted to umol/kg on load)
         oxygen_label = r"Oxygen [µmol kg$^{-1}$]"
 
     # Drop oxygen rows that are suspected mislabelled salinity values

@@ -230,7 +230,7 @@ def compare_stats(
             c for c in df.select_dtypes("number").columns if c != group_col
         )
 
-    # Filter to the requested group labels
+    # Filter to the requested group labels (all groups if none are given)
     temp = df.copy()
     if labels is not None:
         temp = temp[temp[group_col].isin(labels)]

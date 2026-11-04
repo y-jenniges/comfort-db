@@ -152,10 +152,10 @@ def along_track_distance(df: pd.DataFrame, lon_col: str = "LONGITUDE",
 
     # Great-circle distance between consecutive stations
     if len(stations) < 2:
-        # No distance for one station possible
+        # Fewer than two stations: No distance
         cum_km = np.zeros(len(stations))
     else:
-        # Distance between >1 stations
+        # Step lengths [km] between consecutive stations
         step_km = gsw.distance(
             stations["lon"].values.astype(float), stations["lat"].values.astype(float)
         ) / 1000.0
@@ -193,7 +193,7 @@ def _get_coast_points(resolution, coastline_geom):
         except ImportError:
             pass
 
-        # Extracting coordinates
+        # Collect the vertices
         if hasattr(coastline_geom, "__iter__") and not hasattr(coastline_geom, "geoms"):
             for geom in coastline_geom:
                 _extract_coords(geom, coords)
@@ -245,7 +245,7 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     if region_name_col is None:
         region_name_col = next((c for c in _NAME_CANDIDATES if c in gdf.columns), None)
 
-    # Ensure that a code and name columns were found
+    # Both a code and a name column are needed
     if code_col is None or region_name_col is None:
         raise ValueError(
             f"Could not detect code/name columns in {list(gdf.columns)}. "
@@ -355,7 +355,7 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     * **CSV path** with columns ``name`` (or *region_name_col*) and
       ``geometry`` (WKT) - requires ``shapely``.
     * **Shapefile path** (``.shp``) - requires ``geopandas``.
-    * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``.
+    * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``. A GeoSeries names its regions by its index.
 
     Args:
         df (pandas.DataFrame): DataFrame with longitude and latitude columns.
@@ -416,7 +416,7 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     # Iterate over observations
     labels = []
     for _, row in df.iterrows():
-        # Containment test
+        # Point-in-region test (a boundary counts as inside)
         pt = Point(row[lon_col], row[lat_col])
         match = next((region_name for region_name, poly in named_regions if poly.intersects(pt)), None)
         labels.append(match)
@@ -448,11 +448,11 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
                 region_name_col: str = "name") -> tuple[float, float, float, float]:
     """Return the lon/lat bounding box of one or more regions.
 
-    Intended to derive a bounding box for a cheap SQL query before an exact polygon refined region search,
+    Intended to derive a bounding box for a cheap SQL query before the exact polygon search,
     see ``region=`` on :func:`comfort.io.load_comfort`/:func:`~comfort.io.read_parameter`/:func:`~comfort.io.subset_region`.
 
-    A region that crosses the antimeridian (+-180°) must be split as one polygon per side.
-    The return value indicates antimeridian-crossing by lon_min > than lon_max.
+    A region that crosses the antimeridian (+-180°) must be stored as one polygon per side.
+    The box then wraps around, i.e. ``lon_min > lon_max``.
 
     Args:
         regions: Region definition(s), same formats as water_mass_masks.
@@ -470,7 +470,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
     # Longitude intervals of the parts, sorted west to east
     intervals = sorted((b[0], b[2]) for b in bounds)
 
-    # Find longitude range (find the widest empty gap between the regions and leave it out -> the shortest range remains)
+    # Longitude range: Leave out the widest empty gap between the parts, so that the shortest range remains
     hi = intervals[0][1]  # eastern end of the intervals merged so far
     lon_min, lon_max = intervals[0][0], max(h for _, h in intervals)  # plain range
     widest = lon_min + 360 - lon_max  # gap from the easternmost end around to the westernmost start
@@ -523,7 +523,7 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
 def _check_lonlat(named_regions):
     """Raise ValueError if any region coordinate is outside lon/lat range."""
     for region_name, poly in named_regions:
-        # Skip empt polygons
+        # Skip empty polygons
         if poly.is_empty:
             continue
 
@@ -727,7 +727,7 @@ def _nearest_labels(obs_lon, obs_lat, grid_lon, grid_lat, grid_labels):
     """Nearest-neighbour label lookup on the unit sphere (works at any latitude and across +-180°)."""
     from scipy.spatial import cKDTree
 
-    # Construct neighbourhood graph on unit sphere coordinates
+    # Build a k-d tree on unit sphere coordinates
     tree = cKDTree(_to_unit_sphere(grid_lon.astype(float), grid_lat.astype(float)))
 
     # Return the one nearest neighbour for each observation

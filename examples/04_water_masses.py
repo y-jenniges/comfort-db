@@ -67,7 +67,7 @@ if __name__ == "__main__":
              .merge(averaged["NITRATE"], on=loc_cols))
     df_wm = add_teos10_variables(
         df_wm, sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR",
-    )  # adds sigma0
+    )  # adds SA, CT and sigma0
     df_wm["spiciness0"] = compute_spiciness(df_wm["SA"], df_wm["CT"])  # adds spiciness
     print(df_wm[["SALINITY", "TEMPERATURE", "sigma0", "spiciness0"]]
           .head(5).to_string(index=False), "\n")

@@ -43,7 +43,7 @@ with comfort.connect(DB_PATH) as conn:
     print("--- Variable summary (QC_GOOD) ---")
     print(summary.to_string(index=False), "\n")
 
-# --- 2. load_comfort with a file path (manages connection automatically)  --------- #
+# --- 2. load_comfort with a file path (manages connection automatically) --------- #
 # Load parameters of interest (filtered for quality, spatial and temporal extent)
 dfs = comfort.load_comfort(
     DB_PATH,
@@ -60,7 +60,7 @@ for parameter, df in dfs.items():
 print()
 
 # --- 3. xarray output with depth interpolation ------------------------------------ #
-# Load nitrate data as xarray, mapped given depth levels
+# Load nitrate data as xarray, interpolated onto the given depth levels
 ds = comfort.load_comfort(
     DB_PATH,
     parameters=["NITRATE"],
@@ -89,5 +89,5 @@ if BATHYMETRY_PATH:
     print(f"Time steps: {len(grid.time_array)}")
 else:
     print(
-        "Skipping gridding example - set COMFORT_BATHYMETRY_PATH in .env to enable."
+        "Skipping gridding example - set BATHYMETRY_PATH in .env to enable."
     )

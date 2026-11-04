@@ -55,7 +55,7 @@ _CALLBACKS: list = []
 
 
 def _register_callback(*args, **kwargs):
-    """Collect a callback, which create_app() can attach to."""
+    """Collect a callback, so that create_app() can attach it to each new app."""
     def decorator(func):
         _CALLBACKS.append((args, kwargs, func))
         return func
@@ -268,7 +268,7 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
                 )),
             ], className="mb-3"),
 
-            # Colour by (map only)
+            # Colour by (applies to all plot types)
             dbc.Card([
                 dbc.CardHeader("Colour by (map)"),
                 dbc.CardBody(dbc.Select(
@@ -730,7 +730,7 @@ def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
                 lonaxis_range=[lon_min - lon_pad, lon_max + lon_pad],
             )
     elif plot_type == "missing":
-        # Missing value fraction per parameter column
+        # Share of missing values (percent) per parameter column
         meta_cols = {"idx", "LATITUDE", "LONGITUDE", "LEV_M",
                      "DATEANDTIME", "water"}
         param_cols = [c for c in df.columns if c not in meta_cols]
@@ -785,6 +785,7 @@ def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
     prevent_initial_call=True,
 )
 def _load_csv(contents, filename):
+    """Read the uploaded CSV and set up the parameter selector and the depth and time sliders."""
     if contents is None:
         raise PreventUpdate
 
@@ -877,7 +878,7 @@ def _load_csv(contents, filename):
     prevent_initial_call=True,
 )
 def _render_csv(value_col, depth_range, time_idx_range, plot_type, show_global):
-    """Query a depth/time range from the CSV table and render."""
+    """Filter the cached CSV table to the selected depth and time range and render it."""
     if _csv_cache["df"] is None or not value_col:
         raise PreventUpdate
 
@@ -923,6 +924,7 @@ def _render_csv(value_col, depth_range, time_idx_range, plot_type, show_global):
     Input("csv-depth-slider", "value"),
 )
 def _show_csv_depth(val):
+    """Show the selected depth range below the slider."""
     if not val:
         return ""
     return f"Depth: {_format_range_label(val[0], val[1], '{:.0f}')}m"
@@ -933,6 +935,7 @@ def _show_csv_depth(val):
     Input("csv-time-slider", "value"),
 )
 def _show_csv_time(idx_range):
+    """Show the selected time range below the slider."""
     times = _csv_cache.get("times", [])
     if not times or not idx_range:
         return ""

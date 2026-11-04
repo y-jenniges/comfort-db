@@ -54,7 +54,7 @@ def plot_annual_coverage(
         # Per-year counts
         counts = pd.to_datetime(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
 
-        # Normalise
+        # Relative to the busiest year
         if normalise:
             counts = counts / counts.max()
 
@@ -280,10 +280,10 @@ def plot_missing_value_info(
     save_as: str | None = None,
     dpi: int = 300,
 ) -> matplotlib.axes.Axes:
-    """Bar chart of missing-value fractions per parameter.
+    """Bar chart of the percentage of missing values per parameter.
 
     Args:
-        num_nulls: DataFrame with columns ``'parameter'`` and ``'relative'``.
+        num_nulls: DataFrame with columns ``'parameter'`` and ``'relative'`` (percent).
         ax: Axes to draw into.
         save_as: Save path.
         dpi: Resolution (dots per inch) used when saving.
@@ -295,7 +295,7 @@ def plot_missing_value_info(
 
     # Bar chart
     num_nulls.plot(
-        kind="bar", title="Fraction of missing values",
+        kind="bar", title="Missing values per parameter",
         x="parameter", y="relative", legend=False,
         ylabel="%", xlabel="", grid=True, ax=ax,
     )

@@ -39,7 +39,7 @@ def _resolve_profile_col(df: pd.DataFrame, profile_col: str | list[str] | None) 
     if "ID" in df.columns and "PROFILE_NUMBER" in df.columns:
         return ["ID", "PROFILE_NUMBER"]
 
-    # Fallback
+    # Fallback: PROFILE_NUMBER alone
     return "PROFILE_NUMBER"
 
 
@@ -75,7 +75,7 @@ def _detect_value_col(df, value_col):
     if column is not None:
         return column
 
-    # Infer potential candidates
+    # Candidates: All columns that are not known non-value columns
     known = {c.upper() for c in _KNOWN_NON_VALUE_COLS}
     candidates = [c for c in df.columns if str(c).upper() not in known]
     if len(candidates) == 1:
@@ -106,7 +106,7 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
     # Use fallback (if depth_col does not exist)
     fallback = find_col(df, "LEV_DBAR" if depth_col.upper() == "LEV_M" else "LEV_M", required=False)
     if fallback is not None:
-        # Pressure [dbar] used to instead of depth [m] (or the other way round)
+        # Pressure [dbar] used instead of depth [m] (or the other way round)
         unit_note = "dbar treated as m" if fallback.upper() == "LEV_DBAR" else "m treated as dbar"
         logger.warning("detect_depth_col: %r not found, using %r (%s)", depth_col, fallback, unit_note)
         return fallback
@@ -249,7 +249,7 @@ def profile_completeness(df: pd.DataFrame,
     # Iterate over profiles
     rows = []
     for pid, group in df.groupby(profile_col):
-        # Drop nans and repeated depths
+        # Drop NaNs and repeated depths
         depths = np.unique(group[depth_col].dropna().to_numpy())
 
         # Assemble output row
@@ -323,12 +323,12 @@ def mixed_layer_depth(df: pd.DataFrame,
             depth is interpolated linearly between them, so a wider bracket
             gives ``NaN``. ``None`` (default) disables the check.
     Returns:
-        pandas.DataFrame: One row per profile with columns
+        pandas.DataFrame: One row per profile with at least two valid levels, with columns
             [profile_col, ``'MLD_m'``] (``NaN`` when the threshold is never
             exceeded, the reference level is too far from ``reference_depth``
             or the crossing bracket is wider than ``max_gap``).
     """
-    # Get column names
+    # At least one variable is needed
     if density_col is None and temperature_col is None:
         raise ValueError("Provide at least one of density_col or temperature_col")
 
@@ -414,7 +414,7 @@ def pycnocline_depth(df: pd.DataFrame,
             and each of its neighbouring depth levels. The gradients at levels next to a wider
             gap are ignored. ``None`` (default) disables the check.
     Returns:
-        pandas.DataFrame: One row per profile with columns
+        pandas.DataFrame: One row per profile with at least two valid levels, with columns
             [profile_col, ``'pycnocline_depth_m'``, ``'max_gradient'``].
             ``pycnocline_depth_m`` is ``NaN`` when the maximum gradient is
             not positive or below ``min_gradient``.
@@ -446,7 +446,7 @@ def pycnocline_depth(df: pd.DataFrame,
                              "pycnocline_depth_m": np.nan, "max_gradient": np.nan})
                 continue
 
-        # Max. gradient
+        # Level of the strongest gradient
         idx = int(np.nanargmax(grad))
 
         # Check if gradient is significant (>0 and >min_gradient)
@@ -465,16 +465,16 @@ def pycnocline_depth(df: pd.DataFrame,
 
 def _bracket_gap(z: np.ndarray, targets: np.ndarray) -> np.ndarray:
     """Distance between the two measured depths bracketing each target depth."""
-    # Get upper bracket/depth level index (max. is the last depth level)
+    # Index of the deeper bracketing level (at most the last level)
     idx = np.clip(np.searchsorted(z, targets, side="left"), 0, len(z) - 1)
 
     # Target depths that coincide with a depth level
     exact = np.isclose(z[idx], targets)
 
-    # Avoid idx_hi going negative (if idx is 0)
+    # Avoid index -1 when idx is 0
     idx_hi = np.maximum(idx, 1)
 
-    # Bracket widths/distance between the two depth levels
+    # Width of each bracket
     gap = z[idx_hi] - z[idx_hi - 1]
 
     # Return bracket widths (or zero for exact matches)
@@ -529,7 +529,7 @@ def interpolate_depth_levels(df: pd.DataFrame,
     # Interpolate each profile
     chunks = []
     for pid, group in df.groupby(profile_col):
-        # Average duplicate depths, drop nans (both interpolants need strictly increasing x)
+        # Average duplicate depths, drop NaNs (both interpolants need strictly increasing x)
         depths, vals = _profile_levels(group, depth_col, value_col)
         if len(depths) < 2:
             logger.debug("interpolate_depth_levels: profile %s has < 2 valid levels, skipped", pid)

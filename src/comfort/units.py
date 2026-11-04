@@ -86,16 +86,21 @@ class UnitsConverter:
                 density cannot be computed (missing/NaN salinity, temperature or
                 position): ``'constant'`` (default, use 1.025 kg/L), ``'drop'`` or
                 ``'raise'``. Counts are logged.
+        Returns:
+            pandas.DataFrame: The converted rows in their original order.
+        Raises:
+            ValueError: If an option is invalid or if rows cannot be converted and
+                *on_missing* or *density_fallback* is ``'raise'``.
         """
         # Ensure that only defined missingness policies are passed
         check_choice(on_missing, OnMissing, "on_missing")
         check_choice(density_fallback, DensityFallback, "density_fallback")
 
-        # Ensure unit id info is given
+        # Nothing to convert without unit IDs
         if "UNITS_ID" not in df.columns or df.empty:
             return df
 
-        # Check if default unit exists
+        # Nothing to convert to without a default unit
         target = self.default_unit_id(parameter)
         if target is None:
             logger.warning("convert_dataframe: no default unit for %s", parameter)
@@ -198,7 +203,7 @@ class UnitsConverter:
         return int(self.df_default_units.loc[mask, "UNITS_ID_DEFAULT"].iloc[0])
 
     def required_inputs(self, parameter: str, use_density: bool = False) -> tuple[bool, bool]:
-        """Returns which co-located measurements a conversions potentially need.
+        """Return which co-located measurements the conversions potentially need.
 
         Combines requirements of all conversions into the parameter's default unit
         (see :meth:`ConversionFormulas.is_allowed`).
@@ -210,9 +215,9 @@ class UnitsConverter:
             tuple[bool, bool]: ``(needs_temperature, needs_salinity)``.
         """
         target = self.default_unit_id(parameter)  # default unit ID
-        needs: set[str] = set()  # list of required co-located parameters
+        needs: set[str] = set()  # required co-located parameters
 
-        # Iterate over all potential targets
+        # Only parameters with a default unit have conversions
         if target is not None:
             # Iterate over all conversions with default unit ID as target
             for source, conversion_target in self.formulas.conversions:
@@ -248,7 +253,8 @@ class UnitsConverter:
 
         Args:
             tables (list[str]): Table names to convert.
-            use_density (bool): Use in-situ density.
+            use_density (bool): Use computed density (lab or in-situ, see :class:`ConversionFormulas`)
+                instead of the constant 1.025 kg/L.
             override_old_tables (bool): Replace the original table.
             on_missing (str): Policy for unconvertible rows
                 (``'drop'``, ``'keep'`` or ``'raise'``). Default ``'drop'``.
@@ -477,7 +483,7 @@ class ConversionFormulas:
                             "missing - cannot compute oxygen saturation")
             return temp.assign(VAL=np.nan, UNITS_ID=3)
 
-        # Unit conversion
+        # Saturation concentration, scaled by the measured percent saturation
         pt = self._potential_temperature_for_o2sol(df, sal_col, temp_col)
         o2_eq = gsw.O2sol_SP_pt(df[sal_col].to_numpy(dtype=float), pt)
         return temp.assign(VAL=temp["VAL"] * np.asarray(o2_eq) / 100, UNITS_ID=3)
@@ -514,11 +520,11 @@ class ConversionFormulas:
         if isinstance(dens, pd.Series):
             not_nan_dens = dens.notna()
 
-            # Check if there are any not-nan densities
+            # Drop rows with an undefined density ('drop' policy)
             if not not_nan_dens.all():
                 return df[not_nan_dens].copy(), dens[not_nan_dens]
 
-        # If no not-nan densities, return all data
+        # Nothing to drop
         return df.copy(), dens
 
     def lab_density(self, df: pd.DataFrame, use_density: bool,

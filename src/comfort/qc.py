@@ -131,13 +131,13 @@ def apply_qc_flags(df: pd.DataFrame,
     Args:
         df (pandas.DataFrame): DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
         quality_flags (QualityFlags): Quality flag filters, e.g. :data:`QC_GOOD`.
-          ``None`` or ``[]`` returns df unchanged.
+            ``None`` or ``[]`` returns an unfiltered copy.
     Returns:
         pandas.DataFrame: Filtered copy.
     Raises:
         KeyError: If a flag column is not in *df* (insensitive to casing).
     """
-    # Return plain df if no qc flags were provided
+    # No QC flags: Return an unfiltered copy
     if not quality_flags:
         return df.copy()
 
@@ -150,7 +150,7 @@ def apply_qc_flags(df: pd.DataFrame,
         # A missing flag column would silently leave the data unfiltered (raises)
         column = find_col(df, column)
 
-        # Assemble mask and drop NaNs (so comparison possible for such entries)
+        # Rows with a NaN flag are omitted (same as the SQL filter)
         mask &= df[column].notna() & _OP_MAP[operator](df[column], float(number))
 
     return df[mask].copy()
@@ -164,7 +164,7 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     See ``known_data_issues/known_data_issues.md``.
 
     Values are compared as they are in *df*. The issue exists for rows that are already
-    in de default unit (umol/kg), so the check is reliable on ``load_comfort`` output.
+    in the default unit (umol/kg), so the check is reliable on ``load_comfort`` output.
 
     Args:
         df (pandas.DataFrame): Must contain *oxygen_col* and a Practical
@@ -181,7 +181,7 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
         ValueError: If *tol* is negative.
     """
     if tol < 0:
-        # Tolerance must be positive (or zero)
+        # Tolerance must not be negative
         raise ValueError(f"flag_salinity_like_oxygen: tol must be >= 0, got {tol}")
 
     # Find the oxygen column

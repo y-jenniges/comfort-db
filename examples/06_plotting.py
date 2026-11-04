@@ -36,8 +36,7 @@ from comfort.units import UnitsConverter
 
 load_dotenv()
 
-# A profile is identified by (ID, PROFILE_NUMBER)
-# LEV_M adds the depth
+# A profile is identified by (ID, PROFILE_NUMBER), LEV_M adds the depth
 JOIN_KEY = ["ID", "PROFILE_NUMBER", "LEV_M"]
 
 
@@ -60,8 +59,7 @@ if __name__ == "__main__":
         oxygen_unit = UnitsConverter.from_connection(conn).default_unit_name("P_OXYGEN")
     oxygen_label = f"Oxygen [{oxygen_unit}]" if oxygen_unit else "Oxygen"
 
-    # Drop P_OXYGEN rows that are likely mislabelled salinity values
-    # (suspected COMFORT bug)
+    # Drop OXYGEN rows that are copies of the salinity (known COMFORT data issue)
     suspect = flag_salinity_like_oxygen(dfs["OXYGEN"])
     print(f"  Dropping {suspect.sum()}/{len(dfs['OXYGEN'])} OXYGEN rows with salinity-like values")
     dfs["OXYGEN"] = dfs["OXYGEN"][~suspect].copy()
@@ -133,7 +131,7 @@ if __name__ == "__main__":
                                binned=True)
     ax_transect.set_title("Oxygen section along cruise track")
 
-    # --- Figure 4: Distributions (2x1) ---
+    # --- Figure 4: Distributions (1x2) ---
     fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
 
     boxplot(df_o, value_col="OXYGEN", title=oxygen_label, ax=axes2[0])

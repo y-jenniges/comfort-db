@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 def _refine_to_region(df, region, region_name_col):
     """Drop rows outside the exact region polygon(s), e.g. after SQL-level bounding box filtering."""
-    # Check if region and df have data
+    # Nothing to refine without a region or data
     if region is None or df.empty:
         return df
 
@@ -63,7 +63,7 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-# Depth levels (similar to Jenniges et al. 2025 (https://doi.org/10.1016/j.ecoinf.2025.103390)
+# Depth levels (similar to Jenniges et al. 2025, https://doi.org/10.1016/j.ecoinf.2025.103390)
 DEPTH_INTERVALS = np.array([0, 50, 100, 200, 300, 400, 500, 1000, 1500, 2000, 3000, 4000, 5000, 6000])
 
 # Columns of the info()/describe_variables() summaries (used for empty results)
@@ -74,7 +74,7 @@ _DESCRIBE_COLUMNS = ["parameter", "n_samples", "n_stations", "n_profiles", "n_in
 
 
 def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
-    """Print a quick summary of the COMFORT database without loading data.
+    """Return and log a quick summary of the COMFORT database without loading data.
 
     Shows parameter names, row counts, depth range and date range.
 
@@ -100,7 +100,7 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
             table = param_table_name(param)
             cur = conn.cursor()
 
-            # Get depth range
+            # Count rows and get the depth range
             cur.execute(
                 f"SELECT COUNT(*), MIN(LEV_M), MAX(LEV_M) FROM {table};"
             )
@@ -154,7 +154,7 @@ def read_parameter(conn: sqlite3.Connection, parameter: str, *,
                    extra_station_cols: list[str] | None = None) -> pd.DataFrame:
     """Read a P_* parameter table as a DataFrame with optional QC filtering.
 
-    ``station`` table is always joined, so ``LATITUDE``, ``LONGITUDE``
+    The ``station`` table is always joined, so the ``LATITUDE``, ``LONGITUDE``
     and ``DATEANDTIME`` columns are always included.
 
     Args:
@@ -267,7 +267,7 @@ def describe_variables(conn: sqlite3.Connection,
         # Define table name
         table = param_table_name(param)
 
-        # Connect to db and fetch parameter statistics
+        # Fetch parameter statistics
         cur = conn.cursor()
         cur.execute(
             f"SELECT COUNT(*), COUNT(DISTINCT ID), "
@@ -407,7 +407,7 @@ def subset_region(df: pd.DataFrame, *,
     Columns are looked up insensitive to casing: LONGITUDE, LATITUDE, LEV_M, DATEANDTIME.
 
     Args:
-        df (pandas.DataFrame): Extended parameter or station DataFrame.
+        df (pandas.DataFrame): Parameter or station DataFrame.
         lon_min (float): Minimum longitude in degrees E.
         lon_max (float): Maximum longitude in degrees E.
         lat_min (float): Minimum latitude in degrees N.
@@ -459,7 +459,7 @@ def subset_region(df: pd.DataFrame, *,
             # Apply upper threshold
             mask &= dates <= pd.Timestamp(date_max)
 
-    # Exact polygon refine (in addition to the explicit bounds above)
+    # Exact polygon filter (in addition to the explicit bounds above)
     return _refine_to_region(df[mask].copy(), region, region_name_col)
 
 
@@ -546,7 +546,7 @@ def load_comfort(
             ``'raise'``. Counts are logged.
         limit (int): Maximum number of rows to return (the first rows in
             table order). ``None`` returns all. Useful as a safeguard for
-            large tables.
+            large tables. Applied to each parameter separately.
     Returns:
         xarray.Dataset or dict[str, pandas.DataFrame].
         For the dict path each DataFrame has the measurement column named
@@ -555,6 +555,8 @@ def load_comfort(
         target_depths=None``), each parameter's coordinates are prefixed
         with its name (e.g. ``NITRATE_depth``, ``NITRATE_latitude``) since
         different parameters have independent observation dimensions.
+        With *target_depths* and ``output="xarray"`` all parameters share one grid: every
+        variable has the dimensions ``(profile, depth)``.
     Raises:
         ValueError: If a parameter is unknown, an option or date string is invalid or a
             conversion fails with ``on_missing='raise'`` or ``density_fallback='raise'``.
@@ -655,7 +657,7 @@ def load_comfort(
 def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, use_density,
                     on_missing, density_fallback, region, region_name_col, geo_kwargs):
     """Load one parameter for :func:`load_comfort`: Read, refine to the region, convert units, rename.
-    Returns ``(df, unit_ids)``.
+    Returns ``(df, unit_ids)`` or ``None`` if no rows are left.
     """
     logger.info("load_comfort: Loading %s...", param)
 
@@ -668,7 +670,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
                         with_temperature=with_temperature,
                         with_salinity=with_salinity, **geo_kwargs)
 
-    # Refine to exact polygon refine (SQL only filters for region bbox)
+    # Refine to the exact polygon (SQL only filters for the region bbox)
     df = _refine_to_region(df, region, region_name_col)
     if df.empty:
         return None
@@ -690,7 +692,7 @@ def _load_parameter(conn, param, *, converter, lookups, quality_flags, limit, us
                                          use_density=use_density,
                                          on_missing=on_missing,
                                          density_fallback=density_fallback)
-        # Empty df warning
+        # Warn and skip when no rows are left
         if df.empty:
             logger.warning("load_comfort: no %s rows left after unit conversion", param)
             return None
@@ -711,7 +713,7 @@ def _build_profile_dataset(dfs, interp_dfs, depths, lookups, param_unit_ids):
     Profiles are identified by (station ID, profile number). Their coordinates (position, time,
     instrument, platform) come from the first row of each profile in the un-interpolated *dfs*.
     """
-    # Build xarray Dataset with a shared (profile, depth) grid
+    # Imported here as xarray is an optional dependency
     import xarray as xr
 
     # Collect unique (station_id, profile_number) pairs as canonical profile identities
@@ -986,12 +988,12 @@ def _append_box_conditions(conditions, params, lon_pfx, lat_pfx, *,
                            lon_min, lon_max, lat_min, lat_max):
     """Append lon/lat bounding-box SQL conditions and ? parameter values in-place."""
     if lon_min is not None and lon_max is not None and lon_min > lon_max:
-        # Region contains the antimeridian (see comfort.geo.region_bbox) -> Use OR
+        # Box crosses the antimeridian (see comfort.geo.region_bbox): Use OR
         conditions.append(f"({lon_pfx}LONGITUDE >= ? OR {lon_pfx}LONGITUDE <= ?)")
         params.append(float(lon_min))
         params.append(float(lon_max))
     else:
-        # Region does not contain antimeridian -> Use AND
+        # Box does not cross the antimeridian: Use AND
         if lon_min is not None:
             conditions.append(f"{lon_pfx}LONGITUDE >= ?")
             params.append(float(lon_min))

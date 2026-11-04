@@ -55,8 +55,8 @@ def plot_profile(
         ylabel: y-axis label.
         depth_markers: Optional per-profile depth annotations, e.g. the
             output of :func:`~comfort.profile_analysis.mixed_layer_depth` or
-            :func:`~comfort.profile_analysis.pycnocline_depth`. Must share
-            *group_cols* (station/profile columns) with *df*. Matched
+            :func:`~comfort.profile_analysis.pycnocline_depth`. Must contain
+            the same station and profile columns as *df*. Matched
             profiles get a dashed horizontal line at the marker depth, in
             the same colour as the profile line.
         depth_marker_col: Column in *depth_markers* holding the depth value,
@@ -73,8 +73,7 @@ def plot_profile(
     Returns:
         The matplotlib Axes, or ``None`` when the data is empty.
     """
-    # Apply profile filter in SQL when loading from DB
-    # Filter in-memory for DataFrame input
+    # With a connection the profile filter is applied in SQL, with a DataFrame in memory (below)
     user_df = df
     df = _resolve_data(df, conn, parameter, quality_flags, profiles=profiles)
 
@@ -127,6 +126,7 @@ def plot_profile(
     ax.set_xlabel(xlabel or value_col)
     ax.set_ylabel(ylabel)
 
+    # Only add a legend for a few profiles (more would be unreadable)
     n_groups = df.groupby(group_cols).ngroups
     if n_groups <= 10:
         title = " - ".join(_pretty_label(c) for c in group_cols)

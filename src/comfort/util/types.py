@@ -56,13 +56,13 @@ def check_timestamp(value, option: str) -> None:
     # Accept datetime and Timestamp objects (datetime.date does not support time of day)
     valid = not isinstance(value, date) or isinstance(value, datetime)
     if isinstance(value, str):
-        # Str Object
+        # Strings must match the timestamp format exactly
         try:
-            # Apply time format
+            # Parse with the timestamp format
             datetime.strptime(value, _TIMESTAMP_FORMAT)
             valid = True
         except ValueError:
             valid = False
     if not valid:
-        # Invalid format
+        # Neither a matching string nor a datetime object
         raise ValueError(f"{option} must be given as 'YYYY-MM-DD HH:MM:SS', got {value!r}")

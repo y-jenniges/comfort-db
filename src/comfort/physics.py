@@ -3,7 +3,6 @@
 Conversions are computed using the `gsw` library, the Python implementation of the
 TEOS-10 Gibbs Seawater Oceanographic Toolbox (McDougall, T., & Barker, P. (2011).
 Getting started with TEOS-10 and the Gibbs Seawater (GSW) Oceanographic Toolbox. SCOR/IAPSO WG127).
-
 """
 from __future__ import annotations
 
@@ -193,16 +192,17 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
     N2 < 0 indicates gravitational instability.
 
     Rows with a missing value are dropped and repeated pressures within a
-    profile are averaged before N2 is computed.
+    profile are averaged before N2 is computed. Profiles with fewer than two valid
+    levels return an empty df.
 
     Args:
         df (pandas.DataFrame): Wide-format DataFrame with SA and CT columns.
         sa_col (str): Column with Absolute Salinity [g/kg].
         ct_col (str): Column with Conservative Temperature [°C].
         pressure_col (str): Column with sea pressure [dbar].
-        profile_col (str | list[str] | None): Column(s) identifying individual profiles.
         lat_col (str): Latitude column [°N] for gravitational
             acceleration correction. Falls back to 0 if absent.
+        profile_col (str | list[str] | None): Column(s) identifying individual profiles.
         max_gap (float | None): Maximum pressure distance [dbar] between two
             levels. Wider pairs are skipped. Default is None (no limit).
     Returns:
@@ -219,12 +219,12 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
     lat_available = lat_col is not None
     rows = []
 
-    # Get group columns
+    # Profile key columns
     group_cols = _resolve_profile_col(df, profile_col=profile_col)
 
     # Iterate over profiles
     for pid, group in df.groupby(group_cols):
-        # Check if profile has min. 2 levels
+        # Columns needed for N2
         cols = [pressure_col, sa_col, ct_col] + ([lat_col] if lat_available else [])
 
         # Average repeated pressures and sort by pressure
@@ -279,7 +279,7 @@ def compute_potential_vorticity(n2: float | np.ndarray | pd.Series,
     """
     lat_ = _to1d(latitude)
     f = gsw.f(lat_)  # Coriolis parameter
-    g = gsw.grav(lat_, np.zeros_like(lat_))  # Gravitational acceleration
+    g = gsw.grav(lat_, np.zeros_like(lat_))  # gravitational acceleration
     return pd.Series(f * _to1d(n2) / g)
 
 

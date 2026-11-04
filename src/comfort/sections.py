@@ -45,7 +45,7 @@ def bin_section(df: pd.DataFrame,
     depth_col = find_col(df, depth_col)
     along_col = find_col(df, along_col)
 
-    # Drop nans
+    # Drop NaNs
     plot_df = df[[value_col, depth_col, along_col]].dropna()
     if plot_df.empty:
         return pd.DataFrame(columns=[along_col, depth_col, value_col])
@@ -60,7 +60,7 @@ def bin_section(df: pd.DataFrame,
         .reset_index()
     )
 
-    # Over-write old along and depth columns with the bin centres
+    # Overwrite the original along and depth columns with the bin centres
     binned[along_col] = binned["_along_bin"].astype(float)
     binned[depth_col] = binned["_depth_bin"].astype(float)
     return binned[[along_col, depth_col, value_col]]
@@ -103,6 +103,6 @@ def section_difference(section_a: pd.DataFrame,
     # Merge section a and b
     merged = section_a.merge(section_b, on=[along_col, depth_col], suffixes=("_a", "_b"))
 
-    # Compute differences wrt the parameter column
+    # Subtract b from a
     merged[value_col] = merged[f"{value_col}_a"] - merged[f"{value_col}_b"]
     return merged[[along_col, depth_col, value_col]]

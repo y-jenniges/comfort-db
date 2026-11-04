@@ -175,7 +175,7 @@ def plot_parameter_map(
     # One map per parameter x time x depth combination
     parameters = resolve_param_columns(df_wide, parameters)
     for param in parameters:
-        # Shared color norm for all times/depths of a parameter
+        # Shared colour norm for all times and depths of a parameter
         norm = plt.Normalize(df_wide[param].min(), df_wide[param].max())
         for t in times:
             for depth in depths:
@@ -220,7 +220,8 @@ def plot_missing_value_info_map_over_depth(
         parameters: Parameter column names to plot.
         times: Time values to show (``None`` = all).
         savefig_folder: Folder to save figures.
-        relative: Plot relative (%) missing fraction.
+        relative: Plot the proportion of missing depth levels in percent. Otherwise, plot the number
+            of depth levels with data.
         dpi: Resolution (dots per inch) used when saving.
     """
     ccrs, _ = _require_cartopy()

@@ -56,7 +56,7 @@ if __name__ == "__main__":
         )
         print(ds, "\n")
 
-        # Spatial and temporal filtering in SQL
+        # Spatial filtering in SQL (date_min and date_max work similarly)
         print("=== load_comfort with spatial filter ===")
         dfs_filtered = comfort.load_comfort(
             conn,

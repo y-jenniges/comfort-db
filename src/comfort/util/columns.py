@@ -5,7 +5,7 @@ import pandas as pd
 
 
 def find_col(df: pd.DataFrame, name_to_check: str | list[str] | None, *, required: bool = True):
-    """Return the column name in *df* that matches *name*, insensitive to casing.
+    """Return the column name in *df* that matches *name_to_check*, insensitive to casing.
 
     An exact match wins. Otherwise, the one column that matches ignoring case is returned.
 
@@ -17,8 +17,8 @@ def find_col(df: pd.DataFrame, name_to_check: str | list[str] | None, *, require
     Returns:
         str or None: The column name as it is spelled in *df*.
     Raises:
-        KeyError: If *name* is not found and *required* is ``True`` or if several columns
-            match *name* only when ignoring case (e.g. ``Val`` and ``VAL`` for ``val``).
+        KeyError: If *name_to_check* is not found and *required* is ``True`` or if several columns
+            match *name_to_check* only when ignoring case (e.g. ``Val`` and ``VAL`` for ``val``).
     """
     if name_to_check is None:
         return None
@@ -57,6 +57,7 @@ def resolve_param_columns(df: pd.DataFrame, parameters: list[str] | str) -> list
     Raises:
         KeyError: If a parameter has no column in *df*.
     """
+    # Imported here as database.information imports qc, which imports this module
     from ..database.information import param_label, param_table_name
 
     # Wrap single parameter into a list

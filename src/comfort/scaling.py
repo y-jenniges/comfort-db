@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class ParamScaler:
-    """ Scale parameters using a scikit-learn scaler per parameter.
+    """Scale parameters using a scikit-learn scaler per parameter.
 
     Args:
         scaler_class: A scikit-learn scaler class (must support fit/transform).
@@ -52,6 +52,8 @@ class ParamScaler:
 
         Args:
             df (pandas.DataFrame): Contains ``VAL`` and ``PARAM_NAME`` columns.
+        Returns:
+            pandas.DataFrame: Copy of *df* with the added column ``VAL_SCALED``.
         """
         # Prepare for scaling
         temp = df.copy()
@@ -69,6 +71,8 @@ class ParamScaler:
         Args:
             columns (list[str]): Columns to scale.
             df (pandas.DataFrame): Source data.
+        Returns:
+            pandas.DataFrame: Copy of *df* with one added ``<column>_SCALED`` column per scaled column.
         """
         temp = df.copy()
 
@@ -93,6 +97,8 @@ class ParamScaler:
         Args:
             parameter (str): Parameter name.
             value (float): Value to scale.
+        Returns:
+            float: The scaled value.
         Raises:
             KeyError: If no scaler has been fitted for parameter.
         """
@@ -104,7 +110,7 @@ class ParamScaler:
 
 
 class DBParamScaler:
-    """ Scale parameters to [lower, upper] by operating directly on the database via SQL.
+    """Scale parameters to [lower, upper] by operating directly on the database via SQL.
 
     Args:
         connection (sqlite3.Connection): Must hold one table per parameter.
@@ -158,6 +164,8 @@ class DBParamScaler:
 
         Args:
             tables_params (dict): Maps table names to parameter names.
+        Returns:
+            dict[str, str]: Maps each new ``scaled_<table>`` table to its parameter name.
         """
         if not tables_params:
             return {}
@@ -180,7 +188,7 @@ class DBParamScaler:
             # Get min/max values
             param_min, param_max = self.get_min_max(table, self.value_column)
 
-            # Scale
+            # SQL expressions for the scaled value and depth
             val_formula = self._min_max_formula(table, self.value_column, param_min, param_max)
             depth_formula = self._min_max_formula(table, self.depth_column, min_depth, max_depth)
 
@@ -191,12 +199,12 @@ class DBParamScaler:
                 ignore_index=True,
             )
 
-            # Get column names
+            # Columns of the source table
             cur = self.connection.cursor()
             cur.execute(f"SELECT * FROM {table} LIMIT 1;")
             old_columns = [desc[0] for desc in cur.description]
 
-            # Define new column names
+            # All columns except value, depth and UNITS_ID are copied
             new_columns = [f"{table}.{x}" for x in old_columns
                            if x not in (self.value_column, "UNITS_ID", self.depth_column)]
 

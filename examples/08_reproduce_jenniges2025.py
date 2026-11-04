@@ -75,7 +75,7 @@ KNN_K = 5
 
 
 def main():
-    # Get DB and bathymetry pathes
+    # Get DB and bathymetry paths
     db_path = os.environ.get("COMFORT_DB_PATH", "")
     bathy_path = os.environ.get("BATHYMETRY_PATH", "")
     if not db_path:
@@ -138,7 +138,7 @@ def main():
         )
         log.info("  Grid template: %d cells", len(grid.grid))
 
-        # Map parameters to grid and drop land cells with not measurements
+        # Map parameters to grid and drop land cells without measurements
         param_cols = [f"P_{p}" for p in PARAMETERS]
         df_wide = grid.map_dataframes(averaged, dropping_land_cells=True)
         for param, col in zip(PARAMETERS, param_cols):
