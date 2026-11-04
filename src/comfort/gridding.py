@@ -13,8 +13,10 @@ __all__ = [
 
 import logging
 import os
+from collections.abc import Callable
 import numpy as np
 import pandas as pd
+from numpy.typing import ArrayLike
 from dateutil.relativedelta import relativedelta
 
 from .util.columns import find_col, resolve_param_columns
@@ -67,24 +69,27 @@ class Grid:
     - ``'MD'``: Month and day (MM-DD) of the leap year 2000, pooling all years.
     """
 
-    def __init__(self, *, bathymetry_grid_path, lon_min=-180, lon_max=180, dlon=1,
-                 lat_min=-90, lat_max=90, dlat=1,
-                 z_min=None, z_max=None, dz=None, z_array=None,
-                 time_min=None, time_max=None, mode: GridMode | None = None, dtime=None, selection=None,
-                 lon_variable="lon", lat_variable="lat", depth_variable="elevation"):
+    def __init__(self, *, bathymetry_grid_path: str | os.PathLike,
+                 lon_min: float = -180, lon_max: float = 180, dlon: float = 1,
+                 lat_min: float = -90, lat_max: float = 90, dlat: float = 1,
+                 z_min: float | None = None, z_max: float | None = None, dz: float | None = None,
+                 z_array: ArrayLike | None = None,
+                 time_min: str | None = None, time_max: str | None = None, mode: GridMode | None = None,
+                 dtime: int | None = None, selection: ArrayLike | None = None,
+                 lon_variable: str = "lon", lat_variable: str = "lat", depth_variable: str = "elevation"):
         """
         Args:
             lon_min, lon_max, dlon: Longitude range and step [°].
             lat_min, lat_max, dlat: Latitude range and step [°].
-            bathymetry_grid_path (str): Path to a bathymetry NetCDF file. Required.
+            bathymetry_grid_path: Path to a bathymetry NetCDF file. Required.
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
-            z_array (array-like): Explicit depth nodes [m]. Mutually exclusive with dz.
-            time_min, time_max (str): Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
+            z_array: Explicit depth nodes [m]. Mutually exclusive with dz.
+            time_min, time_max: Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
             mode: Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
-            dtime (int): Number of time units per cell.
+            dtime: Number of time units per cell.
                 time_min, time_max, mode and dtime must be given together, or all be
                 None for a grid without time axis.
-            selection (array-like): Boolean mask to sub-select the time array.
+            selection: Boolean mask to sub-select the time array.
                 Requires a time axis.
             lon_variable, lat_variable, depth_variable: Variable names in the NetCDF file.
         """
@@ -364,7 +369,8 @@ class Grid:
         return grouped
 
     def map_dataframes(self, dfs: dict[str, pd.DataFrame], agg: Aggregation = "mean",
-                       bin_fn=None, dropping_land_cells: bool = True) -> pd.DataFrame:
+                       bin_fn: Callable[[pd.DataFrame, str], pd.DataFrame] | None = None,
+                       dropping_land_cells: bool = True) -> pd.DataFrame:
         """Turn a dict of per-parameter DataFrames into one wide grid table.
 
         The full workflow is two calls: create the grid, then map data onto it::
@@ -383,7 +389,7 @@ class Grid:
                 averaging before binning onto the grid's time steps. With a list,
                 the first statistic is ``P_<name>``, the others ``P_<name>_<statistic>``
                 (e.g. ``P_OXYGEN_std``). Ignored when *bin_fn* is given.
-            bin_fn (callable): ``(df, value_col) -> DataFrame`` used instead of
+            bin_fn: ``(df, value_col) -> DataFrame`` used instead of
                 the default ``self.bin(df, value_col, agg=agg)``, for any
                 per-parameter aggregation not expressible via *agg*.
             dropping_land_cells: Drop grid cells that are on land and

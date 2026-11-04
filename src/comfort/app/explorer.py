@@ -270,7 +270,7 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
 
             # Colour by (applies to all plot types)
             dbc.Card([
-                dbc.CardHeader("Colour by (map)"),
+                dbc.CardHeader("Colour by"),
                 dbc.CardBody(dbc.Select(
                     id="sc-colour-by",
                     options=[
@@ -503,38 +503,40 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
 
         try:
             conn = _get_conn()
-            qc = QC_GOOD if use_qc else None
+            try:
+                qc = QC_GOOD if use_qc else None
 
-            # Load all rows matching the spatial and QC filters
-            df = read_parameter(
-                conn, param, quality_flags=qc,
-                lon_min=lon_min, lon_max=lon_max,
-                lat_min=lat_min, lat_max=lat_max,
-                extra_station_cols=["CRUISE_ID", "ST_NUMBER_ORIGIN"],
-            )
-
-            # Convert units to the default for this parameter
-            converted = False
-            if "UNITS_ID" in df.columns and df["UNITS_ID"].nunique() > 1:
-                try:
-                    uc = UnitsConverter.from_connection(conn)
-                    df = uc.convert_dataframe(df, param)
-                    converted = True
-                except (ValueError, Exception) as e:
-                    logger.warning("Unit conversion skipped: %s", e)
-
-            # Station/cruise hover labels
-            if "ST_NUMBER_ORIGIN" in df.columns:
-                df["_station_label"] = df["ST_NUMBER_ORIGIN"].where(
-                    df["ST_NUMBER_ORIGIN"].notna(), df["ID"].astype(str),
-                )
-            if "CRUISE_ID" in df.columns:
-                cruise_labels = _query_cruise_labels(conn)
-                df["_cruise_label"] = (
-                    df["CRUISE_ID"].map(cruise_labels).fillna(df["CRUISE_ID"].astype(str))
+                # Load all rows matching the spatial and QC filters
+                df = read_parameter(
+                    conn, param, quality_flags=qc,
+                    lon_min=lon_min, lon_max=lon_max,
+                    lat_min=lat_min, lat_max=lat_max,
+                    extra_station_cols=["CRUISE_ID", "ST_NUMBER_ORIGIN"],
                 )
 
-            conn.close()
+                # Convert units to the default for this parameter
+                converted = False
+                if "UNITS_ID" in df.columns and df["UNITS_ID"].nunique() > 1:
+                    try:
+                        uc = UnitsConverter.from_connection(conn)
+                        df = uc.convert_dataframe(df, param)
+                        converted = True
+                    except Exception as e:
+                        logger.warning("Unit conversion skipped: %s", e)
+
+                # Station/cruise hover labels
+                if "ST_NUMBER_ORIGIN" in df.columns:
+                    df["_station_label"] = df["ST_NUMBER_ORIGIN"].where(
+                        df["ST_NUMBER_ORIGIN"].notna(), df["ID"].astype(str),
+                    )
+                if "CRUISE_ID" in df.columns:
+                    cruise_labels = _query_cruise_labels(conn)
+                    df["_cruise_label"] = (
+                        df["CRUISE_ID"].map(cruise_labels).fillna(df["CRUISE_ID"].astype(str))
+                    )
+            finally:
+                # Close the connection (also when the query raises)
+                conn.close()
         except Exception as e:
             logger.exception("Scatter query failed")
             return no_update, no_update, *no_slider, str(e), True

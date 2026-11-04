@@ -532,6 +532,10 @@ def load_comfort(
             returns ``dict[parameter, pandas.DataFrame]``.
         convert_units: When ``True``, convert each parameter's values
             to its default unit using :class:`comfort.units.UnitsConverter`.
+            The co-located ``temperature`` and/or ``salinity`` that the parameter's
+            conversions need (see :meth:`comfort.units.UnitsConverter.required_inputs`)
+            stay in the output as lower-case columns: Mean per station and depth, ``NaN``
+            where absent.
         use_density: When ``True`` and ``convert_units=True``, use
             computed density for volumetric conversions instead of the
             constant 1.025 kg/L (COMFORT report Appendix C conventions:

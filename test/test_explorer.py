@@ -3,6 +3,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import types
 from pathlib import Path
 import pytest
 
@@ -92,3 +93,29 @@ class TestGetConn:
         monkeypatch.setattr(explorer, "_db_path", None)
         with pytest.raises(RuntimeError, match="create_app"):
             explorer._get_conn()
+
+
+class TestScatterCallback:
+    # The connection is closed even when the query raises
+    def test_connection_closed_when_query_fails(self, monkeypatch):
+        class TrackedConn:
+            closed = False
+
+            def close(self):
+                self.closed = True
+
+        conn = TrackedConn()
+        monkeypatch.setattr(explorer, "_get_conn", lambda: conn)
+
+        def failing_read(*args, **kwargs):
+            raise sqlite3.OperationalError("boom")
+
+        monkeypatch.setattr(explorer, "read_parameter", failing_read)
+        monkeypatch.setattr(explorer, "ctx", types.SimpleNamespace(triggered_id="btn-scatter"))
+        result = explorer._scatter_callback(
+            1, [0, 100], [2000, 2020], "map", [], "depth", "OXYGEN", -180, 180, -90, 90, [],
+            None, None, None, None,
+        )
+        assert conn.closed
+        assert "boom" in result[-2]
+
