@@ -323,25 +323,25 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
     Args:
         conn (sqlite3.Connection): Connection to the database.
         parameters (list[str]): Parameter names. Insensitive to casing and ``P_`` prefix.
-        quality_flags (QualityFlags): Optional quality flag filters
-            (applied to the negative count only).
+        quality_flags (QualityFlags): Optional quality flag filters.
     Returns:
         pandas.DataFrame: Columns ``[parameter, number of samples, number of negative samples,
         proportion of negative samples]``, sorted by the proportion.
     """
     cursor = conn.cursor()
-    quality_statement = build_where_clause(quality_flags, keyword="AND")
+    quality_statement = build_where_clause(quality_flags)
 
-    # Query negative and total counts for each parameter
+    # Query negative and total counts for each parameter (in one pass with the same QC filter)
     rows = []
     for parameter in map(param_label, parameters):
         table = param_table_name(parameter)
         validate_identifier(table)
         logger.info("count_negative_samples: %s", parameter)
-        negative_count = cursor.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE VAL<0 {quality_statement};"
-        ).fetchone()[0]
-        count = cursor.execute(f"SELECT COUNT(*) FROM {table};").fetchone()[0]
+        count, negative_count = cursor.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(VAL < 0), 0) FROM {table} {quality_statement};"
+        ).fetchone()
+
+        # Assemble result
         rows.append({
             "parameter": parameter,
             "number of samples": count,
@@ -350,7 +350,7 @@ def count_negative_samples(conn: sqlite3.Connection, parameters: list[str], *,
 
     # Compute proportions and sort for display
     df = pd.DataFrame(rows, columns=["parameter", "number of samples", "number of negative samples"])
-    df["proportion of negative samples"] = df["number of negative samples"] / df["number of samples"] * 100
+    df["proportion of negative samples"] = df["number of negative samples"] / df["number of samples"]
     return df.sort_values("proportion of negative samples")
 
 
