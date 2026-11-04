@@ -131,6 +131,21 @@ class TestVerticalGradient:
         out = vertical_gradient(df)
         assert np.allclose(out["VAL_gradient"], -0.03)
 
+    # A non-unique index (e.g. concatenated frames) gives the same result as a unique one
+    @pytest.mark.parametrize("shuffle", [False, True])
+    def test_non_unique_index(self, shuffle):
+        df = pd.DataFrame({"PROFILE_NUMBER": [1, 1, 1, 2, 2, 2],
+                           "LEV_DBAR": [0, 100, 200, 0, 100, 200],
+                           "VAL": [10.0, 8.0, 6.0, 5.0, 4.0, 1.0]})
+        expected = vertical_gradient(df)["VAL_gradient"].to_numpy()
+        # Same rows with repeated labels, as after pd.concat without ignore_index
+        dup = pd.concat([df.iloc[:3], df.iloc[3:]]).set_axis([0, 1, 2, 0, 1, 2])
+        if shuffle:
+            dup = dup.iloc[[4, 0, 5, 2, 3, 1]]
+            expected = vertical_gradient(df.iloc[[4, 0, 5, 2, 3, 1]].reset_index(drop=True))["VAL_gradient"].to_numpy()
+        out = vertical_gradient(dup)
+        assert np.allclose(out["VAL_gradient"].to_numpy(), expected)
+
 
 class TestMixedLayerDepth:
     @staticmethod

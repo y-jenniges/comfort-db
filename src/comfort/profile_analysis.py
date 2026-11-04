@@ -173,6 +173,9 @@ def vertical_gradient(df: pd.DataFrame,
                       ) -> pd.DataFrame:
     """Compute the vertical gradient of a parameter within each profile.
 
+    The gradient is d(value)/d(depth), positive means that the value increases
+    with depth.
+
     Args:
         df (pandas.DataFrame): Input DataFrame.
         value_col (str): Column with measured values.
@@ -191,10 +194,12 @@ def vertical_gradient(df: pd.DataFrame,
     sort_cols = (profile_col if isinstance(profile_col, list) else [profile_col]) + [depth_col]
     df_out = df.copy().sort_values(sort_cols)
     grad_col = f"{value_col}_gradient"
-    df_out[grad_col] = np.nan
+    grad = np.full(len(df_out), np.nan)
 
-    # Compute gradient per profile using central differences
-    for _, group in df_out.groupby(profile_col, sort=False):
+    # Compute gradient per profile using central differences (positional, so a non-unique index is safe)
+    for pos in df_out.groupby(profile_col, sort=False).indices.values():
+        group = df_out.iloc[pos]
+
         # Average duplicate depths, drop NaNs
         depths, vals = _profile_levels(group, depth_col, value_col)
         if len(depths) < 2:
@@ -202,9 +207,10 @@ def vertical_gradient(df: pd.DataFrame,
 
         # Compute gradient and map it back to every row at that depth
         dv = pd.Series(np.gradient(vals, depths), index=depths)
-        valid = group[[depth_col, value_col]].dropna()
-        df_out.loc[valid.index, grad_col] = valid[depth_col].map(dv).values
+        valid = group[[depth_col, value_col]].notna().all(axis=1).to_numpy()
+        grad[pos[valid]] = group[depth_col].iloc[np.flatnonzero(valid)].map(dv).to_numpy()
 
+    df_out[grad_col] = grad
     return df_out
 
 
