@@ -21,7 +21,7 @@ from dateutil.relativedelta import relativedelta
 
 from .util.columns import find_col, resolve_param_columns
 from .util.optional import import_optional
-from .util.types import Aggregation, GridMode, check_choice, check_timestamp
+from .util.types import Aggregation, GridMode, check_choice, check_timestamp, parse_timestamps
 from .database.information import param_label, param_table_name
 
 logger = logging.getLogger(__name__)
@@ -459,7 +459,7 @@ class Grid:
 
     def _filter_time_window(self, df: pd.DataFrame) -> pd.DataFrame:
         """Filter *df* for ``[time_min, time_max]``."""
-        dates = pd.to_datetime(df["DATEANDTIME"])
+        dates = parse_timestamps(df["DATEANDTIME"])
         in_window = (dates >= pd.Timestamp(self.time_min)) & (dates <= pd.Timestamp(self.time_max))
         return df[in_window].copy()
 
@@ -470,7 +470,7 @@ class Grid:
             last_edge = pd.Timestamp(self.time_max) + pd.Timedelta(nanoseconds=1)
             time_bins = pd.DatetimeIndex(self._time_nodes()).append(pd.DatetimeIndex([last_edge]))
             df["DATEANDTIME"] = pd.cut(
-                pd.to_datetime(df["DATEANDTIME"]),
+                parse_timestamps(df["DATEANDTIME"]),
                 bins=time_bins, labels=time_bins[:-1], right=False,
             )
             df["DATEANDTIME"] = df["DATEANDTIME"].astype("datetime64[ns]").dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -673,7 +673,7 @@ def seasonal_mean(
 
     # Extract year and month data
     temp = df.copy()
-    temp[date_col] = pd.to_datetime(temp[date_col])
+    temp[date_col] = parse_timestamps(temp[date_col])
     temp["_YEAR"] = temp[date_col].dt.year
     temp["_MONTH"] = temp[date_col].dt.month
 

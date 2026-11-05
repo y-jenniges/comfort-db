@@ -11,6 +11,7 @@ import seaborn as sns
 
 from ..database.information import param_label
 from ..util.columns import find_col, resolve_param_columns
+from ..util.types import parse_timestamps
 from ._helpers import _finish, _get_or_create_ax, _save_fig
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ def plot_annual_coverage(
     # Iterate over parameter dfs
     for parameter, df in dfs.items():
         # Per-year counts
-        counts = pd.to_datetime(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
+        counts = parse_timestamps(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
 
         # Relative to the busiest year
         if normalise:

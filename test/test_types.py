@@ -4,7 +4,7 @@ import datetime
 
 import pandas as pd
 
-from comfort.util.types import GridMode, InterpMethod, LoadOutput, check_choice, check_timestamp
+from comfort.util.types import GridMode, InterpMethod, LoadOutput, check_choice, check_timestamp, parse_timestamps
 
 
 class TestCheckChoice:
@@ -41,3 +41,19 @@ class TestCheckTimestamp:
     def test_other_values_raise(self, value):
         with pytest.raises(ValueError, match="date_max must be given as 'YYYY-MM-DD HH:MM:SS'"):
             check_timestamp(value, "date_max")
+
+
+class TestParseTimestamps:
+    # Strings with and without fractional seconds in one column are parsed alike (pd.to_datetime raises or gives NaT),
+    def test_mixed_fractional_seconds_are_truncated(self):
+        result = parse_timestamps(pd.Series(["2009-10-09 04:02:02.000970", "2009-10-09 04:02:02", "2009-10-09 04:02:02.9"]))
+        assert list(result) == [pd.Timestamp("2009-10-09 04:02:02")] * 3
+
+    # Date-only strings are valid ISO 8601
+    def test_date_only(self):
+        assert list(parse_timestamps(pd.Series(["2000-01-01"]))) == [pd.Timestamp("2000-01-01")]
+
+    # A value that is no date raises instead of becoming NaT
+    def test_invalid_value_raises(self):
+        with pytest.raises(ValueError):
+            parse_timestamps(pd.Series(["2000-01-01 00:00:00", "not a date"]))

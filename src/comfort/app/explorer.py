@@ -44,6 +44,7 @@ except ImportError:
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
+from ..util.types import parse_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -791,7 +792,7 @@ def _parse_csv_upload(contents: str) -> pd.DataFrame:
 
     # DATEANDTIME is optional
     if "DATEANDTIME" in df.columns:
-        df["DATEANDTIME"] = pd.to_datetime(df["DATEANDTIME"])
+        df["DATEANDTIME"] = parse_timestamps(df["DATEANDTIME"])
     return df
 
 

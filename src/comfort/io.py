@@ -32,7 +32,7 @@ from .qc import QualityFlags, build_where_clause, qc_conditions
 from .util.columns import find_col
 from .util.optional import import_optional
 from .util.sqlite_utils import validate_identifier
-from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice, check_timestamp
+from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice, check_timestamp, parse_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,8 @@ def read_parameter(conn: sqlite3.Connection, parameter: str, *,
         depth_min: Minimum depth [m].
         depth_max: Maximum depth [m].
         date_min: Start (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
-        date_max: End (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
+        date_max: End (inclusive, the whole second counts) as 'YYYY-MM-DD HH:MM:SS' or a
+            datetime-like object.
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
             Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
@@ -416,7 +417,8 @@ def subset_region(df: pd.DataFrame, *,
         depth_min: Minimum depth in metres.
         depth_max: Maximum depth in metres.
         date_min: Start (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
-        date_max: End (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
+        date_max: End (inclusive, the whole second counts) as 'YYYY-MM-DD HH:MM:SS' or a
+            datetime-like object.
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
             Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
@@ -452,7 +454,7 @@ def subset_region(df: pd.DataFrame, *,
                 check_timestamp(bound, name)
 
         # Convert timestamps to datetime format
-        dates = pd.to_datetime(df[find_col(df, "DATEANDTIME")])
+        dates = parse_timestamps(df[find_col(df, "DATEANDTIME")])
         if date_min is not None:
             # Apply lower threshold
             mask &= dates >= pd.Timestamp(date_min)
@@ -511,7 +513,8 @@ def load_comfort(
         depth_min: Minimum depth [m].
         depth_max: Maximum depth [m].
         date_min: Start (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
-        date_max: End (inclusive) as 'YYYY-MM-DD HH:MM:SS' or a datetime-like object.
+        date_max: End (inclusive, the whole second counts) as 'YYYY-MM-DD HH:MM:SS' or a
+            datetime-like object.
         region: Restrict to an arbitrary polygon (e.g. an ocean basin or a
             Longhurst province) instead of or in addition to the lon/lat box above.
             Use :func:`comfort.geo.select_regions` to select one or more named regions.
@@ -1042,5 +1045,7 @@ def _append_geo_conditions(conditions, params, lon_pfx, lat_pfx, depth_pfx, date
         params.append(pd.Timestamp(date_min).isoformat(sep=" ", timespec="seconds"))
     if date_max is not None:
         check_timestamp(date_max, "date_max")
-        conditions.append(f"{date_pfx}DATEANDTIME <= ?")
-        params.append(pd.Timestamp(date_max).isoformat(sep=" ", timespec="seconds"))
+        # Stations with fractional seconds ('...:02.000970') sort after '...:02', so compare with the next second
+        conditions.append(f"{date_pfx}DATEANDTIME < ?")
+        next_second = pd.Timestamp(date_max).floor("s") + pd.Timedelta(seconds=1)
+        params.append(next_second.isoformat(sep=" ", timespec="seconds"))
