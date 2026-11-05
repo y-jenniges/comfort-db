@@ -10,11 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ..database.information import param_table_name
-from ..qc import build_where_clause
 from ..util.columns import find_col, resolve_param_columns
-from ..util.sqlite_utils import validate_identifier
-from ._helpers import _finish, _get_or_create_ax, _require_cartopy
+from ._helpers import _finish, _get_or_create_ax, _require_cartopy, _resolve_data
 
 if TYPE_CHECKING:
     import sqlite3
@@ -66,20 +63,8 @@ def plot_spatial_distribution(
     """
     ccrs, cfeature = _require_cartopy()
 
-    # Load lat/lon from the database when no DataFrame is given
-    if df is None:
-        if conn is None or parameter is None:
-            raise ValueError(
-                "Provide either a DataFrame (df) or conn + parameter"
-            )
-        table = param_table_name(parameter)
-        validate_identifier(table)
-        quality_statement = build_where_clause(quality_flags)
-        cursor = conn.cursor()
-        ex = cursor.execute(
-            f"SELECT LONGITUDE, LATITUDE FROM {table} {quality_statement};"
-        )
-        df = pd.DataFrame(ex.fetchall(), columns=np.array([x[0] for x in cursor.description]))
+    # Coordinates live in the station table, so read through the joined reader
+    df = _resolve_data(df, conn, parameter, quality_flags)
 
     # Resolve column names (insensitive to casing)
     lon_col = find_col(df, lon_col)
@@ -190,7 +175,7 @@ def plot_parameter_map(
     # One map per parameter x time x depth combination
     parameters = resolve_param_columns(df_wide, parameters)
     for param in parameters:
-        # Shared color norm for all times/depths of a parameter
+        # Shared colour norm for all times and depths of a parameter
         norm = plt.Normalize(df_wide[param].min(), df_wide[param].max())
         for t in times:
             for depth in depths:
@@ -235,7 +220,8 @@ def plot_missing_value_info_map_over_depth(
         parameters: Parameter column names to plot.
         times: Time values to show (``None`` = all).
         savefig_folder: Folder to save figures.
-        relative: Plot relative (%) missing fraction.
+        relative: Plot the proportion of missing depth levels in percent. Otherwise, plot the number
+            of depth levels with data.
         dpi: Resolution (dots per inch) used when saving.
     """
     ccrs, _ = _require_cartopy()
@@ -245,10 +231,17 @@ def plot_missing_value_info_map_over_depth(
 
     # Colour settings
     cmap = plt.colormaps["viridis"]
-    norm = plt.Normalize(0, 100)
 
     parameters = resolve_param_columns(df_wide, parameters)
     for param in parameters:
+        # Shared colour norm for all times of a parameter
+        if relative:
+            # Percent
+            norm = plt.Normalize(0, 100)
+        else:
+            # 0 to the largest count of depth levels with data
+            max_count = df_wide.groupby(["DATEANDTIME", "LATITUDE", "LONGITUDE"])[param].count().max()
+            norm = plt.Normalize(0, max(max_count, 1))
         for t in times:
             dft = df_wide[df_wide["DATEANDTIME"] == t]
 
@@ -278,6 +271,7 @@ def plot_missing_value_info_map_over_depth(
             if savefig_folder:
                 os.makedirs(savefig_folder, exist_ok=True)
                 plt.savefig(f"{savefig_folder}/{param}_time{t.year}.png", dpi=dpi)
+            plt.close()
 
 
 def plot_missing_value_info_map_joint(

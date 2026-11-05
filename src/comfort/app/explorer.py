@@ -12,7 +12,7 @@ Usage:
 
 or from Python:
     from comfort.app.explorer import create_app
-    create_app("/path/to/comfort.sqlite").run(debug=True)
+    create_app("/path/to/comfort.sqlite").run()
 """
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ except ImportError:
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
+from ..util.types import parse_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ _CALLBACKS: list = []
 
 
 def _register_callback(*args, **kwargs):
-    """Collect a callback, which create_app() can attach to."""
+    """Collect a callback, so that create_app() can attach it to each new app."""
     def decorator(func):
         _CALLBACKS.append((args, kwargs, func))
         return func
@@ -111,7 +112,7 @@ def _query_cruise_labels(conn: sqlite3.Connection) -> dict:
     CRUISE_NUMBER). Returns {} if no CRUISE table exists in this database."""
     try:
         df = pd.read_sql_query("SELECT ID, EXPOCODE, CRUISE_NUMBER FROM CRUISE", conn)
-    except Exception:
+    except (sqlite3.Error, pd.errors.DatabaseError):
         return {}
     has_expocode = df["EXPOCODE"].notna() & (df["EXPOCODE"].astype(str) != "")
     label = df["EXPOCODE"].where(has_expocode, df["CRUISE_NUMBER"].astype(str))
@@ -268,9 +269,9 @@ def _scatter_tab(all_params: list[str]) -> dbc.Tab:
                 )),
             ], className="mb-3"),
 
-            # Colour by (map only)
+            # Colour by (applies to all plot types)
             dbc.Card([
-                dbc.CardHeader("Colour by (map)"),
+                dbc.CardHeader("Colour by"),
                 dbc.CardBody(dbc.Select(
                     id="sc-colour-by",
                     options=[
@@ -503,38 +504,40 @@ def _scatter_callback(n_clicks, depth_range, year_range, plot_type, show_global,
 
         try:
             conn = _get_conn()
-            qc = QC_GOOD if use_qc else None
+            try:
+                qc = QC_GOOD if use_qc else None
 
-            # Load all rows matching the spatial and QC filters
-            df = read_parameter(
-                conn, param, quality_flags=qc,
-                lon_min=lon_min, lon_max=lon_max,
-                lat_min=lat_min, lat_max=lat_max,
-                extra_station_cols=["CRUISE_ID", "ST_NUMBER_ORIGIN"],
-            )
-
-            # Convert units to the default for this parameter
-            converted = False
-            if "UNITS_ID" in df.columns and df["UNITS_ID"].nunique() > 1:
-                try:
-                    uc = UnitsConverter.from_connection(conn)
-                    df = uc.convert_dataframe(df, param)
-                    converted = True
-                except (ValueError, Exception) as e:
-                    logger.warning("Unit conversion skipped: %s", e)
-
-            # Station/cruise hover labels
-            if "ST_NUMBER_ORIGIN" in df.columns:
-                df["_station_label"] = df["ST_NUMBER_ORIGIN"].where(
-                    df["ST_NUMBER_ORIGIN"].notna(), df["ID"].astype(str),
-                )
-            if "CRUISE_ID" in df.columns:
-                cruise_labels = _query_cruise_labels(conn)
-                df["_cruise_label"] = (
-                    df["CRUISE_ID"].map(cruise_labels).fillna(df["CRUISE_ID"].astype(str))
+                # Load all rows matching the spatial and QC filters
+                df = read_parameter(
+                    conn, param, quality_flags=qc,
+                    lon_min=lon_min, lon_max=lon_max,
+                    lat_min=lat_min, lat_max=lat_max,
+                    extra_station_cols=["CRUISE_ID", "ST_NUMBER_ORIGIN"],
                 )
 
-            conn.close()
+                # Convert units to the default for this parameter
+                converted = False
+                if "UNITS_ID" in df.columns and df["UNITS_ID"].nunique() > 1:
+                    try:
+                        uc = UnitsConverter.from_connection(conn)
+                        df = uc.convert_dataframe(df, param)
+                        converted = True
+                    except Exception as e:
+                        logger.warning("Unit conversion skipped: %s", e)
+
+                # Station/cruise hover labels
+                if "ST_NUMBER_ORIGIN" in df.columns:
+                    df["_station_label"] = df["ST_NUMBER_ORIGIN"].where(
+                        df["ST_NUMBER_ORIGIN"].notna(), df["ID"].astype(str),
+                    )
+                if "CRUISE_ID" in df.columns:
+                    cruise_labels = _query_cruise_labels(conn)
+                    df["_cruise_label"] = (
+                        df["CRUISE_ID"].map(cruise_labels).fillna(df["CRUISE_ID"].astype(str))
+                    )
+            finally:
+                # Close the connection (also when the query raises)
+                conn.close()
         except Exception as e:
             logger.exception("Scatter query failed")
             return no_update, no_update, *no_slider, str(e), True
@@ -730,7 +733,7 @@ def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
                 lonaxis_range=[lon_min - lon_pad, lon_max + lon_pad],
             )
     elif plot_type == "missing":
-        # Missing value fraction per parameter column
+        # Share of missing values (percent) per parameter column
         meta_cols = {"idx", "LATITUDE", "LONGITUDE", "LEV_M",
                      "DATEANDTIME", "water"}
         param_cols = [c for c in df.columns if c not in meta_cols]
@@ -764,6 +767,35 @@ def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
 # --- CSV callbacks ----------------------------------------------------
 
 
+def _parse_csv_upload(contents: str) -> pd.DataFrame:
+    """Decode the base64 data URL of an uploaded gridded CSV.
+
+    Args:
+        contents: Value of ``dcc.Upload.contents`` (``data:<type>;base64,<data>``).
+    Returns:
+        pandas.DataFrame: The table, with ``DATEANDTIME`` parsed if present.
+    Raises:
+        ValueError: If the file is not a UTF-8 CSV, lacks ``LONGITUDE``, ``LATITUDE`` or ``LEV_M``
+            or has unparsable dates.
+    """
+    # Split at the first comma only: The header never contains one, but be safe
+    _, content_string = contents.split(",", 1)
+    decoded = base64.b64decode(content_string)
+
+    # UnicodeDecodeError, the pandas parser errors and binascii.Error are all ValueErrors
+    df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+
+    # Ensure required columns are given
+    missing = [c for c in ("LONGITUDE", "LATITUDE", "LEV_M") if c not in df.columns]
+    if missing:
+        raise ValueError(f"missing column(s) {', '.join(missing)}")
+
+    # DATEANDTIME is optional
+    if "DATEANDTIME" in df.columns:
+        df["DATEANDTIME"] = parse_timestamps(df["DATEANDTIME"])
+    return df
+
+
 @_register_callback(
     Output("csv-filename", "children"),
     Output("csv-param", "options"),
@@ -785,18 +817,23 @@ def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
     prevent_initial_call=True,
 )
 def _load_csv(contents, filename):
+    """Read the uploaded CSV and set up the parameter selector and the depth and time sliders."""
     if contents is None:
         raise PreventUpdate
 
     # Read CSV
-    content_type, content_string = contents.split(",")
-    decoded = base64.b64decode(content_string)
-    df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+    try:
+        df = _parse_csv_upload(contents)
+    except ValueError as e:
+        # A bad file is reported in the file label
+        logger.warning("CSV upload %s rejected: %s", filename, e)
+        _clear_csv_cache()
+        return (
+            f"Could not read {filename}: {e}",
+            [], None, *_EMPTY_RANGE_SLIDER, *_EMPTY_RANGE_SLIDER,
+        )
 
-    # DATEANDTIME is optional
     has_time = "DATEANDTIME" in df.columns
-    if has_time:
-        df["DATEANDTIME"] = pd.to_datetime(df["DATEANDTIME"])
     _csv_cache["df"] = df
 
     # Available depth/time values
@@ -877,7 +914,7 @@ def _load_csv(contents, filename):
     prevent_initial_call=True,
 )
 def _render_csv(value_col, depth_range, time_idx_range, plot_type, show_global):
-    """Query a depth/time range from the CSV table and render."""
+    """Filter the cached CSV table to the selected depth and time range and render it."""
     if _csv_cache["df"] is None or not value_col:
         raise PreventUpdate
 
@@ -923,6 +960,7 @@ def _render_csv(value_col, depth_range, time_idx_range, plot_type, show_global):
     Input("csv-depth-slider", "value"),
 )
 def _show_csv_depth(val):
+    """Show the selected depth range below the slider."""
     if not val:
         return ""
     return f"Depth: {_format_range_label(val[0], val[1], '{:.0f}')}m"
@@ -933,6 +971,7 @@ def _show_csv_depth(val):
     Input("csv-time-slider", "value"),
 )
 def _show_csv_time(idx_range):
+    """Show the selected time range below the slider."""
     times = _csv_cache.get("times", [])
     if not times or not idx_range:
         return ""
@@ -949,13 +988,14 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
     """Create the COMFORT dataset Explorer app.
 
     Args:
-        db_path (str or Path): Path to the COMFORT SQLite database. ``None``
+        db_path: Path to the COMFORT SQLite database. ``None``
             reads the ``COMFORT_DB_PATH`` environment variable (a ``.env``
             file is loaded if python-dotenv is installed).
     Returns:
         dash.Dash: The app.
     Raises:
         EnvironmentError: If no database path is given and ``COMFORT_DB_PATH`` is not set.
+        FileNotFoundError: If the database file does not exist.
     """
     global _db_path
 
@@ -969,6 +1009,10 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
             "No database path given and COMFORT_DB_PATH environment variable is not set.\n"
             "    export COMFORT_DB_PATH=/path/to/comfort.sqlite"
         )
+
+    # Check if passed DB file exists
+    if not os.path.isfile(tmp_path):
+        raise FileNotFoundError(f"COMFORT database not found: {tmp_path}")
     _db_path = str(tmp_path)
 
     # Build app
@@ -982,9 +1026,12 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
 
 
 def main() -> None:
-    """Launch the app in debug mode (``python -m comfort.app.explorer``)."""
+    """Launch the app on the local machine (``python -m comfort.app.explorer``)."""
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-    create_app().run(debug=True)
+
+    # Do not show Werkzeug INFO logs
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    create_app().run()
 
 
 if __name__ == "__main__":

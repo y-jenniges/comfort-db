@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Mean Earth radius for haversine distance calculations
+# Mean Earth radius, converts arc lengths on the unit sphere to distances
 _EARTH_RADIUS_KM = 6371.0
 
 
@@ -48,10 +48,10 @@ def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     out-of-range coordinates get NaN.
 
     Args:
-        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
-        lon_col (str): Longitude column [°E].
-        lat_col (str): Latitude column [°N].
-        resolution (str): Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
+        df: DataFrame with longitude and latitude columns.
+        lon_col: Longitude column [°E].
+        lat_col: Latitude column [°N].
+        resolution: Natural Earth resolution (``'110m'``, ``'50m'`` or ``'10m'``).
             Ignored when ``coastline_geom`` is provided.
         coastline_geom: Pre-loaded coastline as a shapely geometry, list
             of geometries or geopandas GeoSeries/GeoDataFrame.
@@ -67,7 +67,7 @@ def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     # Load coastline vertices
     coast_pts = _get_coast_points(resolution, coastline_geom)
     if coast_pts is None or len(coast_pts) == 0:
-        logger.error("distance_to_coast: no coastline points could be loaded")
+        logger.error("distance_to_coast: No coastline points could be loaded")
         return pd.Series(np.nan, index=df.index)
 
     # Get observed lon/lat
@@ -111,12 +111,12 @@ def along_track_distance(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     ``gsw.distance`` between consecutive stations.
 
     Args:
-        df (pandas.DataFrame): DataFrame with longitude/latitude columns.
-        lon_col (str): Longitude column [°E].
-        lat_col (str): Latitude column [°N].
-        order_col (str): Column to sort stations by (e.g. ``DATEANDTIME``).
+        df: DataFrame with longitude/latitude columns.
+        lon_col: Longitude column [°E].
+        lat_col: Latitude column [°N].
+        order_col: Column to sort stations by (e.g. ``DATEANDTIME``).
             Defaults to first-appearance order.
-        station_col (str or list[str]): Column(s) identifying a station
+        station_col: Column(s) identifying a station
             (e.g. ``"ID"``). Defaults to ``None``, i.e. stations at identical
             ``(lon_col, lat_col)`` are treated as one.
     Returns:
@@ -152,10 +152,10 @@ def along_track_distance(df: pd.DataFrame, lon_col: str = "LONGITUDE",
 
     # Great-circle distance between consecutive stations
     if len(stations) < 2:
-        # No distance for one station possible
+        # Fewer than two stations: No distance
         cum_km = np.zeros(len(stations))
     else:
-        # Distance between >1 stations
+        # Step lengths [km] between consecutive stations
         step_km = gsw.distance(
             stations["lon"].values.astype(float), stations["lat"].values.astype(float)
         ) / 1000.0
@@ -193,7 +193,7 @@ def _get_coast_points(resolution, coastline_geom):
         except ImportError:
             pass
 
-        # Extracting coordinates
+        # Collect the vertices
         if hasattr(coastline_geom, "__iter__") and not hasattr(coastline_geom, "geoms"):
             for geom in coastline_geom:
                 _extract_coords(geom, coords)
@@ -225,9 +225,9 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     Requires geopandas (``pip install "comfort-db[geo]"``).
 
     Args:
-        path (str or Path): Path to the Longhurst ``.shp`` file.
-        code_col (str): Province code column. Auto-detected when ``None``.
-        region_name_col (str): Province description column. Auto-detected when ``None``.
+        path: Path to the Longhurst ``.shp`` file.
+        code_col: Province code column. Auto-detected when ``None``.
+        region_name_col: Province description column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Standardised province boundaries.
     """
@@ -245,7 +245,7 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     if region_name_col is None:
         region_name_col = next((c for c in _NAME_CANDIDATES if c in gdf.columns), None)
 
-    # Ensure that a code and name columns were found
+    # Both a code and a name column are needed
     if code_col is None or region_name_col is None:
         raise ValueError(
             f"Could not detect code/name columns in {list(gdf.columns)}. "
@@ -269,8 +269,8 @@ def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.Geo
     Requires geopandas (``pip install "comfort-db[geo]"``).
 
     Args:
-        path (str or Path): Path to the basins ``.shp`` file.
-        region_name_col (str): Basin name column. Auto-detected when ``None``.
+        path: Path to the basins ``.shp`` file.
+        region_name_col: Basin name column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Basin boundaries with columns ``basin_name`` and ``geometry``.
     """
@@ -300,8 +300,8 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     Requires xarray (``pip install "comfort-db[grid]"``).
 
     Args:
-        path (str or Path): Path to the biomes NetCDF file.
-        biome_var (str): Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
+        path: Path to the biomes NetCDF file.
+        biome_var: Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
             ``"TimeVaryingBiomes"``).
     Returns:
         pandas.DataFrame: Columns ``LONGITUDE``, ``LATITUDE``, ``label``
@@ -355,16 +355,16 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     * **CSV path** with columns ``name`` (or *region_name_col*) and
       ``geometry`` (WKT) - requires ``shapely``.
     * **Shapefile path** (``.shp``) - requires ``geopandas``.
-    * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``.
+    * **GeoDataFrame** / **GeoSeries** - requires ``geopandas``. A GeoSeries names its regions by its index.
 
     Args:
-        df (pandas.DataFrame): DataFrame with longitude and latitude columns.
+        df: DataFrame with longitude and latitude columns.
         regions: Region definitions in any format listed above.
-        lon_col (str): Longitude column [°E].
-        lat_col (str): Latitude column [°N].
-        region_name_col (str): Region name column in GeoDataFrame / CSV.
+        lon_col: Longitude column [°E].
+        lat_col: Latitude column [°N].
+        region_name_col: Region name column in GeoDataFrame / CSV.
             Ignored for dict input. Default ``"name"``.
-        output_col (str): Name of the new column. Default ``"region"``.
+        output_col: Name of the new column. Default ``"region"``.
     Returns:
         pandas.DataFrame: Copy of df with an added ``output_col`` column.
     """
@@ -416,7 +416,7 @@ def water_mass_masks(df: pd.DataFrame, regions: dict | str | Path | gpd.GeoDataF
     # Iterate over observations
     labels = []
     for _, row in df.iterrows():
-        # Containment test
+        # Point-in-region test (a boundary counts as inside)
         pt = Point(row[lon_col], row[lat_col])
         match = next((region_name for region_name, poly in named_regions if poly.intersects(pt)), None)
         labels.append(match)
@@ -432,10 +432,10 @@ def water_mass_statistics(df: pd.DataFrame, parameters: list[str] | str,
     """Compute per-region descriptive statistics for one or more parameters.
 
     Args:
-        df (pandas.DataFrame): DataFrame with region assignments
+        df: DataFrame with region assignments
             (from :func:`water_mass_masks`) and parameter columns.
-        parameters (list[str] or str): Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
-        region_col (str): Region column. Default ``"region"``.
+        parameters: Parameter columns to aggregate. Insensitive to casing and ``P_`` prefix.
+        region_col: Region column. Default ``"region"``.
     Returns:
         pandas.DataFrame: MultiIndex columns ``(parameter, statistic)``
             with count, mean, std, min, max. Rows are regions.
@@ -448,15 +448,15 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
                 region_name_col: str = "name") -> tuple[float, float, float, float]:
     """Return the lon/lat bounding box of one or more regions.
 
-    Intended to derive a bounding box for a cheap SQL query before an exact polygon refined region search,
+    Intended to derive a bounding box for a cheap SQL query before the exact polygon search,
     see ``region=`` on :func:`comfort.io.load_comfort`/:func:`~comfort.io.read_parameter`/:func:`~comfort.io.subset_region`.
 
-    A region that crosses the antimeridian (+-180°) must be split as one polygon per side.
-    The return value indicates antimeridian-crossing by lon_min > than lon_max.
+    A region that crosses the antimeridian (+-180°) must be stored as one polygon per side.
+    The box then wraps around, i.e. ``lon_min > lon_max``.
 
     Args:
         regions: Region definition(s), same formats as water_mass_masks.
-        region_name_col (str): Region name column. See water_mass_masks.
+        region_name_col: Region name column. See water_mass_masks.
     Returns:
         tuple[float, float, float, float]: ``(lon_min, lon_max, lat_min, lat_max)``.
     """
@@ -470,7 +470,7 @@ def region_bbox(regions: dict | str | Path | gpd.GeoDataFrame,
     # Longitude intervals of the parts, sorted west to east
     intervals = sorted((b[0], b[2]) for b in bounds)
 
-    # Find longitude range (find the widest empty gap between the regions and leave it out -> the shortest range remains)
+    # Longitude range: Leave out the widest empty gap between the parts, so that the shortest range remains
     hi = intervals[0][1]  # eastern end of the intervals merged so far
     lon_min, lon_max = intervals[0][0], max(h for _, h in intervals)  # plain range
     widest = lon_min + 360 - lon_max  # gap from the easternmost end around to the westernmost start
@@ -495,8 +495,8 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
 
     Args:
         regions: Region definition(s), same format as water_mass_masks.
-        names (str or list[str]): Region name(s) to keep.
-        region_name_col (str): Region name column. See water_mass_masks.
+        names: Region name(s) to keep.
+        region_name_col: Region name column. See water_mass_masks.
     Returns:
         dict[str, shapely.Polygon]: Only the requested region(s).
     Raises:
@@ -523,7 +523,7 @@ def select_regions(regions: dict | str | Path | gpd.GeoDataFrame,
 def _check_lonlat(named_regions):
     """Raise ValueError if any region coordinate is outside lon/lat range."""
     for region_name, poly in named_regions:
-        # Skip empt polygons
+        # Skip empty polygons
         if poly.is_empty:
             continue
 
@@ -610,12 +610,13 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
     from `Zenodo record 15201767 <https://zenodo.org/records/15201767>`_.
 
     Args:
-        path (str or Path): Path to the cluster CSV file.
-        depth (float): Depth level [m] to select. When ``None`` all depths
+        path: Path to the cluster CSV file.
+        depth: Depth level [m] to select. When ``None`` all depths
             are returned. Uses closest available level if exact match
             is unavailable.
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: The grid cells with ``LONGITUDE``, ``LATITUDE``, ``LEV_M`` and ``label``
+            (one depth level if *depth* is given).
     """
     # Check if file exists
     path = Path(path)
@@ -632,7 +633,7 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
         closest = float(available[np.abs(available - depth).argmin()])
         if closest != depth:
             logger.info(
-                "load_jenniges_provinces: requested depth %.1f m, "
+                "load_jenniges_provinces: Requested depth %.1f m, "
                 "using closest available %.1f m", depth, closest,
             )
         df = df[df["LEV_M"] == closest].copy()
@@ -657,18 +658,18 @@ def classify_from_grid(df: pd.DataFrame, grid_df: pd.DataFrame,
     only in that time step.
 
     Args:
-        df (pandas.DataFrame): Observation DataFrame with lon/lat columns.
-        grid_df (pandas.DataFrame): Labelled grid (e.g. from
+        df: Observation DataFrame with lon/lat columns.
+        grid_df: Labelled grid (e.g. from
             :func:`load_jenniges_provinces` or :func:`load_biomes`).
-        lon_col (str): Longitude column in *df*.
-        lat_col (str): Latitude column in *df*.
-        grid_lon_col (str): Longitude column in *grid_df*.
-        grid_lat_col (str): Latitude column in *grid_df*.
-        label_col (str): Label column in *grid_df*.
-        output_col (str): Name of the new column added to the result.
-        time_col (str): Time column in *df* (e.g. year) to match against
+        lon_col: Longitude column in *df*.
+        lat_col: Latitude column in *df*.
+        grid_lon_col: Longitude column in *grid_df*.
+        grid_lat_col: Latitude column in *grid_df*.
+        label_col: Label column in *grid_df*.
+        output_col: Name of the new column added to the result.
+        time_col: Time column in *df* (e.g. year) to match against
             *grid_time_col*. Omit for a purely spatial grid.
-        grid_time_col (str): Time column in *grid_df*. Defaults to
+        grid_time_col: Time column in *grid_df*. Defaults to
             *time_col* if *time_col* is given.
     Returns:
         pandas.DataFrame: Copy of *df* with an added *output_col* column.
@@ -727,7 +728,7 @@ def _nearest_labels(obs_lon, obs_lat, grid_lon, grid_lat, grid_labels):
     """Nearest-neighbour label lookup on the unit sphere (works at any latitude and across +-180°)."""
     from scipy.spatial import cKDTree
 
-    # Construct neighbourhood graph on unit sphere coordinates
+    # Build a k-d tree on unit sphere coordinates
     tree = cKDTree(_to_unit_sphere(grid_lon.astype(float), grid_lat.astype(float)))
 
     # Return the one nearest neighbour for each observation

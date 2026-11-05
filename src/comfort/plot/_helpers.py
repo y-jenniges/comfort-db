@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from ..util.optional import import_optional
 
 if TYPE_CHECKING:
+    import matplotlib.figure
     import sqlite3
     import pandas as pd
     from ..qc import QualityFlags
@@ -42,14 +43,14 @@ def _get_or_create_ax(ax=None, figsize=None, **subplot_kw):
     return ax, True
 
 
-def _save_fig(save_as: str | None, dpi: int = 300) -> None:
-    """Save the current figure to *save_as*, creating parent dirs as needed."""
+def _save_fig(fig: matplotlib.figure.Figure, save_as: str | None, dpi: int = 300) -> None:
+    """Save *fig* to *save_as*, creating parent dirs as needed."""
     if save_as is None:
         return
     # Ensure target directory exists
     os.makedirs(os.path.dirname(os.path.abspath(save_as)), exist_ok=True)
     # Save
-    plt.savefig(save_as, bbox_inches="tight", dpi=dpi)
+    fig.savefig(save_as, bbox_inches="tight", dpi=dpi)
 
 
 def _finish(ax, standalone: bool, save_as: str | None, dpi: int = 300):
@@ -57,7 +58,8 @@ def _finish(ax, standalone: bool, save_as: str | None, dpi: int = 300):
     # Only adjust layout when this function created the figure
     if standalone:
         plt.tight_layout()
-    _save_fig(save_as, dpi)
+    # Save the figure of ax
+    _save_fig(ax.figure, save_as, dpi)
     return ax
 
 

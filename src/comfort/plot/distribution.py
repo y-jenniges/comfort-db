@@ -18,7 +18,7 @@ import seaborn as sns
 
 from ..util.columns import find_col
 from ..util.optional import import_optional
-from ..util.types import BoxKind, check_choice
+from ..util.types import BoxKind, check_choice, parse_timestamps
 from ._helpers import _finish, _get_or_create_ax, _resolve_data, _save_fig
 
 if TYPE_CHECKING:
@@ -160,7 +160,7 @@ def plot_monthly_histogram(
     value_col = find_col(df, value_col)
     date_col = find_col(df, date_col)
     temp = df.copy()
-    temp[date_col] = pd.to_datetime(temp[date_col])
+    temp[date_col] = parse_timestamps(temp[date_col])
 
     # Create a 3x4 grid of subplots, one per calendar month
     fig, axs = plt.subplots(3, 4, figsize=(12, 8))
@@ -178,7 +178,7 @@ def plot_monthly_histogram(
     fig.supylabel("Count")
     fig.supxlabel(value_col)
     plt.tight_layout()
-    _save_fig(save_as, dpi)
+    _save_fig(fig, save_as, dpi)
     return fig
 
 
@@ -230,7 +230,7 @@ def compare_stats(
             c for c in df.select_dtypes("number").columns if c != group_col
         )
 
-    # Filter to the requested group labels
+    # Filter to the requested group labels (all groups if none are given)
     temp = df.copy()
     if labels is not None:
         temp = temp[temp[group_col].isin(labels)]

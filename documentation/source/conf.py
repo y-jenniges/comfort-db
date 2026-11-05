@@ -29,6 +29,12 @@ author = 'Yvonne Jenniges, Are Olsen, Boris Peter Koch, Sebastian Maneth'
 # ones.
 extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon', 'sphinx.ext.viewcode']
 
+# Take the types of parameters and return values from the annotations (the docstrings do not repeat them)
+autodoc_typehints = 'description'
+
+# Render the Args of the class __init__ docstring
+autoclass_content = 'both'
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 

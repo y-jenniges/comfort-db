@@ -30,9 +30,9 @@ class UnitsConverter:
                  units: pd.DataFrame) -> None:
         """
         Args:
-            connection (sqlite3.Connection): Database connection.
-            default_units (pandas.DataFrame): Must have columns NAME_TABLE and UNITS_ID_DEFAULT.
-            units (pandas.DataFrame): Must have column ID (and NAME_SHORT for unit names).
+            connection: Database connection.
+            default_units: Must have columns NAME_TABLE and UNITS_ID_DEFAULT.
+            units: Must have column ID (and NAME_SHORT for unit names).
         """
         self.connection = connection
         self.df_default_units = default_units
@@ -46,9 +46,9 @@ class UnitsConverter:
         Create a UnitsConverter by reading DATABASE_TABLES and UNITS automatically.
 
         Args:
-            conn (sqlite3.Connection): COMFORT database connection.
+            conn: COMFORT database connection.
         Returns:
-            UnitsConverter
+            UnitsConverter: Converter with the default units and unit names of the database.
         Raises:
             ValueError: If required tables are not found.
         """
@@ -75,30 +75,35 @@ class UnitsConverter:
         to *on_missing*. Counts are always logged.
 
         Args:
-            df (pandas.DataFrame): Must contain ``VAL`` and ``UNITS_ID``.
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-            use_density (bool): Use computed density instead of the
+            df: Must contain ``VAL`` and ``UNITS_ID``.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+            use_density: Use computed density instead of the
                 constant 1.025 kg/L.
-            on_missing (str): Policy for unconvertible rows: ``'drop'``
+            on_missing: Policy for unconvertible rows: ``'drop'``
                 (default) removes them, ``'keep'`` retains them with their
                 original VAL and UNITS_ID, ``'raise'`` raises ValueError.
-            density_fallback (str): With ``use_density=True``, policy for rows whose
+            density_fallback: With ``use_density=True``, policy for rows whose
                 density cannot be computed (missing/NaN salinity, temperature or
                 position): ``'constant'`` (default, use 1.025 kg/L), ``'drop'`` or
                 ``'raise'``. Counts are logged.
+        Returns:
+            pandas.DataFrame: The converted rows in their original order.
+        Raises:
+            ValueError: If an option is invalid or if rows cannot be converted and
+                *on_missing* or *density_fallback* is ``'raise'``.
         """
         # Ensure that only defined missingness policies are passed
         check_choice(on_missing, OnMissing, "on_missing")
         check_choice(density_fallback, DensityFallback, "density_fallback")
 
-        # Ensure unit id info is given
+        # Nothing to convert without unit IDs
         if "UNITS_ID" not in df.columns or df.empty:
             return df
 
-        # Check if default unit exists
+        # Nothing to convert to without a default unit
         target = self.default_unit_id(parameter)
         if target is None:
-            logger.warning("convert_dataframe: no default unit for %s", parameter)
+            logger.warning("convert_dataframe: No default unit for %s", parameter)
             return df
 
         # Get used unit IDs
@@ -186,7 +191,7 @@ class UnitsConverter:
         """Return the ID of a parameter's default unit.
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             int or None: Unit ID, or ``None`` when no default unit is
                 registered for *parameter*.
@@ -198,21 +203,21 @@ class UnitsConverter:
         return int(self.df_default_units.loc[mask, "UNITS_ID_DEFAULT"].iloc[0])
 
     def required_inputs(self, parameter: str, use_density: bool = False) -> tuple[bool, bool]:
-        """Returns which co-located measurements a conversions potentially need.
+        """Return which co-located measurements the conversions potentially need.
 
         Combines requirements of all conversions into the parameter's default unit
         (see :meth:`ConversionFormulas.is_allowed`).
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-            use_density (bool): If densities are computed (``True``) or the constant is used.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+            use_density: If densities are computed (``True``) or the constant is used.
         Returns:
             tuple[bool, bool]: ``(needs_temperature, needs_salinity)``.
         """
         target = self.default_unit_id(parameter)  # default unit ID
-        needs: set[str] = set()  # list of required co-located parameters
+        needs: set[str] = set()  # required co-located parameters
 
-        # Iterate over all potential targets
+        # Only parameters with a default unit have conversions
         if target is not None:
             # Iterate over all conversions with default unit ID as target
             for source, conversion_target in self.formulas.conversions:
@@ -226,7 +231,7 @@ class UnitsConverter:
         """Return the human-readable name of a parameter's default unit.
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             str or None: Unit name (e.g. ``'µmol/kg'``), or ``None`` when
                 no default unit is registered for *parameter*.
@@ -247,12 +252,13 @@ class UnitsConverter:
         """Convert units for the given parameter tables to their default unit.
 
         Args:
-            tables (list[str]): Table names to convert.
-            use_density (bool): Use in-situ density.
-            override_old_tables (bool): Replace the original table.
-            on_missing (str): Policy for unconvertible rows
+            tables: Table names to convert.
+            use_density: Use computed density (lab or in-situ, see :class:`ConversionFormulas`)
+                instead of the constant 1.025 kg/L.
+            override_old_tables: Replace the original table.
+            on_missing: Policy for unconvertible rows
                 (``'drop'``, ``'keep'`` or ``'raise'``). Default ``'drop'``.
-            density_fallback (str): Policy for rows without computable density
+            density_fallback: Policy for rows without computable density
                 (``'constant'``, ``'drop'`` or ``'raise'``). Default ``'constant'``.
         Returns:
             dict[str, str]: Maps each input table name to the table holding
@@ -262,7 +268,7 @@ class UnitsConverter:
         new_tables = {}
         for table in tables:
             validate_identifier(table)
-            logger.info("UnitsConverter: converting %s", table)
+            logger.info("UnitsConverter: Converting %s", table)
 
             # Get data as df
             ex = self.connection.cursor().execute(f"SELECT * FROM {table};")
@@ -341,10 +347,10 @@ class ConversionFormulas:
         Depends on whether density should be used (lab_dens needs salinity, real_dens needs both)
 
         Args:
-            source_unit_id (int): Unit ID of the values.
-            target_unit_id (int): Unit ID to convert to.
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
-            use_density (bool): Whether densities are computed (``True``) or the constant is used.
+            source_unit_id: Unit ID of the values.
+            target_unit_id: Unit ID to convert to.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
+            use_density: Whether densities are computed (``True``) or the constant is used.
         Returns:
             set[str]: Subset of ``{'temperature', 'salinity'}``.
         """
@@ -367,9 +373,9 @@ class ConversionFormulas:
         """Check if a registered conversion may be applied to a parameter.
 
         Args:
-            source_unit_id (int): Unit ID of the values.
-            target_unit_id (int): Unit ID to convert to.
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            source_unit_id: Unit ID of the values.
+            target_unit_id: Unit ID to convert to.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             bool: ``True`` if the conversion has no parameter restriction or lists *parameter*.
         """
@@ -380,7 +386,7 @@ class ConversionFormulas:
         """Return the molar mass of the element (N, P, Si, Ba), not of the ion.
 
         Args:
-            parameter (str): Parameter name. Insensitive to casing and ``P_`` prefix.
+            parameter: Parameter name. Insensitive to casing and ``P_`` prefix.
         Returns:
             float: Molar mass.
         Raises:
@@ -477,7 +483,7 @@ class ConversionFormulas:
                             "missing - cannot compute oxygen saturation")
             return temp.assign(VAL=np.nan, UNITS_ID=3)
 
-        # Unit conversion
+        # Saturation concentration, scaled by the measured percent saturation
         pt = self._potential_temperature_for_o2sol(df, sal_col, temp_col)
         o2_eq = gsw.O2sol_SP_pt(df[sal_col].to_numpy(dtype=float), pt)
         return temp.assign(VAL=temp["VAL"] * np.asarray(o2_eq) / 100, UNITS_ID=3)
@@ -514,11 +520,11 @@ class ConversionFormulas:
         if isinstance(dens, pd.Series):
             not_nan_dens = dens.notna()
 
-            # Check if there are any not-nan densities
+            # Drop rows with an undefined density ('drop' policy)
             if not not_nan_dens.all():
                 return df[not_nan_dens].copy(), dens[not_nan_dens]
 
-        # If no not-nan densities, return all data
+        # Nothing to drop
         return df.copy(), dens
 
     def lab_density(self, df: pd.DataFrame, use_density: bool,

@@ -11,6 +11,7 @@ import seaborn as sns
 
 from ..database.information import param_label
 from ..util.columns import find_col, resolve_param_columns
+from ..util.types import parse_timestamps
 from ._helpers import _finish, _get_or_create_ax, _save_fig
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ def plot_annual_coverage(
     :func:`plot_counts_bar`.
 
     Args:
-        dfs (dict): Dictionary mapping parameter names to DataFrames, each containing
+        dfs: Dictionary mapping parameter names to DataFrames, each containing
             a datetime column.
         date_col: Column name containing datetime values.
         normalise: If ``True`` show counts relative to the per-parameter
@@ -52,9 +53,9 @@ def plot_annual_coverage(
     # Iterate over parameter dfs
     for parameter, df in dfs.items():
         # Per-year counts
-        counts = pd.to_datetime(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
+        counts = parse_timestamps(df[find_col(df, date_col)]).dt.year.value_counts().sort_index()
 
-        # Normalise
+        # Relative to the busiest year
         if normalise:
             counts = counts / counts.max()
 
@@ -136,13 +137,14 @@ def plot_counts_bar(
     *tick_style* to ``'year'`` or ``'month'``),
     :func:`~comfort.database.count_samples_per_parameter` and
     :func:`~comfort.database.count_negative_samples` (select the ``parameter`` and
-    ``proportion of negative samples`` columns first; *tick_style* ``None``).
+    ``percentage of negative samples`` columns first; *tick_style* ``None``).
 
     Args:
         df_count: First column is the category (year, month, parameter, ...),
             second is the count.
-        tick_style: ``'year'``, ``'month'`` or ``None`` (no special tick
-            formatting, e.g. for per-parameter counts).
+        tick_style: ``'year'`` (label the first and last year and every full
+            decade), ``'month'`` (month numbers 1 to 12 become *month_ticks*) or
+            ``None`` (label every category, e.g. for per-parameter counts).
         title: Plot title.
         month_ticks: 12 month labels.
         ax: Axes to draw into.
@@ -154,42 +156,43 @@ def plot_counts_bar(
     """
     # Define months labels
     if month_ticks is None:
-        month_ticks = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        month_ticks = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
     # Check input df
     if df_count is None or df_count.empty:
-        logger.warning("plot_counts_bar: passed dataframe is empty")
+        logger.warning("plot_counts_bar: Passed dataframe is empty")
         return None
 
     ax, standalone = _get_or_create_ax(ax)
 
-    # Determine x and y
-    cols = df_count.columns
-    x = df_count[cols[0]].map(str).tolist()
-    y = df_count[cols[1]].tolist()
+    category_col, value_col = df_count.columns[:2]
+    categories = df_count[category_col].tolist()
+    values = df_count[value_col].tolist()
+    positions = np.arange(len(categories))
 
     # Barplot
-    ax.barh(x, y)
-    for i, (xi, yi) in enumerate(zip(x, y)):
-        ax.text(yi, i, str(yi), ha="left", va="center")
+    ax.barh(positions, values)
+    for pos, value in zip(positions, values):
+        text = str(value) if isinstance(value, int) else f"{value:.3g}"
+        ax.text(value, pos, text, ha="left", va="center")
     ax.set_title(title)
-    ax.set_ylabel("Count")
+    ax.set_xlabel(str(value_col))
 
-    # Draw ticks and labels
-    if tick_style == "year" and len(df_count) > 0:
-        min_y = df_count.iloc[0, 0]
-        max_y = df_count.iloc[-1, 0]
-        min_y_rounded = np.round(min_y, -1)
-        min_tick = min_y_rounded if min_y_rounded >= min_y else min_y_rounded + 10
-        ticks = ([str(min_y)]
-                 + [str(t) for t in range(int(min_tick), int(max_y), 10)]
-                 + [str(max_y)])
-        ax.set_xticks([float(t) for t in ticks])
-        ax.set_xticklabels(ticks, rotation=90)
+    # Set tick labels
+    labels = [str(c) for c in categories]
+    shown = positions
+    if tick_style == "year":
+        # Years: Label the first, the last and every full decade
+        years = df_count[category_col].astype(int).to_numpy()
+        shown = positions[(years % 10 == 0) | (positions == 0) | (positions == len(years) - 1)]
     elif tick_style == "month":
-        ax.set_yticks(range(len(month_ticks)))
-        ax.set_yticklabels(month_ticks)
+        # Month: Use the 12 month_ticks
+        labels = [month_ticks[int(c) - 1] for c in categories]
+    ax.set_yticks(shown)
+    ax.set_yticklabels([labels[i] for i in shown])
+
+    # First time category on top
+    ax.invert_yaxis()
 
     return _finish(ax, standalone, save_as, dpi)
 
@@ -234,31 +237,31 @@ def plot_duplicates(
         plt.xticks(rotation=90)
         plt.tight_layout()
         if save_as_prefix:
-            _save_fig(f"{save_as_prefix}_{parameter}_number_of_duplicates.png", dpi)
+            _save_fig(fig, f"{save_as_prefix}_{parameter}_number_of_duplicates.png", dpi)
         plt.close()
 
         sns.scatterplot(data=dups_time_loc, x="size", y="mean", size="std", hue="std")
         plt.title(f"{parameter} - time/loc duplicate statistics")
         plt.tight_layout()
         if save_as_prefix:
-            _save_fig(f"{save_as_prefix}_{parameter}_duplicates_statistics.png", dpi)
+            _save_fig(plt.gcf(), f"{save_as_prefix}_{parameter}_duplicates_statistics.png", dpi)
         plt.close()
 
         sns.boxplot(data=dups_time_loc, x="size", y="std")
         plt.title(f"{parameter} - time/loc duplicate std")
         plt.tight_layout()
         if save_as_prefix:
-            _save_fig(f"{save_as_prefix}_{parameter}_duplicates_std.png", dpi)
+            _save_fig(plt.gcf(), f"{save_as_prefix}_{parameter}_duplicates_std.png", dpi)
         plt.close()
 
     # Summary bar chart comparing both duplicate types
     width = 0.35
     x = np.arange(len(summary))
     fig, ax = plt.subplots()
-    b0 = ax.bar(x - width / 2, summary["proportion of row duplicates"], width, label="Row duplicates")
-    b1 = ax.bar(x + width / 2, summary["proportion of time loc duplicates"], width, label="Time/location duplicates")
+    b0 = ax.bar(x - width / 2, summary["percentage of row duplicates"], width, label="Row duplicates")
+    b1 = ax.bar(x + width / 2, summary["percentage of time loc duplicates"], width, label="Time/location duplicates")
     ax.set_ylabel("%")
-    ax.set_title("Proportion of duplicates per parameter")
+    ax.set_title("Percentage of duplicates per parameter")
     ax.set_xticks(x)
     ax.set_xticklabels(summary["parameter"], rotation=90)
     ax.bar_label(b0, padding=3)
@@ -266,7 +269,7 @@ def plot_duplicates(
     ax.legend()
     plt.tight_layout()
     if save_as_prefix:
-        _save_fig(f"{save_as_prefix}_duplicates_summary.png", dpi)
+        _save_fig(fig, f"{save_as_prefix}_duplicates_summary.png", dpi)
 
     return ax
 
@@ -278,10 +281,10 @@ def plot_missing_value_info(
     save_as: str | None = None,
     dpi: int = 300,
 ) -> matplotlib.axes.Axes:
-    """Bar chart of missing-value fractions per parameter.
+    """Bar chart of the percentage of missing values per parameter.
 
     Args:
-        num_nulls: DataFrame with columns ``'parameter'`` and ``'relative'``.
+        num_nulls: DataFrame with columns ``'parameter'`` and ``'relative'`` (percent).
         ax: Axes to draw into.
         save_as: Save path.
         dpi: Resolution (dots per inch) used when saving.
@@ -293,7 +296,7 @@ def plot_missing_value_info(
 
     # Bar chart
     num_nulls.plot(
-        kind="bar", title="Fraction of missing values",
+        kind="bar", title="Missing values per parameter",
         x="parameter", y="relative", legend=False,
         ylabel="%", xlabel="", grid=True, ax=ax,
     )

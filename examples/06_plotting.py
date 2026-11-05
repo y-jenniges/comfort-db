@@ -6,7 +6,7 @@ Requires:
     COMFORT_DB_PATH - path to the COMFORT SQLite database
 
 Install extras:
-    pip install "comfort-db[plot]"
+    pip install "comfort-db[plot,scale]"
 """
 from __future__ import annotations
 
@@ -36,8 +36,7 @@ from comfort.units import UnitsConverter
 
 load_dotenv()
 
-# A profile is identified by (ID, PROFILE_NUMBER)
-# LEV_M adds the depth
+# A profile is identified by (ID, PROFILE_NUMBER), LEV_M adds the depth
 JOIN_KEY = ["ID", "PROFILE_NUMBER", "LEV_M"]
 
 
@@ -60,8 +59,7 @@ if __name__ == "__main__":
         oxygen_unit = UnitsConverter.from_connection(conn).default_unit_name("P_OXYGEN")
     oxygen_label = f"Oxygen [{oxygen_unit}]" if oxygen_unit else "Oxygen"
 
-    # Drop P_OXYGEN rows that are likely mislabelled salinity values
-    # (suspected COMFORT bug)
+    # Drop OXYGEN rows that are copies of the salinity (known COMFORT data issue)
     suspect = flag_salinity_like_oxygen(dfs["OXYGEN"])
     print(f"  Dropping {suspect.sum()}/{len(dfs['OXYGEN'])} OXYGEN rows with salinity-like values")
     dfs["OXYGEN"] = dfs["OXYGEN"][~suspect].copy()
@@ -79,6 +77,9 @@ if __name__ == "__main__":
 
     # Merge T + S and T + O for multi-parameter plots
     df_ts = df_t.merge(df_s[JOIN_KEY + ["SALINITY"]], on=JOIN_KEY)
+
+    # TEOS-10 variables (SA, CT, sigma0): Needed for the T-S diagram contours and the density profile
+    df_ts = add_teos10_variables(df_ts, sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR")
     df_to = df_t.merge(df_o[JOIN_KEY + ["OXYGEN"]], on=JOIN_KEY)
 
     # --- Figure 1: Profiles, section, T-S, correlation (2x2 grid) ---
@@ -99,9 +100,9 @@ if __name__ == "__main__":
     plot_section(df_o, value_col="OXYGEN", colourbar_label=oxygen_label, binned=True, ax=axes[0, 1])
     axes[0, 1].set_title("Oxygen section (binned mean)")
 
-    # 1c. T-S diagram with isopycnal contours and depth colouring
-    plot_ts_diagram(df_ts, temperature_col="TEMPERATURE", salinity_col="SALINITY",
-                    ylabel="Temperature [°C]", xlabel="Salinity [PSU]",
+    # 1c. T-S diagram with isopycnal contours and depth colouring (the contours need SA and CT)
+    plot_ts_diagram(df_ts, temperature_col="CT", salinity_col="SA",
+                    ylabel="Conservative Temperature [°C]", xlabel="Absolute Salinity [g/kg]",
                     ax=axes[1, 0])
 
     # 1d. Correlation: Temperature vs. oxygen - hexbin
@@ -113,10 +114,7 @@ if __name__ == "__main__":
     fig.tight_layout()
 
     # --- Figure 2: Density profile with pycnocline depth (same 5 stations) ---
-    df_dens_sample = add_teos10_variables(
-        df_t_sample.merge(df_s[JOIN_KEY + ["SALINITY"]], on=JOIN_KEY),
-        sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR",
-    )
+    df_dens_sample = df_ts[df_ts["ID"].isin(sample_ids)]
     pyc = pycnocline_depth(df_dens_sample, density_col="sigma0", depth_col="LEV_M")
     ax_pyc = plot_profile(df_dens_sample, value_col="sigma0",
                           xlabel=r"$\sigma_0$ [kg/m$^3$]",
@@ -133,7 +131,7 @@ if __name__ == "__main__":
                                binned=True)
     ax_transect.set_title("Oxygen section along cruise track")
 
-    # --- Figure 4: Distributions (2x1) ---
+    # --- Figure 4: Distributions (1x2) ---
     fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
 
     boxplot(df_o, value_col="OXYGEN", title=oxygen_label, ax=axes2[0])

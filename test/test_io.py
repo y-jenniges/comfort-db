@@ -312,6 +312,13 @@ class TestSubsetRegion:
         assert len(subset_region(df, date_max="2000-12-31 13:59:59")) == 1
         assert len(subset_region(df, date_min="2000-12-31 14:00:00")) == 2
 
+    # Times with and without fractional seconds in one column are both filtered, date_max includes its whole second
+    def test_mixed_fractional_seconds(self):
+        df = self._df()
+        df["DATEANDTIME"] = ["2009-10-09 04:02:01", "2009-10-09 04:02:02.000970", "2009-10-09 04:02:03"]
+        assert list(subset_region(df, date_max="2009-10-09 04:02:02")["VAL"]) == [1.0, 2.0]
+        assert list(subset_region(df, date_min="2009-10-09 04:02:02")["VAL"]) == [2.0, 3.0]
+
     # A date-only bound (no time of day) is rejected
     @pytest.mark.parametrize("kwargs", [{"date_min": "2000-01-01"}, {"date_max": "2000-12-31"}])
     def test_date_only_bound_raises(self, kwargs):
@@ -785,8 +792,8 @@ class TestReadParameter:
         assert "(s.LONGITUDE >= ? OR s.LONGITUDE <= ?)" in conditions
         assert params == [-180.0, 0.0, 170.0, -170.0, -10.0, 10.0]
 
-    # The SQL date bounds are inclusive, a date-only value is rejected
-    @pytest.mark.parametrize("date_max, param", [("2000-12-31 14:00:00", "2000-12-31 14:00:00"), ("2000-12-31", None)])
+    # The SQL upper date bound includes the whole last second, a date-only value is rejected
+    @pytest.mark.parametrize("date_max, param", [("2000-12-31 14:00:00", "2000-12-31 14:00:01"), ("2000-12-31", None)])
     def test_sql_date_max_bound(self, date_max, param):
         from comfort.io import _append_geo_conditions
         conditions, params = [], []
@@ -800,7 +807,7 @@ class TestReadParameter:
 
         # Inclusive SQL date bounds
         _append_geo_conditions(conditions, params, "s.", "s.", "p.", "s.", **kwargs)
-        assert conditions == ["s.DATEANDTIME <= ?"]
+        assert conditions == ["s.DATEANDTIME < ?"]
         assert params == [param]
 
     # extra_station_cols pulls additional station columns (e.g. CRUISE_ID)
@@ -894,6 +901,49 @@ class TestReadWithGeoSharedQuery:
         assert list(result["VAL"]) == [200.0]
         assert list(result["salinity"]) == [35.0]
         assert list(result["CRUISE_ID"]) == ["A"]
+
+
+class TestFractionalSecondStations:
+    """Some stations have fractional seconds in DATEANDTIME ('2009-10-09 04:02:02.000970')."""
+
+    @staticmethod
+    def _conn():
+        # Dummy DB with an oxygen table (three samples) and three stations
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE station (ID INTEGER PRIMARY KEY, LATITUDE REAL, LONGITUDE REAL, DATEANDTIME TEXT)")
+        conn.executemany("INSERT INTO station VALUES (?,?,?,?)", [
+            (1, 45.0, -30.0, "2009-10-09 04:02:01"),
+            (2, 45.0, -30.0, "2009-10-09 04:02:02.000970"),
+            (3, 45.0, -30.0, "2009-10-09 04:02:03"),
+        ])
+        conn.execute("CREATE TABLE P_OXYGEN (ID INTEGER, LEV_DBAR REAL, LEV_M REAL, VAL REAL, PQF1 INTEGER, "
+                     "PQF2 INTEGER, SQF INTEGER, BOTTLE_NUMBER INTEGER, PROFILE_NUMBER INTEGER, "
+                     "PROFILE_BEST INTEGER, UNITS_ID INTEGER, INSTRUMENT_ID INTEGER)")
+        conn.executemany("INSERT INTO P_OXYGEN VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                         [(i, 0.0, 0.0, 200.0 + i, 1, 3, 0, 1, 1, 1, 3, 1) for i in (1, 2, 3)])
+        return conn
+
+    # The returned times are uniform whole-second strings, so they can be parsed without a format
+    def test_returned_times_are_uniform(self):
+        conn = self._conn()
+        df = read_parameter(conn, "OXYGEN")
+        conn.close()
+        assert sorted(df["DATEANDTIME"]) == ["2009-10-09 04:02:01", "2009-10-09 04:02:02", "2009-10-09 04:02:03"]
+        pd.to_datetime(df["DATEANDTIME"], format="%Y-%m-%d %H:%M:%S")
+
+    # date_max includes the whole second, a station at :02.000970 is kept for date_max ...:02
+    def test_date_max_includes_the_whole_second(self):
+        conn = self._conn()
+        df = read_parameter(conn, "OXYGEN", date_max="2009-10-09 04:02:02")
+        conn.close()
+        assert sorted(df["VAL"]) == [201.0, 202.0]
+
+    # date_min is unaffected: The station at :02.000970 is on or after date_min ...:02
+    def test_date_min_includes_the_same_second(self):
+        conn = self._conn()
+        df = read_parameter(conn, "OXYGEN", date_min="2009-10-09 04:02:02")
+        conn.close()
+        assert sorted(df["VAL"]) == [202.0, 203.0]
 
 
 class TestLoadComfortLimit:

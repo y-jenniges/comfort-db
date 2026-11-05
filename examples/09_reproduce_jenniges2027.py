@@ -7,14 +7,15 @@ salinity, oxygen, nitrate, silicate and phosphate in unified
 units (°C / PSU / umol/kg).
 
 Steps:
-  1. Load global parameters with QC_GOOD, O2/NO3/SiO4/PO4 are converted to
-     umol/kg on load.
+  1. Load North Atlantic parameters (0-70 °N, 77 °W - 30 °E, 0-5000 m) with QC_GOOD,
+     O2/NO3/SiO4/PO4 are converted to umol/kg on load.
   2. Plot annual coverage per parameter (to decide on START_YEAR)
   3. Filter to START_YEAR onwards
   4. Average params over identical (lat, lon, depth, time)
   5. Convert in-situ T to potential temperature
-  6. Grid: 1° x 1° x 12 depth layers (0-5000 m) x 13 20-year time means
-  7. Remove empty land cells (using GEBCO) and save the gridded table as CSV
+  6. Grid: 1° x 1° x 12 depth layers (0-5000 m) x 13 20-year time means,
+     empty land cells are removed (using GEBCO)
+  7. Save the gridded table as CSV
      (inspect it in the CSV tab of the explorer: python -m comfort.app.explorer)
   8. Diagnostic plots
 
@@ -39,7 +40,7 @@ from dotenv import load_dotenv
 from comfort import connect
 from comfort.gridding import Grid, average_duplicate_locations, get_missing_value_info
 from comfort.io import load_comfort
-from comfort.physics import convert_to_potential_temperature
+from comfort.physics import add_teos10_variables, convert_to_potential_temperature, resolve_pressure
 from comfort.plot import (
     plot_annual_coverage,
     plot_correlation,
@@ -89,7 +90,7 @@ def main():
 
     with connect(db_path) as conn:
         # ------------------------------------------------------------------ #
-        # Step 1: Load parameters with QC; convert params are converted to   #
+        # Step 1: Load parameters with QC; O2/NO3/SiO4/PO4 are converted to  #
         # umol/kg on load (SQL-joined co-located T/S, App. C densities)      #
         # ------------------------------------------------------------------ #
         log.info("Step 1: Loading parameters (QC_GOOD, depth <= %d m)...", DEPTH_MAX)
@@ -148,14 +149,22 @@ def main():
         # temperature (co-located salinity + pressure, gsw)                  #
         # ------------------------------------------------------------------ #
         log.info("Step 5: Converting T to potential temperature...")
+
+        # Absolute Salinity and Conservative Temperature for the T-S diagram contours
+        loc_cols = ["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]
+        ts = averaged["TEMPERATURE"].merge(averaged["SALINITY"][loc_cols + ["SALINITY"]], on=loc_cols)
+        ts["LEV_DBAR"] = resolve_pressure(ts)  # measured pressure, else from depth and latitude
+        ts = add_teos10_variables(ts, sp_col="SALINITY", t_col="TEMPERATURE")
+        averaged["SA"], averaged["CT"] = ts[loc_cols + ["SA"]], ts[loc_cols + ["CT"]]
+
         averaged = convert_to_potential_temperature(averaged)
 
         # ------------------------------------------------------------------ #
         # Step 6: Spatio-temporal grid                                       #
         # ------------------------------------------------------------------ #
         log.info(
-            "Step 6: Gridding (1 deg x %d depth layers x annual)...",
-            len(DEPTH_INTERVALS) - 1,
+            "Step 6: Gridding (1 deg x %d depth layers x %d-year time steps)...",
+            len(DEPTH_INTERVALS) - 1, DTIME,
         )
 
         # Define grid
@@ -170,7 +179,7 @@ def main():
         )
         log.info("  Grid template: %d cells", len(grid.grid))
 
-        # Mapping parameter tables to grid
+        # Map the parameter DataFrames onto the grid
         param_cols = [f"P_{p}" for p in PARAMETERS]
         df_wide = grid.map_dataframes(averaged, agg="mean", dropping_land_cells=True)
         for param, col in zip(PARAMETERS, param_cols):
@@ -182,16 +191,10 @@ def main():
             len(df_wide), n_years, len(param_cols),
         )
 
-        # Save the gridded table (loadable in the CSV tab of the explorer)
-        sp = _save_path(output_dir, "gridded_table.csv")
-        if sp:
-            df_wide.to_csv(sp, index=False)
-            log.info("Saved gridded table to %s", sp)
-
         # ------------------------------------------------------------------ #
-        # Step 8: Diagnostic plots                                           #
+        # Step 7: Diagnostic plots                                           #
         # ------------------------------------------------------------------ #
-        log.info("Step 8: Generating diagnostic plots...")
+        log.info("Step 7: Generating diagnostic plots...")
 
         # Histograms
         fig, axes = plt.subplots(2, 3, figsize=(14, 8))
@@ -209,12 +212,12 @@ def main():
         plt.close()
 
         # T-S diagram
-        ts_data = df_wide[["P_TEMPERATURE", "P_SALINITY", "LEV_M"]].dropna()
+        ts_data = df_wide[["P_CT", "P_SA", "LEV_M"]].dropna()
         if not ts_data.empty:
             plot_ts_diagram(
                 ts_data,
-                temperature_col="P_TEMPERATURE",
-                salinity_col="P_SALINITY",
+                temperature_col="P_CT",
+                salinity_col="P_SA",
                 depth_col="LEV_M",
                 save_as=_save_path(output_dir, "ts_diagram.png"),
             )
@@ -277,7 +280,7 @@ def main():
             .to_string()
         )
 
-        # Store
+        # Store the gridded table (loadable in the CSV tab of the explorer)
         out_path = _save_path(output_dir, "na_20y_dataset.csv")
         if out_path:
             df_wide.to_csv(out_path, index=False)

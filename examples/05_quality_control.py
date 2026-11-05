@@ -70,9 +70,10 @@ if __name__ == "__main__":
             print(df_all["PQF2"].value_counts().sort_index()
                   .to_string(header=False))
 
-    # --- Content sanity check: Salinity potentially mislabelled as oxygen ---
-    # Likely a bug in COMFORT
+    # --- Content sanity check: Oxygen values that are copies of the salinity ---
+    # Known COMFORT data issue, see flag_salinity_like_oxygen
     print("\n=== Salinity-like oxygen check ===")
+    # convert_units=True also attaches the co-located salinity column
     data = comfort.load_comfort(db_path, parameters=["OXYGEN"], quality_flags=QC_GOOD,
                                 convert_units=True, output="dict", limit=100_000)
     df_oxygen = data.get("OXYGEN")

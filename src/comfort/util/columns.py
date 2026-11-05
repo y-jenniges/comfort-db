@@ -5,20 +5,20 @@ import pandas as pd
 
 
 def find_col(df: pd.DataFrame, name_to_check: str | list[str] | None, *, required: bool = True):
-    """Return the column name in *df* that matches *name*, insensitive to casing.
+    """Return the column name in *df* that matches *name_to_check*, insensitive to casing.
 
     An exact match wins. Otherwise, the one column that matches ignoring case is returned.
 
     Args:
-        df (pandas.DataFrame): DataFrame to search.
-        name_to_check (str or list[str]): Column name to look for. A list is resolved element by element.
+        df: DataFrame to search.
+        name_to_check: Column name to look for. A list is resolved element by element.
             ``None`` is returned as ``None``, so optional column arguments can be passed through.
-        required (bool): If ``True``, a missing column raises. Otherwise, ``None`` is returned.
+        required: If ``True``, a missing column raises. Otherwise, ``None`` is returned.
     Returns:
         str or None: The column name as it is spelled in *df*.
     Raises:
-        KeyError: If *name* is not found and *required* is ``True`` or if several columns
-            match *name* only when ignoring case (e.g. ``Val`` and ``VAL`` for ``val``).
+        KeyError: If *name_to_check* is not found and *required* is ``True`` or if several columns
+            match *name_to_check* only when ignoring case (e.g. ``Val`` and ``VAL`` for ``val``).
     """
     if name_to_check is None:
         return None
@@ -50,13 +50,14 @@ def resolve_param_columns(df: pd.DataFrame, parameters: list[str] | str) -> list
     find the column ``P_NITRATE``.
 
     Args:
-        df (pandas.DataFrame): DataFrame with one column per parameter.
-        parameters (list[str] or str): Parameter names. Insensitive to casing and ``P_`` prefix.
+        df: DataFrame with one column per parameter.
+        parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
     Returns:
         list[str]: The matching column names, in the order of *parameters*.
     Raises:
         KeyError: If a parameter has no column in *df*.
     """
+    # Imported here as database.information imports qc, which imports this module
     from ..database.information import param_label, param_table_name
 
     # Wrap single parameter into a list

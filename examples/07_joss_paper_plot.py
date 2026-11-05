@@ -52,7 +52,7 @@ def main():
         for param, df_param in raw.items():
             log.info("  %-12s %10d rows", param, len(df_param))
 
-        # Define plotting label (oxygen is converted to umol/kg on load; unit parts separated by a space like the SA label)
+        # Plotting label (oxygen is converted to umol/kg on load)
         oxygen_label = r"Oxygen [µmol kg$^{-1}$]"
 
     # Drop oxygen rows that are suspected mislabelled salinity values
@@ -80,7 +80,7 @@ def main():
     df = add_teos10_variables(df, sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR")
 
     # Get count of remaining oxygen observations
-    num_remaining_observations =len(df.dropna())
+    num_remaining_observations = len(df.dropna())
     log.info(f"Remaining number of oxygen observations: {num_remaining_observations}")
 
     # Global T-S diagram with isopycnal contours, coloured by oxygen concentration

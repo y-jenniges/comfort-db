@@ -4,11 +4,12 @@ from __future__ import annotations
 __all__ = [
     "Aggregation", "BoxKind", "DensityFallback", "DensityQuantity", "GridMode", "InterpMethod",
     "JointKind", "LoadOutput", "OnMissing", "SalinityType", "ScatterKind", "TemperatureTarget",
-    "TemperatureType", "TimeMode", "check_choice", "check_timestamp",
+    "TemperatureType", "TimeMode", "check_choice", "check_timestamp", "parse_timestamps",
 ]
 
 from datetime import date, datetime
 from typing import Literal, get_args
+import pandas as pd
 
 # Long timestamp format that all date and time bounds are given in
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -56,13 +57,26 @@ def check_timestamp(value, option: str) -> None:
     # Accept datetime and Timestamp objects (datetime.date does not support time of day)
     valid = not isinstance(value, date) or isinstance(value, datetime)
     if isinstance(value, str):
-        # Str Object
+        # Strings must match the timestamp format exactly
         try:
-            # Apply time format
+            # Parse with the timestamp format
             datetime.strptime(value, _TIMESTAMP_FORMAT)
             valid = True
         except ValueError:
             valid = False
     if not valid:
-        # Invalid format
+        # Neither a matching string nor a datetime object
         raise ValueError(f"{option} must be given as 'YYYY-MM-DD HH:MM:SS', got {value!r}")
+
+
+def parse_timestamps(values: pd.Series) -> pd.Series:
+    """Parse station times and cut fractional to whole seconds (same as database loaders).
+
+    Args:
+        values: Strings or datetime-like values.
+    Returns:
+        pandas.Series: The parsed times, truncated to whole seconds.
+    Raises:
+        ValueError: If a value is not an ISO 8601 date and time.
+    """
+    return pd.to_datetime(values, format="ISO8601").dt.floor("s")

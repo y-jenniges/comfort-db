@@ -315,6 +315,44 @@ class TestCounting:
         assert len(ax.patches) == len(counts)
         plt.close()
 
+    # Year ticks sit on the category axis: First year, decades, last year
+    def test_year_ticks_on_category_axis(self):
+        counts = pd.DataFrame({"YEAR": range(1998, 2013), "COUNT": range(15)})
+        ax = plot_counts_bar(counts, tick_style="year")
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["1998", "2000", "2010", "2012"]
+        # The count axis is not stretched to the year values
+        assert ax.get_xlim()[1] < 100
+        assert ax.get_xlabel() == "COUNT"
+        plt.close()
+
+    # A first year on a decade is labelled once
+    def test_year_ticks_no_duplicate(self):
+        counts = pd.DataFrame({"YEAR": range(2000, 2021), "COUNT": 1})
+        ax = plot_counts_bar(counts, tick_style="year")
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["2000", "2010", "2020"]
+        plt.close()
+
+    # Month numbers become month names, January on top
+    def test_month_ticks(self):
+        counts = pd.DataFrame({"MONTH": range(1, 13), "COUNT": range(12)})
+        ax = plot_counts_bar(counts, tick_style="month")
+        labels = [t.get_text() for t in ax.get_yticklabels()]
+        assert labels[0] == "Jan" and labels[-1] == "Dec" and len(labels) == 12
+        assert ax.yaxis_inverted()
+        plt.close()
+
+    # Without tick style every category is labelled; float values are shortened
+    def test_no_tick_style(self):
+        data = pd.DataFrame({"parameter": ["OXYGEN", "NITRATE"], "proportion": [0.123456, 0.5]})
+        ax = plot_counts_bar(data, tick_style=None)
+        assert [t.get_text() for t in ax.get_yticklabels()] == ["OXYGEN", "NITRATE"]
+        assert [t.get_text() for t in ax.texts] == ["0.123", "0.5"]
+        plt.close()
+
+    # An empty table returns None
+    def test_empty_returns_none(self):
+        assert plot_counts_bar(pd.DataFrame(columns=["YEAR", "COUNT"])) is None
+
 
 #--- Annual coverage -------------------------------------------------#
 
@@ -455,6 +493,17 @@ class TestPlotSpatialDistribution:
         assert ax is not None
         plt.close()
 
+    # conn + parameter reads the coordinates from the station table, not from P_<parameter>
+    def test_from_database(self, demo_conn):
+        ax = plot_spatial_distribution(conn=demo_conn, parameter="temperature")
+        assert ax is not None
+        plt.close()
+
+    # Passing neither df nor conn + parameter raises an error
+    def test_without_data_raises(self):
+        with pytest.raises(ValueError):
+            plot_spatial_distribution()
+
 
 @pytest.mark.skipif(not _has_cartopy, reason="cartopy not installed ([geo] extra)")
 class TestPlotLatLonRange:
@@ -481,6 +530,20 @@ class TestPlotMissingValueInfoMapOverDepth:
         plot_missing_value_info_map_over_depth(_missing_value_wide_df(), ["P_NITRATE"],
                                                savefig_folder=str(tmp_path))
         assert list(tmp_path.iterdir())
+
+    # The figures are closed after plotting
+    def test_closes_figures(self):
+        plt.close("all")
+        plot_missing_value_info_map_over_depth(_missing_value_wide_df(), ["P_NITRATE"])
+        assert plt.get_fignums() == []
+
+    # Absolute counts use a colour scale from 0 to the largest count, not the fixed 0-100 of percent
+    def test_absolute_counts_scale(self, monkeypatch):
+        norms = []
+        original = plt.Normalize
+        monkeypatch.setattr(plt, "Normalize", lambda *a, **k: norms.append(a) or original(*a, **k))
+        plot_missing_value_info_map_over_depth(_missing_value_wide_df(), ["P_NITRATE"], relative=False)
+        assert norms == [(0, 1)]
 
 
 @pytest.mark.skipif(not _has_cartopy, reason="cartopy not installed ([geo] extra)")
@@ -531,3 +594,17 @@ class TestColumnCasing:
         df = pd.DataFrame({"X": [1.0], "Y": [2.0]})
         with pytest.raises(KeyError, match="Available columns"):
             plot_correlation(df, "x", "z")
+
+
+class TestSaveFigure:
+    # The figure of the passed ax is saved, not the current figure
+    def test_saves_figure_of_ax(self, tmp_path):
+        import matplotlib.image as mpimg
+        plt.close("all")
+        fig1, ax1 = plt.subplots(figsize=(2, 2))
+        plt.figure(figsize=(8, 6))  # Current figure, different size
+        df = pd.DataFrame({"X": [1.0, 2.0, 3.0], "Y": [2.0, 4.0, 7.0]})
+        plot_correlation(df, "X", "Y", ax=ax1, save_as=str(tmp_path / "a.png"), dpi=50)
+        height, width = mpimg.imread(tmp_path / "a.png").shape[:2]
+        assert width < 150 and height < 150  # 2x2 inch at 50 dpi, not 8x6
+        plt.close("all")

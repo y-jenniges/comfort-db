@@ -3,7 +3,6 @@
 Conversions are computed using the `gsw` library, the Python implementation of the
 TEOS-10 Gibbs Seawater Oceanographic Toolbox (McDougall, T., & Barker, P. (2011).
 Getting started with TEOS-10 and the Gibbs Seawater (GSW) Oceanographic Toolbox. SCOR/IAPSO WG127).
-
 """
 from __future__ import annotations
 
@@ -49,10 +48,10 @@ def resolve_pressure(df: pd.DataFrame, pressure_col: str = "LEV_DBAR",
     Depths more than 5 m above the sea surface are treated as invalid.
 
     Args:
-        df (pandas.DataFrame): DataFrame with any of the pressure, depth and latitude columns (case-insensitive).
-        pressure_col (str): Column with measured sea pressure [dbar].
-        depth_col (str): Column with depth [m, positive down].
-        lat_col (str): Column with latitude [°N].
+        df: DataFrame with any of the pressure, depth and latitude columns (case-insensitive).
+        pressure_col: Column with measured sea pressure [dbar].
+        depth_col: Column with depth [m, positive down].
+        lat_col: Column with latitude [°N].
     Returns:
         pandas.Series: Sea pressure [dbar].
     """
@@ -96,10 +95,10 @@ def convert_salinity(sp: float | np.ndarray | pd.Series,
     """Convert Practical Salinity to Absolute Salinity (TEOS-10).
 
     Args:
-        sp (array-like): Practical Salinity [PSS-78].
-        pressure (array-like): Sea pressure [dbar] (0 dbar at the ocean surface).
-        longitude (array-like): Longitude [°East].
-        latitude (array-like): Latitude [°North].
+        sp: Practical Salinity [PSS-78].
+        pressure: Sea pressure [dbar] (0 dbar at the ocean surface).
+        longitude: Longitude [°East].
+        latitude: Latitude [°North].
     Returns:
         pandas.Series: Absolute Salinity SA [g/kg].
     """
@@ -114,15 +113,15 @@ def convert_temperature(t_insitu: float | np.ndarray | pd.Series,
     """Convert in-situ temperature to a TEOS-10 temperature variable.
 
     Args:
-        t_insitu (array-like): In-situ temperature [°C, ITS-90].
-        sa (array-like): Absolute Salinity [g/kg]
+        t_insitu: In-situ temperature [°C, ITS-90].
+        sa: Absolute Salinity [g/kg]
             (from :func:`convert_salinity`).
-        pressure (array-like): Sea pressure [dbar].
-        to (str): Target variable:
+        pressure: Sea pressure [dbar].
+        to: Target variable:
             ``"CT"`` - Conservative temperature [°C];
             ``"pt0"`` - Potential temperature ref. 0 dbar [°C].
     Returns:
-        pandas.Series
+        pandas.Series: Temperature [°C] of the type given by *to*.
     Raises:
         ValueError: If ``to`` is not ``'CT'`` or ``'pt0'``.
     """
@@ -146,17 +145,17 @@ def compute_density(sa: float | np.ndarray | pd.Series,
     """Compute seawater density or potential density anomaly (TEOS-10).
 
     Args:
-        sa (array-like): Absolute Salinity [g/kg].
-        ct (array-like): Conservative Temperature [°C].
-        pressure (array-like): Sea pressure [dbar]. Required only for
+        sa: Absolute Salinity [g/kg].
+        ct: Conservative Temperature [°C].
+        pressure: Sea pressure [dbar]. Required only for
             ``quantity='rho'``, ignored otherwise.
-        quantity (str): What to compute:
+        quantity: What to compute:
             ``"sigma0"`` - potential density anomaly [kg/m3], ref. 0 dbar;
             ``"sigma1"`` - [kg/m3], ref. 1000 dbar;
             ``"sigma2"`` - [kg/m3], ref. 2000 dbar;
             ``"rho"`` - in-situ density [kg/m3].
     Returns:
-        pandas.Series
+        pandas.Series: Density [kg/m3] of the type given by *quantity*.
     Raises:
         ValueError: If ``quantity`` is unknown or pressure is missing
             for ``'rho'``.
@@ -193,17 +192,18 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
     N2 < 0 indicates gravitational instability.
 
     Rows with a missing value are dropped and repeated pressures within a
-    profile are averaged before N2 is computed.
+    profile are averaged before N2 is computed. Profiles with fewer than two valid
+    levels return an empty df.
 
     Args:
-        df (pandas.DataFrame): Wide-format DataFrame with SA and CT columns.
-        sa_col (str): Column with Absolute Salinity [g/kg].
-        ct_col (str): Column with Conservative Temperature [°C].
-        pressure_col (str): Column with sea pressure [dbar].
-        profile_col (str | list[str] | None): Column(s) identifying individual profiles.
-        lat_col (str): Latitude column [°N] for gravitational
+        df: Wide-format DataFrame with SA and CT columns.
+        sa_col: Column with Absolute Salinity [g/kg].
+        ct_col: Column with Conservative Temperature [°C].
+        pressure_col: Column with sea pressure [dbar].
+        lat_col: Latitude column [°N] for gravitational
             acceleration correction. Falls back to 0 if absent.
-        max_gap (float | None): Maximum pressure distance [dbar] between two
+        profile_col: Column(s) identifying individual profiles.
+        max_gap: Maximum pressure distance [dbar] between two
             levels. Wider pairs are skipped. Default is None (no limit).
     Returns:
         pandas.DataFrame: One row per consecutive level pair per profile
@@ -219,12 +219,12 @@ def compute_buoyancy_frequency(df: pd.DataFrame, sa_col: str, ct_col: str,
     lat_available = lat_col is not None
     rows = []
 
-    # Get group columns
+    # Profile key columns
     group_cols = _resolve_profile_col(df, profile_col=profile_col)
 
     # Iterate over profiles
     for pid, group in df.groupby(group_cols):
-        # Check if profile has min. 2 levels
+        # Columns needed for N2
         cols = [pressure_col, sa_col, ct_col] + ([lat_col] if lat_available else [])
 
         # Average repeated pressures and sort by pressure
@@ -270,16 +270,16 @@ def compute_potential_vorticity(n2: float | np.ndarray | pd.Series,
     https://doi.org/10.1175/JPO2895.1.
 
     Args:
-        n2 (array-like): Buoyancy frequency squared [1/s2], e.g. from
+        n2: Buoyancy frequency squared [1/s2], e.g. from
             :func:`compute_buoyancy_frequency`.
-        latitude (array-like): Latitude [°N]. Broadcast against *n2*,
+        latitude: Latitude [°N]. Broadcast against *n2*,
             e.g. pass the same latitude for every level of one profile.
     Returns:
         pandas.Series: Potential vorticity [1/(m s)].
     """
     lat_ = _to1d(latitude)
     f = gsw.f(lat_)  # Coriolis parameter
-    g = gsw.grav(lat_, np.zeros_like(lat_))  # Gravitational acceleration
+    g = gsw.grav(lat_, np.zeros_like(lat_))  # gravitational acceleration
     return pd.Series(f * _to1d(n2) / g)
 
 
@@ -293,9 +293,9 @@ def compute_spiciness(sa: float | np.ndarray | pd.Series,
     Use alongside sigma0 in T-S space to identify water masses.
 
     Args:
-        sa (array-like): Absolute Salinity [g/kg].
-        ct (array-like): Conservative Temperature [°C].
-        reference_pressure (int): Reference pressure in dbar:
+        sa: Absolute Salinity [g/kg].
+        ct: Conservative Temperature [°C].
+        reference_pressure: Reference pressure in dbar:
             ``0`` - upper ocean (spiciness0);
             ``2000`` - deep ocean (spiciness2).
     Returns:
@@ -324,9 +324,9 @@ def compute_aou(oxygen: float | np.ndarray | pd.Series,
     how much oxygen the water could hold and the actual oxygen concentration.
 
     Args:
-        oxygen (array-like): Observed dissolved oxygen concentration [umol/kg].
-        sp (array-like): Practical Salinity.
-        pt (array-like): Potential temperature referenced to 0 dbar [°C].
+        oxygen: Observed dissolved oxygen concentration [umol/kg].
+        sp: Practical Salinity.
+        pt: Potential temperature referenced to 0 dbar [°C].
     Returns:
         pandas.Series: AOU [umol/kg].
     """
@@ -344,13 +344,13 @@ def add_teos10_variables(df: pd.DataFrame, sp_col: str, t_col: str,
     :func:`convert_temperature` and :func:`compute_density`.
 
     Args:
-        df (pandas.DataFrame): DataFrame with Practical Salinity, in-situ
+        df: DataFrame with Practical Salinity, in-situ
             temperature, sea pressure, longitude and latitude columns.
-        sp_col (str): Column with Practical Salinity [PSS-78].
-        t_col (str): Column with in-situ temperature [°C, ITS-90].
-        pressure_col (str): Column with sea pressure [dbar].
-        lon_col (str): Column with longitude [°East].
-        lat_col (str): Column with latitude [°North].
+        sp_col: Column with Practical Salinity [PSS-78].
+        t_col: Column with in-situ temperature [°C, ITS-90].
+        pressure_col: Column with sea pressure [dbar].
+        lon_col: Column with longitude [°East].
+        lat_col: Column with latitude [°North].
     Returns:
         pandas.DataFrame: Copy of *df* with three added columns:
             ``SA`` [g/kg], ``CT`` [°C], ``sigma0`` [kg/m3].
@@ -385,11 +385,11 @@ def convert_to_potential_temperature(
     become NaN and are counted in a warning.
 
     Args:
-        averaged (dict[str, pandas.DataFrame]): Per-parameter DataFrames. Must
+        averaged: Per-parameter DataFrames. Must
             contain *temperature_col* and *salinity_col*.
-        temperature_col (str): Key for temperature. Default ``"TEMPERATURE"``.
-        salinity_col (str): Key for salinity. Default ``"SALINITY"``.
-        loc_cols (list[str]): Columns identifying a unique location. Default
+        temperature_col: Key for temperature. Default ``"TEMPERATURE"``.
+        salinity_col: Key for salinity. Default ``"SALINITY"``.
+        loc_cols: Columns identifying a unique location. Default
             ``["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]``.
     Returns:
         dict[str, pandas.DataFrame]: Copy of *averaged* with *temperature_col*

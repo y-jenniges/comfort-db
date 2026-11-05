@@ -55,8 +55,8 @@ def plot_profile(
         ylabel: y-axis label.
         depth_markers: Optional per-profile depth annotations, e.g. the
             output of :func:`~comfort.profile_analysis.mixed_layer_depth` or
-            :func:`~comfort.profile_analysis.pycnocline_depth`. Must share
-            *group_cols* (station/profile columns) with *df*. Matched
+            :func:`~comfort.profile_analysis.pycnocline_depth`. Must contain
+            the same station and profile columns as *df*. Matched
             profiles get a dashed horizontal line at the marker depth, in
             the same colour as the profile line.
         depth_marker_col: Column in *depth_markers* holding the depth value,
@@ -73,8 +73,7 @@ def plot_profile(
     Returns:
         The matplotlib Axes, or ``None`` when the data is empty.
     """
-    # Apply profile filter in SQL when loading from DB
-    # Filter in-memory for DataFrame input
+    # With a connection the profile filter is applied in SQL, with a DataFrame in memory (below)
     user_df = df
     df = _resolve_data(df, conn, parameter, quality_flags, profiles=profiles)
 
@@ -86,7 +85,7 @@ def plot_profile(
     if profiles is not None and user_df is not None:
         df = df[df[profile_col].isin(profiles)]
     if df.empty:
-        logger.warning("plot_profile: no data to plot")
+        logger.warning("plot_profile: No data to plot")
         return None
 
     ax, standalone = _get_or_create_ax(ax)
@@ -102,7 +101,7 @@ def plot_profile(
         missing = [c for c in group_cols if c not in depth_markers.columns]
         if missing:
             logger.warning(
-                "plot_profile: depth_markers missing columns %s; skipping markers", missing
+                "plot_profile: Depth_markers missing columns %s; skipping markers", missing
             )
         else:
             marker_lookup = depth_markers.set_index(group_cols)[find_col(depth_markers, depth_marker_col)]
@@ -127,6 +126,7 @@ def plot_profile(
     ax.set_xlabel(xlabel or value_col)
     ax.set_ylabel(ylabel)
 
+    # Only add a legend for a few profiles (more would be unreadable)
     n_groups = df.groupby(group_cols).ngroups
     if n_groups <= 10:
         title = " - ".join(_pretty_label(c) for c in group_cols)
@@ -230,7 +230,7 @@ def plot_section(
     # Drop NaNs
     plot_df = df[[value_col, depth_col, along_col]].dropna()
     if plot_df.empty:
-        logger.warning("plot_section: no valid data after dropping NaNs")
+        logger.warning("plot_section: No valid data after dropping NaNs")
         return None
 
     ax, standalone = _get_or_create_ax(ax)

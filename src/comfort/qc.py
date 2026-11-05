@@ -51,8 +51,8 @@ def _parse_flag(column: str, condition: str) -> tuple[str, str, str]:
     """Validate one quality flag and split its condition into operator and number.
 
     Args:
-        column (str): Name of the flag column, e.g. ``"PQF1"``.
-        condition (str): Operator followed by a number, e.g. ``">0"``.
+        column: Name of the flag column, e.g. ``"PQF1"``.
+        condition: Operator followed by a number, e.g. ``">0"``.
             Supported operators: ``>=``, ``<=``, ``>``, ``<``, ``==``, ``!=``.
     Returns:
         tuple[str, str, str]: Column name, operator and number.
@@ -129,15 +129,15 @@ def apply_qc_flags(df: pd.DataFrame,
     :func:`comfort.io.read_parameter`, but on an already-loaded DataFrame.
 
     Args:
-        df (pandas.DataFrame): DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
-        quality_flags (QualityFlags): Quality flag filters, e.g. :data:`QC_GOOD`.
-          ``None`` or ``[]`` returns df unchanged.
+        df: DataFrame with QC flag columns (e.g. PQF1, PQF2, SQF).
+        quality_flags: Quality flag filters, e.g. :data:`QC_GOOD`.
+            ``None`` or ``[]`` returns an unfiltered copy.
     Returns:
         pandas.DataFrame: Filtered copy.
     Raises:
         KeyError: If a flag column is not in *df* (insensitive to casing).
     """
-    # Return plain df if no qc flags were provided
+    # No QC flags: Return an unfiltered copy
     if not quality_flags:
         return df.copy()
 
@@ -150,7 +150,7 @@ def apply_qc_flags(df: pd.DataFrame,
         # A missing flag column would silently leave the data unfiltered (raises)
         column = find_col(df, column)
 
-        # Assemble mask and drop NaNs (so comparison possible for such entries)
+        # Rows with a NaN flag are omitted (same as the SQL filter)
         mask &= df[column].notna() & _OP_MAP[operator](df[column], float(number))
 
     return df[mask].copy()
@@ -164,15 +164,15 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     See ``known_data_issues/known_data_issues.md``.
 
     Values are compared as they are in *df*. The issue exists for rows that are already
-    in de default unit (umol/kg), so the check is reliable on ``load_comfort`` output.
+    in the default unit (umol/kg), so the check is reliable on ``load_comfort`` output.
 
     Args:
-        df (pandas.DataFrame): Must contain *oxygen_col* and a Practical
+        df: Must contain *oxygen_col* and a Practical
             Salinity column (``SALINITY``/``salinity``), not Absolute Salinity.
-        oxygen_col (str): Oxygen value column. Default ``'OXYGEN'``.
-        salinity_col (str): Practical Salinity column to compare against.
+        oxygen_col: Oxygen value column. Default ``'OXYGEN'``.
+        salinity_col: Practical Salinity column to compare against.
             ``None`` auto-detects ``SALINITY``/``salinity``.
-        tol (float): Maximum absolute difference between oxygen and salinity
+        tol: Maximum absolute difference between oxygen and salinity
             for a row to be flagged. Default 0 flags exact copies only.
     Returns:
         pandas.Series: Bool mask aligned with df (True = suspect row).
@@ -181,7 +181,7 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
         ValueError: If *tol* is negative.
     """
     if tol < 0:
-        # Tolerance must be positive (or zero)
+        # Tolerance must not be negative
         raise ValueError(f"flag_salinity_like_oxygen: tol must be >= 0, got {tol}")
 
     # Find the oxygen column
@@ -193,7 +193,7 @@ def flag_salinity_like_oxygen(df: pd.DataFrame, oxygen_col: str = "OXYGEN",
     # Suspect rows: Oxygen equals the salinity value
     mask = (df[oxy] - df[sal]).abs() <= tol
     if mask.any():
-        # Print how common the issue is in this DataFrame
+        # Log how common the issue is in this DataFrame
         logger.warning(
             "flag_salinity_like_oxygen: %d of %d rows (%.2f%%) look like mislabelled salinity",
             int(mask.sum()), len(df), 100 * mask.mean(),

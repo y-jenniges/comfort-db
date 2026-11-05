@@ -28,8 +28,6 @@ from comfort.physics import (
 
 load_dotenv()
 
-LOC_COLS = ["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]
-
 if __name__ == "__main__":
     # Get DB path from .env
     db_path = os.environ.get("COMFORT_DB_PATH", "")

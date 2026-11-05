@@ -229,20 +229,42 @@ class TestCountSamplesPerParameter:
 
 class TestCountNegativeSamples:
     # Proportion of negative samples per parameter, sorted ascending
-    def test_proportions(self, comfort_conn):
+    def test_percentages(self, comfort_conn):
         comfort_conn.execute("INSERT INTO P_NITRATE VALUES (3,0.0,0.0,-1.0,1,3,0,1,3,1,3,1)")
         comfort_conn.commit()
         result = count_negative_samples(comfort_conn, ["NITRATE", "OXYGEN"])
         assert list(result["parameter"]) == ["OXYGEN", "NITRATE"]
         assert list(result["number of negative samples"]) == [0, 1]
-        assert list(result["proportion of negative samples"]) == [0.0, 25.0]
+        assert list(result["percentage of negative samples"]) == [0.0, 25.0]
+
+    # QC applies to the total as well as to the negative count
+    def test_quality_flags_filter_both_counts(self, comfort_conn):
+        # One negative sample that passes QC_GOOD, one that fails it
+        comfort_conn.executemany("INSERT INTO P_NITRATE VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [
+            (3, 0.0, 0.0, -1.0, 1, 3, 0, 1, 3, 1, 3, 1),
+            (3, 10.0, 10.0, -2.0, 0, 1, 0, 2, 3, 1, 3, 1),
+        ])
+        comfort_conn.commit()
+        result = count_negative_samples(comfort_conn, ["NITRATE"], quality_flags=QC_GOOD)
+        assert result.loc[result.index[0], "number of samples"] == 3
+        assert result.loc[result.index[0], "number of negative samples"] == 1
+        assert result.loc[result.index[0], "percentage of negative samples"] == pytest.approx(100 / 3)
+
+    # No sample passes QC: Zero counts and an undefined percentage
+    def test_no_sample_passes_qc(self, comfort_conn):
+        comfort_conn.execute("UPDATE P_OXYGEN SET PQF1 = 0")
+        comfort_conn.commit()
+        result = count_negative_samples(comfort_conn, ["OXYGEN"], quality_flags=QC_GOOD)
+        assert result["number of samples"].iloc[0] == 0
+        assert result["number of negative samples"].iloc[0] == 0
+        assert result["percentage of negative samples"].isna().all()
 
     # No parameters requested: Empty df with the documented columns
     def test_no_parameters(self, comfort_conn):
         result = count_negative_samples(comfort_conn, [])
         assert result.empty
         assert list(result.columns) == [
-            "parameter", "number of samples", "number of negative samples", "proportion of negative samples",
+            "parameter", "number of samples", "number of negative samples", "percentage of negative samples",
         ]
 
 
@@ -263,7 +285,7 @@ class TestFindSpatiotemporalDuplicates:
         assert row["number of samples"] == 4
         assert row["number of time loc duplicates"] == 1
         assert row["number of row duplicates"] == 0
-        assert row["proportion of time loc duplicates"] == 25.0
+        assert row["percentage of time loc duplicates"] == 25.0
         assert set(details["NITRATE"]) == {"time_loc", "rows"}
         assert len(details["NITRATE"]["time_loc"]) == 1
 
@@ -282,7 +304,7 @@ class TestFindSpatiotemporalDuplicates:
         assert details == {}
         assert list(summary.columns) == [
             "parameter", "number of samples", "number of row duplicates", "number of time loc duplicates",
-            "proportion of row duplicates", "proportion of time loc duplicates",
+            "percentage of row duplicates", "percentage of time loc duplicates",
         ]
 
 

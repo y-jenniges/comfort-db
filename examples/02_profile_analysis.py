@@ -1,6 +1,6 @@
 """Profile analysis: Gradients, completeness, MLD, pycnocline, interpolation.
 
-Loads and analyse real profiles from the COMFORT database.
+Load and analyse real profiles from the COMFORT database.
 (Duplicates in (station, profile, depth) are averaged initially.)
 
 Requires:
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     if not db_path:
         sys.exit("COMFORT_DB_PATH is not set. Point it to your COMFORT SQLite database.")
 
-    # Load temperature profiles from the North Atlantic
+    # Load temperature and salinity profiles from the North Atlantic
     print("Loading TEMPERATURE and SALINITY (North Atlantic, QC_GOOD)...")
     with comfort.connect(db_path) as conn:
         dfs = comfort.load_comfort(
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     print(grad[["ID", "PROFILE_NUMBER", "LEV_M", "TEMPERATURE", "TEMPERATURE_gradient"]]
           .head(5).to_string(index=False), "\n")
 
-    # Profile completeness against WOD standard depths
+    # Profile completeness against standard depth levels
     print("=== profile_completeness ===")
     comp = profile_completeness(
         df_t_sample, reference_depths=[0, 50, 100, 200, 500, 1000, 2000],

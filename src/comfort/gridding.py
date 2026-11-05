@@ -13,13 +13,15 @@ __all__ = [
 
 import logging
 import os
+from collections.abc import Callable
 import numpy as np
 import pandas as pd
+from numpy.typing import ArrayLike
 from dateutil.relativedelta import relativedelta
 
 from .util.columns import find_col, resolve_param_columns
 from .util.optional import import_optional
-from .util.types import Aggregation, GridMode, check_choice, check_timestamp
+from .util.types import Aggregation, GridMode, check_choice, check_timestamp, parse_timestamps
 from .database.information import param_label, param_table_name
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ def _is_multiple(span: float, step: float) -> bool:
 
 
 def _axis_cells(lo: float, hi: float, step: float) -> tuple[np.ndarray, np.ndarray]:
-    """Return the cell edges and cell centres of an axis from *lo* to *hi*. """
+    """Return the cell edges and cell centres of an axis from *lo* to *hi*."""
     n = round((hi - lo) / step)  # number of bins
     return lo + step * np.arange(n + 1), lo + step * (np.arange(n) + 0.5)
 
@@ -43,7 +45,7 @@ def _axis_cells(lo: float, hi: float, step: float) -> tuple[np.ndarray, np.ndarr
 def _inclusive_last_edge(edges: np.ndarray) -> np.ndarray:
     """Return a float copy of *edges* whose last edge is adapted so that the last bin includes the maximum."""
     edges = np.asarray(edges, dtype=float).copy()  # copy the edges
-    edges[-1] = np.nextafter(edges[-1], np.inf)  # increase last edge by the next floating point number
+    edges[-1] = np.nextafter(edges[-1], np.inf)  # next float above the maximum, so that [a, b) still includes it
     return edges
 
 
@@ -67,24 +69,27 @@ class Grid:
     - ``'MD'``: Month and day (MM-DD) of the leap year 2000, pooling all years.
     """
 
-    def __init__(self, *, bathymetry_grid_path, lon_min=-180, lon_max=180, dlon=1,
-                 lat_min=-90, lat_max=90, dlat=1,
-                 z_min=None, z_max=None, dz=None, z_array=None,
-                 time_min=None, time_max=None, mode: GridMode | None = None, dtime=None, selection=None,
-                 lon_variable="lon", lat_variable="lat", depth_variable="elevation"):
+    def __init__(self, *, bathymetry_grid_path: str | os.PathLike,
+                 lon_min: float = -180, lon_max: float = 180, dlon: float = 1,
+                 lat_min: float = -90, lat_max: float = 90, dlat: float = 1,
+                 z_min: float | None = None, z_max: float | None = None, dz: float | None = None,
+                 z_array: ArrayLike | None = None,
+                 time_min: str | None = None, time_max: str | None = None, mode: GridMode | None = None,
+                 dtime: int | None = None, selection: ArrayLike | None = None,
+                 lon_variable: str = "lon", lat_variable: str = "lat", depth_variable: str = "elevation"):
         """
         Args:
             lon_min, lon_max, dlon: Longitude range and step [°].
             lat_min, lat_max, dlat: Latitude range and step [°].
-            bathymetry_grid_path (str): Path to a bathymetry NetCDF file. Required.
+            bathymetry_grid_path: Path to a bathymetry NetCDF file. Required.
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
-            z_array (array-like): Explicit depth nodes [m]. Mutually exclusive with dz.
-            time_min, time_max (str): Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
-            mode (str): Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
-            dtime (int): Number of time units per cell.
+            z_array: Explicit depth nodes [m]. Mutually exclusive with dz.
+            time_min, time_max: Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
+            mode: Time grouping mode. One of 'Y', 'M', 'D', 'YM', 'YD', 'MD' (see class docstring).
+            dtime: Number of time units per cell.
                 time_min, time_max, mode and dtime must be given together, or all be
                 None for a grid without time axis.
-            selection (array-like): Boolean mask to sub-select the time array.
+            selection: Boolean mask to sub-select the time array.
                 Requires a time axis.
             lon_variable, lat_variable, depth_variable: Variable names in the NetCDF file.
         """
@@ -163,7 +168,7 @@ class Grid:
         """Create the time steps of the grid, before ``selection`` is applied."""
         time_array = []
 
-        # Determine all valid dates for the desired time range
+        # Time nodes per mode (M and D are zero-padded numbers, MD uses the leap year 2000)
         if self.mode == "Y":
             time_array = [v.strftime("%Y-%m-%d %H:%M:%S")
                           for v in self._iter_range(self.time_min, self.time_max, relativedelta(years=+self.dtime))]
@@ -184,8 +189,12 @@ class Grid:
         return np.array(time_array)
 
     def _create_time_array(self) -> np.ndarray:
-        """Create the time array containing the (selected) time steps for the grid."""
-        time_array = self._time_nodes()  # get the nodes
+        """Create the time array containing the (selected) time steps for the grid.
+
+        Node format per mode: ``'YYYY-MM-DD HH:MM:SS'`` for Y, YM and YD, ``'MM'`` for M,
+        ``'DD'`` for D and ``'MM-DD HH:MM:SS'`` for MD.
+        """
+        time_array = self._time_nodes()  # all nodes (before the selection)
 
         # Perform selection
         if self.selection is not None:
@@ -271,14 +280,14 @@ class Grid:
         return self.z_array[:-1]
 
     def _water_mask(self, ds, lon, lat):
-        """Return a xarray DataArray that is True where there is water (depth > 0)."""
+        """Return a xarray DataArray that is True where a depth level lies at or above the sea floor."""
         xr = import_optional("xarray", "grid", "gridding")
 
         # Wrap depth levels into xarray
         z_arr = self._make_z_arr()
         z = xr.DataArray(z_arr, dims="LEV_M", coords={"LEV_M": z_arr}, name="LEV_M")
 
-        # Assign
+        # Sea floor depth at each cell centre (nearest bathymetry point)
         z_at_grid = ds.LEV_M.sel(LONGITUDE=lon, LATITUDE=lat, method="nearest")
         z_at_grid.coords["LONGITUDE"] = lon
         z_at_grid.coords["LATITUDE"] = lat
@@ -327,8 +336,8 @@ class Grid:
         Works on data already in memory (e.g. after ``load_comfort``).
 
         Args:
-            df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M.
-            value_col (str): Column to aggregate. Required if *agg* is given;
+            df: Must contain LATITUDE, LONGITUDE, LEV_M.
+            value_col: Column to aggregate. Required if *agg* is given;
                 omit both to get back every row of *df* with its coordinates
                 snapped to the grid (e.g. to run a custom aggregation like
                 ``seasonal_mean`` before further binning).
@@ -360,7 +369,8 @@ class Grid:
         return grouped
 
     def map_dataframes(self, dfs: dict[str, pd.DataFrame], agg: Aggregation = "mean",
-                       bin_fn=None, dropping_land_cells: bool = True) -> pd.DataFrame:
+                       bin_fn: Callable[[pd.DataFrame, str], pd.DataFrame] | None = None,
+                       dropping_land_cells: bool = True) -> pd.DataFrame:
         """Turn a dict of per-parameter DataFrames into one wide grid table.
 
         The full workflow is two calls: create the grid, then map data onto it::
@@ -369,7 +379,7 @@ class Grid:
             df_wide = grid.map_dataframes(raw)
 
         Args:
-            dfs (dict[str, pandas.DataFrame]): Parameter name -> DataFrame,
+            dfs: Parameter name -> DataFrame,
                 Each DataFrame must contain LATITUDE, LONGITUDE, LEV_M
                 (+ DATEANDTIME for a grid with time axis) and a value column named
                 after its parameter key. Insensitive to casing and ``P_`` prefix.
@@ -379,16 +389,16 @@ class Grid:
                 averaging before binning onto the grid's time steps. With a list,
                 the first statistic is ``P_<name>``, the others ``P_<name>_<statistic>``
                 (e.g. ``P_OXYGEN_std``). Ignored when *bin_fn* is given.
-            bin_fn (callable): ``(df, value_col) -> DataFrame`` used instead of
+            bin_fn: ``(df, value_col) -> DataFrame`` used instead of
                 the default ``self.bin(df, value_col, agg=agg)``, for any
                 per-parameter aggregation not expressible via *agg*.
-            dropping_land_cells (bool): Drop grid cells that are on land and
+            dropping_land_cells: Drop grid cells that are on land and
                 never carry a value for any parameter. Default True.
         Returns:
             pandas.DataFrame: This grid's template merged with one ``P_<name>``
                 column per input parameter.
         """
-        # Custom aggregation function
+        # Default: Bin every parameter with self.bin
         if bin_fn is None:
             def bin_fn(df, value_col):
                 return self.bin(df, value_col, agg=agg)
@@ -403,24 +413,27 @@ class Grid:
             # Rename the value column to P_<parameter> (casing and P_ prefix of the column do not matter)
             col = param_table_name(parameter)
             df = df.rename(columns={resolve_param_columns(df, parameter)[0]: col})
-            # Binning
+            # Bin this parameter
             binned = bin_fn(df, col)
-            # Left-merge on grid
+            # Left merge keeps every grid cell
             df_wide = df_wide.merge(binned, on=merge_cols, how="left")
 
         if dropping_land_cells:
             # Drop cells that are on land and have no data for any parameter
             n_before = len(df_wide)
             df_wide = _drop_land_cells(df_wide).reset_index(drop=True)
-            logger.info("map_dataframes: dropped %d empty land cells (%d -> %d rows)",
+            logger.info("map_dataframes: Dropped %d empty land cells (%d -> %d rows)",
                         n_before - len(df_wide), n_before, len(df_wide))
         return df_wide
 
     def _create_grid(self, lon_variable: str, lat_variable: str,
                       depth_variable: str) -> pd.DataFrame:
-        """Creating a grid based on:
+        """Build the grid, one row per cell centre, depth node and time step.
+
+        The ``water`` column is True where the depth node lies at or above the sea floor of the
+        bathymetry file.
+        Based on:
         https://github.com/willirath/geomar-open-hacky-hour-2021-04/blob/main/2022-06-23/etopo05_to_grid.ipynb
-        grid must be nc file, format: latitude, longitude, depth
         """
         xr = import_optional("xarray", "grid", "gridding")
 
@@ -446,7 +459,7 @@ class Grid:
 
     def _filter_time_window(self, df: pd.DataFrame) -> pd.DataFrame:
         """Filter *df* for ``[time_min, time_max]``."""
-        dates = pd.to_datetime(df["DATEANDTIME"])
+        dates = parse_timestamps(df["DATEANDTIME"])
         in_window = (dates >= pd.Timestamp(self.time_min)) & (dates <= pd.Timestamp(self.time_max))
         return df[in_window].copy()
 
@@ -457,7 +470,7 @@ class Grid:
             last_edge = pd.Timestamp(self.time_max) + pd.Timedelta(nanoseconds=1)
             time_bins = pd.DatetimeIndex(self._time_nodes()).append(pd.DatetimeIndex([last_edge]))
             df["DATEANDTIME"] = pd.cut(
-                pd.to_datetime(df["DATEANDTIME"]),
+                parse_timestamps(df["DATEANDTIME"]),
                 bins=time_bins, labels=time_bins[:-1], right=False,
             )
             df["DATEANDTIME"] = df["DATEANDTIME"].astype("datetime64[ns]").dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -465,10 +478,10 @@ class Grid:
             # Snap the month to the first month of its bin
             dates = df["DATEANDTIME"].astype("datetime64[ns]")
             bin_index = (dates.dt.month - 1) // self.dtime
-            node = bin_index * self.dtime + 1  # get the grid node, i.e. the month
+            node = bin_index * self.dtime + 1  # first month of the bin
             df["DATEANDTIME"] = node.astype("Int64").astype(str).str.zfill(2)
         elif self.mode == "MD":
-            # Snap the day-month bin
+            # Snap month and day to the first day of the bin
             dates = df["DATEANDTIME"].astype("datetime64[ns]")
             # Days index of the year (1 Jan = 0)
             day_index = dates.dt.day_of_year - 1
@@ -498,8 +511,8 @@ class Grid:
         Rows are then grouped by cell + time bin together.
 
         Args:
-            df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M, DATEANDTIME and *value_col*.
-            value_col (str): Column to aggregate.
+            df: Must contain LATITUDE, LONGITUDE, LEV_M, DATEANDTIME and *value_col*.
+            value_col: Column to aggregate.
             agg: Aggregation passed to ``DataFrame.agg``. A list gives one column per statistic: The first keeps
             the name of *value_col*, the others are named ``<value_col>_<statistic>``.
         Returns:
@@ -532,8 +545,8 @@ class Grid:
         *value_col* per cell. Usable for data already in memory (e.g. after ``load_comfort``).
 
         Args:
-            df (pandas.DataFrame): Must contain LATITUDE, LONGITUDE, LEV_M, *value_col* (+ DATEANDTIME for a grid with time axis).
-            value_col (str): Column to aggregate.
+            df: Must contain LATITUDE, LONGITUDE, LEV_M, *value_col* (+ DATEANDTIME for a grid with time axis).
+            value_col: Column to aggregate.
             agg: Aggregation passed to ``DataFrame.agg``. The special
                 value ``"seasonal_mean"`` (grid with time axis only) runs
                 monthly-first annual averaging before binning onto this
@@ -578,7 +591,7 @@ class Grid:
         # Convert YEAR returned by seasonal_mean into a time stamp
         annual["DATEANDTIME"] = annual["YEAR"].astype(int).astype(str) + "-01-01 00:00:00"
         annual = annual.drop(columns=["YEAR"])
-        annual = annual[pd.to_datetime(annual["DATEANDTIME"]) < pd.Timestamp(self.time_max)]  # filter for max timestamp
+        annual = annual[pd.to_datetime(annual["DATEANDTIME"]) < pd.Timestamp(self.time_max)]  # Drop years that start at or after time_max
         return self.bin_time(annual, value_col, agg="mean")
 
 
@@ -595,18 +608,18 @@ def average_duplicate_locations(
     Locations are matched by exact equality of the *loc_cols* values (no tolerance, time is matched to the second).
 
     Args:
-        raw (dict[str, pandas.DataFrame]): Per-parameter DataFrames.
-        other_params (list[str]): Parameters to average over identical locations
+        raw: Per-parameter DataFrames.
+        other_params: Parameters to average over identical locations
             (simple mean). Defaults to all keys in *raw* other than *temperature_col*.
-        temperature_col (str): Column for temperature. Default ``"TEMPERATURE"``.
-        loc_cols (list[str]): Columns identifying a unique location. Default
+        temperature_col: Column for temperature. Default ``"TEMPERATURE"``.
+        loc_cols: Columns identifying a unique location. Default
             ``["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]``.
     Returns:
         dict[str, pandas.DataFrame]: One DataFrame per parameter (plus
             ``LEV_DBAR`` for *temperature_col*, kept for downstream pressure
             use e.g. TEOS-10 conversions).
     """
-    # Identify location and parameter columns (other than temperature)
+    # Defaults: The location columns and every parameter, except temperature
     if loc_cols is None:
         loc_cols = ["LATITUDE", "LONGITUDE", "LEV_M", "DATEANDTIME"]
     if other_params is None:
@@ -641,10 +654,10 @@ def seasonal_mean(
     """Annual mean with monthly averaging to correct seasonal sampling bias.
 
     Args:
-        df (pandas.DataFrame): with value, date and spatial/group columns.
-        value_col (str): Column containing measured values.
-        date_col (str): Column containing datetime values.
-        group_cols (list<str>): Columns that identify spatial cells. Defaults to
+        df: with value, date and spatial/group columns.
+        value_col: Column containing measured values.
+        date_col: Column containing datetime values.
+        group_cols: Columns that identify spatial cells. Defaults to
             ``["LATITUDE", "LONGITUDE", "LEV_M"]``.
 
     Returns:
@@ -660,7 +673,7 @@ def seasonal_mean(
 
     # Extract year and month data
     temp = df.copy()
-    temp[date_col] = pd.to_datetime(temp[date_col])
+    temp[date_col] = parse_timestamps(temp[date_col])
     temp["_YEAR"] = temp[date_col].dt.year
     temp["_MONTH"] = temp[date_col].dt.month
 
@@ -686,9 +699,9 @@ def _drop_land_cells(df_wide: pd.DataFrame) -> pd.DataFrame:
     is kept in all time steps.
 
     Args:
-        df_wide (pandas.DataFrame): Wide grid table with a 'water' column.
+        df_wide: Wide grid table with a 'water' column.
     Returns:
-        pandas.DataFrame
+        pandas.DataFrame: *df_wide* without the empty land cells.
     """
     temp = df_wide.copy()
 
@@ -714,8 +727,8 @@ def get_missing_value_info(df_wide: pd.DataFrame, parameters: list[str] | None =
     :meth:`Grid.map_dataframes`).
 
     Args:
-        df_wide (pandas.DataFrame): Wide grid table with ``P_*`` columns.
-        parameters (list[str]): Parameters to report, insensitive to casing and ``P_`` prefix.
+        df_wide: Wide grid table with ``P_*`` columns.
+        parameters: Parameters to report, insensitive to casing and ``P_`` prefix.
             Default ``None`` reports every ``P_*`` column.
     Returns:
         pandas.DataFrame: Columns ``'parameter'`` (without ``P_``),

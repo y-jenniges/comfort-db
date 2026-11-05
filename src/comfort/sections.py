@@ -24,17 +24,17 @@ def bin_section(df: pd.DataFrame,
     """Bin scattered section observations onto an (along-track x depth) grid.
 
     Args:
-        df (pandas.DataFrame): Input DataFrame.
-        value_col (str): Column with measured values.
-        depth_col (str): Column with depth [m].
-        along_col (str): Column with along-track position, e.g. the output
+        df: Input DataFrame.
+        value_col: Column with measured values.
+        depth_col: Column with depth [m].
+        along_col: Column with along-track position, e.g. the output
             of :func:`~comfort.geo.along_track_distance`.
-        along_bins (int or array-like): Number of equal-width bins or
+        along_bins: Number of equal-width bins or
             explicit bin edges, along *along_col*. Bins are left-closed,
             ``[a, b)``, with the maximum edge included (as in gridding).
-        depth_bins (int or array-like): Same as *along_bins*, for *depth_col*.
+        depth_bins: Same as *along_bins*, for *depth_col*.
             Unlike :class:`~comfort.gridding.Grid`, the bin is labelled by its centre here (not by top node).
-        agg (str): Aggregation applied to *value_col* within each cell.
+        agg: Aggregation applied to *value_col* within each cell.
     Returns:
         pandas.DataFrame: One row per (along, depth) cell with columns
             [*along_col*, *depth_col*, *value_col*], holding the bin centres
@@ -45,7 +45,7 @@ def bin_section(df: pd.DataFrame,
     depth_col = find_col(df, depth_col)
     along_col = find_col(df, along_col)
 
-    # Drop nans
+    # Drop NaNs
     plot_df = df[[value_col, depth_col, along_col]].dropna()
     if plot_df.empty:
         return pd.DataFrame(columns=[along_col, depth_col, value_col])
@@ -60,7 +60,7 @@ def bin_section(df: pd.DataFrame,
         .reset_index()
     )
 
-    # Over-write old along and depth columns with the bin centres
+    # Overwrite the original along and depth columns with the bin centres
     binned[along_col] = binned["_along_bin"].astype(float)
     binned[depth_col] = binned["_depth_bin"].astype(float)
     return binned[[along_col, depth_col, value_col]]
@@ -85,12 +85,12 @@ def section_difference(section_a: pd.DataFrame,
     *along_bins*/*depth_bins* (same explicit bin edges).
 
     Args:
-        section_a (pandas.DataFrame): Output of :func:`bin_section`.
-        section_b (pandas.DataFrame): Output of :func:`bin_section`, same
+        section_a: Output of :func:`bin_section`.
+        section_b: Output of :func:`bin_section`, same
             binning as *section_a*.
-        value_col (str): Column with measured values.
-        depth_col (str): Column with depth [m].
-        along_col (str): Column with along-track position.
+        value_col: Column with measured values.
+        depth_col: Column with depth [m].
+        along_col: Column with along-track position.
     Returns:
         pandas.DataFrame: One row per (along, depth) cell present in both
             inputs, with *value_col* holding ``section_a - section_b``.
@@ -103,6 +103,6 @@ def section_difference(section_a: pd.DataFrame,
     # Merge section a and b
     merged = section_a.merge(section_b, on=[along_col, depth_col], suffixes=("_a", "_b"))
 
-    # Compute differences wrt the parameter column
+    # Subtract b from a
     merged[value_col] = merged[f"{value_col}_a"] - merged[f"{value_col}_b"]
     return merged[[along_col, depth_col, value_col]]

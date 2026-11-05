@@ -9,9 +9,9 @@ def import_optional(module: str, install_extra: str, required_for: str) -> Modul
     """Import an optional dependency or raise an ``ImportError`` with install instructions.
 
     Args:
-        module (str): Module to import, e.g. ``"xarray"`` or ``"cartopy.crs"``.
-        install_extra (str): Name of the ``comfort-db`` extra that installs it, e.g. ``"grid"``.
-        required_for (str): What needs the module, e.g. ``"load_comfort"``.
+        module: Module to import, e.g. ``"xarray"`` or ``"cartopy.crs"``.
+        install_extra: Name of the ``comfort-db`` extra that installs it, e.g. ``"grid"``.
+        required_for: What needs the module, e.g. ``"load_comfort"``.
     Returns:
         types.ModuleType: The imported module.
     Raises:

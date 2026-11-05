@@ -613,6 +613,19 @@ class TestTimeWindow:
         result = grid.bin_time(self._df(dates), "VAL", agg="count")
         assert dict(zip(result["DATEANDTIME"], result["VAL"])) == {"2000-01-01 00:00:00": 1, "2001-01-01 00:00:00": 1}
 
+    # Times with and without fractional seconds in one column are binned alike (no error, no lost rows)
+    def test_mixed_fractional_seconds_are_binned(self):
+        grid = _make_grid_stub(time_array=("2000-01-01 00:00:00", "2001-01-01 00:00:00"), time_max="2001-12-31 23:59:59")
+        dates = ["2000-06-01 04:02:02.000970", "2000-07-01 00:00:00", "2001-03-01 12:00:00.5"]
+        result = grid.bin_time(self._df(dates), "VAL", agg="count")
+        assert dict(zip(result["DATEANDTIME"], result["VAL"])) == {"2000-01-01 00:00:00": 2, "2001-01-01 00:00:00": 1}
+
+    # A time within the last second of time_max (fractional seconds) still counts as inside the window
+    def test_fraction_in_last_second_is_inside(self):
+        grid = _make_grid_stub(time_array=("2000-01-01 00:00:00", "2001-01-01 00:00:00"), time_max="2001-12-31 23:59:59")
+        result = grid.bin_time(self._df(["2001-12-31 23:59:59.5"]), "VAL", agg="count")
+        assert dict(zip(result["DATEANDTIME"], result["VAL"])) == {"2001-01-01 00:00:00": 1}
+
     # Data from outside the time window is not included (M, D, MD modes)
     @pytest.mark.parametrize("mode", ["M", "D", "MD"])
     def test_pooling_modes_drop_out_of_window_rows(self, mode):
