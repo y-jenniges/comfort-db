@@ -184,7 +184,7 @@ def read_parameter(conn: sqlite3.Connection, parameter: str, *,
         region_name_col: Region name column for *region*.
         limit: Maximum number of rows to return (the first rows in
             table order). ``None`` returns all. Useful as a safeguard for
-            large tables.
+            large tables. A warning is logged when rows were cut.
         extra_station_cols: Additional ``station`` columns to
             include (e.g. ``["CRUISE_ID", "ST_NUMBER_ORIGIN"]``).
     Returns:
@@ -561,7 +561,8 @@ def load_comfort(
             ``'raise'``. Counts are logged.
         limit: Maximum number of rows to return (the first rows in
             table order). ``None`` returns all. Useful as a safeguard for
-            large tables. Applied to each parameter separately.
+            large tables. Applied to each parameter separately. A warning is
+            logged when rows were cut.
     Returns:
         xarray.Dataset or dict[str, pandas.DataFrame].
         For the dict path each DataFrame has the measurement column named
@@ -990,11 +991,16 @@ def _read_with_geo(conn, parameter, quality_flags,
     params = ts_params + params
 
     # Add optional limit, ORDER BY rowid takes the first rows in table order (reproducible)
+    # LIMIT+1 rows are fetched to check if the result was cut
     if limit is not None:
-        query += f" ORDER BY p.rowid LIMIT {int(limit)}"
+        query += f" ORDER BY p.rowid LIMIT {int(limit) + 1}"
 
     # Execute query with parametrised geo/date values
-    return pd.read_sql_query(query, conn, params=params)
+    df = pd.read_sql_query(query, conn, params=params)
+    if limit is not None and len(df) > limit:
+        logger.warning("%s: limit=%d cut the result, more rows match the filters", table, limit)
+        df = df.iloc[:limit]
+    return df
 
 
 def _append_box_conditions(conditions, params, lon_pfx, lat_pfx, *,

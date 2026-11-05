@@ -993,6 +993,29 @@ class TestLoadComfortLimit:
             assert list(df["ID"]) == [1, 1, 1, 2]
             assert list(df["LEV_M"]) == [0.0, 100.0, 200.0, 0.0]
 
+    # A warning is logged only when rows were really cut (the NITRATE fixture has 6 rows)
+    @pytest.mark.parametrize("limit, n_rows, warns", [
+        (2, 2, True),
+        (5, 5, True),
+        (6, 6, False),  # exact fit
+        (100, 6, False),
+        (None, 6, False),
+    ])
+    def test_warns_only_when_rows_are_cut(self, comfort_db, caplog, limit, n_rows, warns):
+        with caplog.at_level(logging.WARNING, logger="comfort.io"):
+            result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", limit=limit)
+        assert len(result["NITRATE"]) == n_rows
+        assert ("cut the result" in caplog.text) is warns
+
+    # read_parameter warns and returns exactly `limit` rows
+    def test_read_parameter_warns_when_cut(self, comfort_db, caplog):
+        conn = sqlite3.connect(comfort_db)
+        with caplog.at_level(logging.WARNING, logger="comfort.io"):
+            df = read_parameter(conn, "NITRATE", limit=3)
+        conn.close()
+        assert len(df) == 3
+        assert "P_NITRATE: limit=3 cut the result" in caplog.text
+
 
 class TestLoadComfortUnitConversion:
     """Tests for load_comfort(convert_units=True): T/S enrichment, on_missing policy, unit attrs."""
