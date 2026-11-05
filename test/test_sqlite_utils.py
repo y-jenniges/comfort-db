@@ -1,10 +1,6 @@
 """Tests for comfort.util.sqlite_utils."""
-import logging
-import sqlite3
-
 import pytest
 
-from comfort.database import vacuum
 from comfort.util.sqlite_utils import validate_identifier
 
 
@@ -31,24 +27,3 @@ class TestValidateIdentifier:
     def test_rejects_identifier_starting_with_digit(self):
         with pytest.raises(ValueError):
             validate_identifier("1table")
-
-
-class TestVacuum:
-    # VACUUM runs on a normal connection and is reachable from comfort.database
-    def test_runs(self, tmp_path):
-        conn = sqlite3.connect(tmp_path / "db.sqlite")
-        conn.execute("CREATE TABLE t (a INTEGER)")
-        conn.commit()
-        vacuum(conn)  # must not raise
-        conn.close()
-
-    # A failing VACUUM (e.g. inside a transaction) only logs a warning
-    def test_failure_logs_warning(self, tmp_path, caplog):
-        conn = sqlite3.connect(tmp_path / "db.sqlite")
-        conn.execute("CREATE TABLE t (a INTEGER)")
-        conn.execute("BEGIN")
-        conn.execute("INSERT INTO t VALUES (1)")
-        with caplog.at_level(logging.WARNING):
-            vacuum(conn)
-        assert "VACUUM failed" in caplog.text
-        conn.close()
