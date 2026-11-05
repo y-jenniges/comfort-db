@@ -18,23 +18,21 @@ from .database.information import param_label, param_table_name
 from .physics import convert_salinity, convert_temperature, resolve_pressure
 from .util.columns import find_col
 from .util.types import DensityFallback, OnMissing, check_choice
-from .util.sqlite_utils import validate_identifier
 
 logger = logging.getLogger(__name__)
 
 
 class UnitsConverter:
-    """Convert parameter units in the SQLite database to their default units."""
+    """Convert DataFrames of COMFORT parameters to their default units.
+    You can use :meth:`convert_dataframe` or ``load_comfort(convert_units=True)``.
+    """
 
-    def __init__(self, connection: sqlite3.Connection, default_units: pd.DataFrame,
-                 units: pd.DataFrame) -> None:
+    def __init__(self, default_units: pd.DataFrame, units: pd.DataFrame) -> None:
         """
         Args:
-            connection: Database connection.
             default_units: Must have columns NAME_TABLE and UNITS_ID_DEFAULT.
             units: Must have column ID (and NAME_SHORT for unit names).
         """
-        self.connection = connection
         self.df_default_units = default_units
         self.df_units = units
         self.formulas = ConversionFormulas()
@@ -63,7 +61,7 @@ class UnitsConverter:
         # Fetch tables
         default_units = get_table_as_df(conn, "DATABASE_TABLES")
         units = get_table_as_df(conn, "UNITS")
-        return cls(conn, default_units, units)
+        return cls(default_units, units)
 
     def convert_dataframe(self, df: pd.DataFrame, parameter: str,
                           use_density: bool = False, on_missing: OnMissing = "drop",
@@ -244,53 +242,6 @@ class UnitsConverter:
         # Get the short name of the unit ID
         row = self.df_units.loc[self.df_units["ID"] == target, "NAME_SHORT"]
         return row.iloc[0] if not row.empty else None
-
-    def convert_units(self, tables: list[str], use_density: bool = False,
-                      override_old_tables: bool = False,
-                      on_missing: OnMissing = "drop",
-                      density_fallback: DensityFallback = "constant") -> dict[str, str]:
-        """Convert units for the given parameter tables to their default unit.
-
-        Args:
-            tables: Table names to convert.
-            use_density: Use computed density (lab or in-situ, see :class:`ConversionFormulas`)
-                instead of the constant 1.025 kg/L.
-            override_old_tables: Replace the original table.
-            on_missing: Policy for unconvertible rows
-                (``'drop'``, ``'keep'`` or ``'raise'``). Default ``'drop'``.
-            density_fallback: Policy for rows without computable density
-                (``'constant'``, ``'drop'`` or ``'raise'``). Default ``'constant'``.
-        Returns:
-            dict[str, str]: Maps each input table name to the table holding
-                the converted data (the input name itself when nothing changed).
-        """
-        # Iterate over tables
-        new_tables = {}
-        for table in tables:
-            validate_identifier(table)
-            logger.info("UnitsConverter: Converting %s", table)
-
-            # Get data as df
-            ex = self.connection.cursor().execute(f"SELECT * FROM {table};")
-            df = pd.DataFrame(ex.fetchall(), columns=[x[0] for x in ex.description])
-            old_len = len(df)
-
-            # Convert units
-            df_new = self.convert_dataframe(df, table, use_density=use_density,
-                                            on_missing=on_missing, density_fallback=density_fallback)
-
-            # Write converted data only when something changed
-            changed = ("UNITS_ID" in df_new.columns
-                       and (len(df_new) != old_len or not df_new["UNITS_ID"].equals(df["UNITS_ID"])))
-            if changed:
-                new_table_name = table if override_old_tables else f"converted_{table}"
-                if_exists = "replace" if override_old_tables else "fail"
-                df_new.to_sql(new_table_name, self.connection, if_exists=if_exists, index=False)
-                logger.info("  rows removed during conversion: %d", old_len - len(df_new))
-                new_tables[table] = new_table_name
-            else:
-                new_tables[table] = table
-        return new_tables
 
 
 class ConversionFormulas:
