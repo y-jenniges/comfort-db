@@ -79,7 +79,7 @@ To our knowledge, no existing package offers a comparable reproducible interface
 The organisation of the `comfort-db` library is driven by usability and the scale of the COMFORT dataset. Since the dataset
 is distributed as a single multi-gigabyte SQLite file, efficiency and low memory usage were key design goals. 
 For example, space, time and quality filtering is applied at the SQL level rather than after loading potentially large data tables into memory.
-SQLite does not support polygon-based filtering, e.g. to extract a specific ocean basin. Therefore, `comfort-db` first
+SQLite does not support spatial (polygon-based) filtering, e.g. to extract a specific ocean basin. Therefore, `comfort-db` first
 computes a broader bounding box, filters for it in the database and subsequently filters the data in-memory to
 the exact polygon shape.
 Moreover, `distance_to_coast` and `classify_from_grid` map coordinates to the unit sphere and build a k-d tree (`scipy`, [@virtanen2020]) 
