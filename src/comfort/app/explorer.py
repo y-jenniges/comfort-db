@@ -35,11 +35,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
-
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
+from dotenv import load_dotenv
 
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
@@ -990,7 +986,7 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
     Args:
         db_path: Path to the COMFORT SQLite database. ``None``
             reads the ``COMFORT_DB_PATH`` environment variable (a ``.env``
-            file is loaded if python-dotenv is installed).
+            file in the working directory is loaded).
     Returns:
         dash.Dash: The app.
     Raises:
@@ -999,9 +995,8 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
     """
     global _db_path
 
-    # Pick up COMFORT_DB_PATH from a .env file if available
-    if load_dotenv is not None:
-        load_dotenv()
+    # Pick up COMFORT_DB_PATH from a .env file
+    load_dotenv()
 
     tmp_path = db_path or os.environ.get("COMFORT_DB_PATH")
     if not tmp_path:
