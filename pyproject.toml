@@ -1,22 +1,22 @@
 # Build instructions
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 # Metadata and requirements
 [project]
 name = "comfort-db"
-version = "0.1.0"
+dynamic = ["version"]  # read from comfort.__version__, see [tool.setuptools.dynamic]
 description = "Helper library for working with the COMFORT oceanographic dataset (SQLite)"
 authors = [{ name = "Yvonne Jenniges", email = "yvonne.jenniges@gmail.com" }]
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = ["oceanography", "hydrography", "SQLite", "COMFORT", "WOD"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -87,6 +87,10 @@ Documentation = "https://comfort-db.readthedocs.io/en/latest/"
 # Directory of packages
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Single source of the version: Read from src/comfort/__init__.py
+[tool.setuptools.dynamic]
+version = { attr = "comfort.__version__" }
 
 # Test suite settings
 [tool.pytest.ini_options]
