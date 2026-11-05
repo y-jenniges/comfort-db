@@ -12,7 +12,7 @@ Usage:
 
 or from Python:
     from comfort.app.explorer import create_app
-    create_app("/path/to/comfort.sqlite").run(debug=True)
+    create_app("/path/to/comfort.sqlite").run()
 """
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def _query_cruise_labels(conn: sqlite3.Connection) -> dict:
     CRUISE_NUMBER). Returns {} if no CRUISE table exists in this database."""
     try:
         df = pd.read_sql_query("SELECT ID, EXPOCODE, CRUISE_NUMBER FROM CRUISE", conn)
-    except Exception:
+    except (sqlite3.Error, pd.errors.DatabaseError):
         return {}
     has_expocode = df["EXPOCODE"].notna() & (df["EXPOCODE"].astype(str) != "")
     label = df["EXPOCODE"].where(has_expocode, df["CRUISE_NUMBER"].astype(str))
@@ -766,6 +766,35 @@ def _grid_figure(df, value_col, depth_label, plot_type, show_global=False):
 # --- CSV callbacks ----------------------------------------------------
 
 
+def _parse_csv_upload(contents: str) -> pd.DataFrame:
+    """Decode the base64 data URL of an uploaded gridded CSV.
+
+    Args:
+        contents: Value of ``dcc.Upload.contents`` (``data:<type>;base64,<data>``).
+    Returns:
+        pandas.DataFrame: The table, with ``DATEANDTIME`` parsed if present.
+    Raises:
+        ValueError: If the file is not a UTF-8 CSV, lacks ``LONGITUDE``, ``LATITUDE`` or ``LEV_M``
+            or has unparsable dates.
+    """
+    # Split at the first comma only: The header never contains one, but be safe
+    _, content_string = contents.split(",", 1)
+    decoded = base64.b64decode(content_string)
+
+    # UnicodeDecodeError, the pandas parser errors and binascii.Error are all ValueErrors
+    df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+
+    # Ensure required columns are given
+    missing = [c for c in ("LONGITUDE", "LATITUDE", "LEV_M") if c not in df.columns]
+    if missing:
+        raise ValueError(f"missing column(s) {', '.join(missing)}")
+
+    # DATEANDTIME is optional
+    if "DATEANDTIME" in df.columns:
+        df["DATEANDTIME"] = pd.to_datetime(df["DATEANDTIME"])
+    return df
+
+
 @_register_callback(
     Output("csv-filename", "children"),
     Output("csv-param", "options"),
@@ -792,14 +821,18 @@ def _load_csv(contents, filename):
         raise PreventUpdate
 
     # Read CSV
-    content_type, content_string = contents.split(",")
-    decoded = base64.b64decode(content_string)
-    df = pd.read_csv(io.StringIO(decoded.decode("utf-8")))
+    try:
+        df = _parse_csv_upload(contents)
+    except ValueError as e:
+        # A bad file is reported in the file label
+        logger.warning("CSV upload %s rejected: %s", filename, e)
+        _clear_csv_cache()
+        return (
+            f"Could not read {filename}: {e}",
+            [], None, *_EMPTY_RANGE_SLIDER, *_EMPTY_RANGE_SLIDER,
+        )
 
-    # DATEANDTIME is optional
     has_time = "DATEANDTIME" in df.columns
-    if has_time:
-        df["DATEANDTIME"] = pd.to_datetime(df["DATEANDTIME"])
     _csv_cache["df"] = df
 
     # Available depth/time values
@@ -961,6 +994,7 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
         dash.Dash: The app.
     Raises:
         EnvironmentError: If no database path is given and ``COMFORT_DB_PATH`` is not set.
+        FileNotFoundError: If the database file does not exist.
     """
     global _db_path
 
@@ -974,6 +1008,10 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
             "No database path given and COMFORT_DB_PATH environment variable is not set.\n"
             "    export COMFORT_DB_PATH=/path/to/comfort.sqlite"
         )
+
+    # Check if passed DB file exists
+    if not os.path.isfile(tmp_path):
+        raise FileNotFoundError(f"COMFORT database not found: {tmp_path}")
     _db_path = str(tmp_path)
 
     # Build app
@@ -987,9 +1025,12 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
 
 
 def main() -> None:
-    """Launch the app in debug mode (``python -m comfort.app.explorer``)."""
+    """Launch the app on the local machine (``python -m comfort.app.explorer``)."""
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-    create_app().run(debug=True)
+
+    # Do not show Werkzeug INFO logs
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    create_app().run()
 
 
 if __name__ == "__main__":
