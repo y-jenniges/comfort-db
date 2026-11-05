@@ -1,12 +1,13 @@
 """Tests for comfort.io, i.e. load_comfort, describe_variables, subset_region, read_parameter, info."""
 import logging
 import sqlite3
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
 
 from comfort.io import (
-    _read_with_geo, describe_variables, info, load_comfort, read_parameter, subset_region,
+    _read_with_geo, connect, describe_variables, info, load_comfort, read_parameter, subset_region,
 )
 
 _has_shapely = True
@@ -77,6 +78,31 @@ def comfort_db(tmp_path):
     conn.commit()
     conn.close()
     return db_path
+
+
+class TestOpenDatabase:
+    # A mistyped path raises and must not leave an empty database file behind
+    @pytest.mark.parametrize("opener", [
+        lambda p: connect(p).__enter__(),
+        lambda p: info(p),
+        lambda p: load_comfort(p, output="dict"),
+    ], ids=["connect", "info", "load_comfort"])
+    def test_missing_file_raises_and_creates_nothing(self, tmp_path, opener):
+        missing = tmp_path / "typo.sqlite"
+        with pytest.raises(FileNotFoundError, match="not found"):
+            opener(str(missing))
+        assert not missing.exists()
+
+    # A directory is not a database (raises)
+    def test_directory_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            info(str(tmp_path))
+
+    # An existing file opens (as a string or a Path)
+    def test_existing_file_opens(self, comfort_db):
+        with connect(comfort_db) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM station").fetchone()[0] > 0
+        assert not info(Path(comfort_db)).empty
 
 
 class TestDescribeVariables:

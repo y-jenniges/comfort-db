@@ -15,7 +15,7 @@ __all__ = [
 import logging
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
@@ -55,7 +55,12 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
         db_path: Path to the COMFORT SQLite database.
     Yields:
         sqlite3.Connection
+    Raises:
+        FileNotFoundError: If the database file does not exist.
     """
+    # Check if the DB file exists
+    if not Path(db_path).is_file():
+        raise FileNotFoundError(f"COMFORT database not found: {db_path}")
     conn = sqlite3.connect(db_path)
     try:
         yield conn
@@ -83,11 +88,16 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
             COMFORT SQLite database or an existing open connection.
     Returns:
         pandas.DataFrame: Summary table (one row per parameter).
+    Raises:
+        FileNotFoundError: If a path is given and the database file does not exist.
     """
     # Open connection if path given
-    own_conn = not isinstance(db_path_or_conn, sqlite3.Connection)
-    conn = sqlite3.connect(db_path_or_conn) if own_conn else db_path_or_conn
-    try:
+    # (path given: connect(path) opens and closes the database)
+    # (connection given: nullcontext(conn) returns the open connection to be handled by the caller)
+    opened = (nullcontext(db_path_or_conn) if isinstance(db_path_or_conn, sqlite3.Connection)
+              else connect(db_path_or_conn))
+
+    with opened as conn:
         params = list_parameters(conn)
         if not params:
             logger.warning("info: No parameter tables found")
@@ -125,9 +135,6 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
         result = pd.DataFrame(rows)
         logger.info(result.to_string(index=False))
         return result
-    finally:
-        if own_conn:
-            conn.close()
 
 
 def list_parameters(conn: sqlite3.Connection) -> list[str]:
@@ -569,6 +576,7 @@ def load_comfort(
         ValueError: If a parameter is unknown, an option or date string is invalid or a
             conversion fails with ``on_missing='raise'`` or ``density_fallback='raise'``.
         ImportError: If ``output="xarray"`` and xarray is not installed (extra ``[grid]``).
+        FileNotFoundError: If a path is given and the database file does not exist.
     """
     # Fail early on unknown options
     check_choice(output, LoadOutput, "output")
@@ -589,10 +597,11 @@ def load_comfort(
         region_box=region_bbox(region, region_name_col) if region is not None else None,
     )
 
-    # Open connection if path given; leave caller-owned connections open
-    own_conn = not isinstance(db_path_or_conn, sqlite3.Connection)
-    conn = sqlite3.connect(db_path_or_conn) if own_conn else db_path_or_conn
-    try:
+    # Open connection if path given (leave caller-owned connections open)
+    opened = (nullcontext(db_path_or_conn) if isinstance(db_path_or_conn, sqlite3.Connection)
+              else connect(db_path_or_conn))
+
+    with opened as conn:
         # Default to all available parameters
         available = list_parameters(conn)
         if parameters is None:
@@ -629,10 +638,6 @@ def load_comfort(
             )
             if loaded is not None:
                 dfs[param], _param_unit_ids[param] = loaded
-    finally:
-        # Close connection
-        if own_conn:
-            conn.close()
 
     if not dfs:
         # No data was found
