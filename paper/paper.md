@@ -39,7 +39,7 @@ with isopycnals in $kg~m^{-3}$ (dashed lines, reference pressure 0 dbar, compute
 of oxygen measurements from the COMFORT dataset. 
 Only quality-controlled (`QC_GOOD`) data are loaded, units are harmonised (`comfort.units`) and
 oxygen values that are identical to their co-located practical salinity are dropped (`flag_salinity_like_oxygen`). 
-Duplicate spatio-temporal locations are averaged (`average_duplicate_locations`) and temperature, salinity and oxygen inner-joined. 
+Duplicate spatio-temporal locations are averaged (`average_duplicates_by_location`) and temperature, salinity and oxygen inner-joined. 
 Absolute Salinity ($S_A$) and Conservative Temperature ($\Theta$) are derived via TEOS-10 (`comfort.physics`). 
 The remaining 40,434,271 data points (out of 67,085,418 oxygen observations in the dataset) are averaged into hexagonal bins and coloured by oxygen concentration. 
 The three visible low-oxygen zones in the plot broadly correspond to known oxygen-depleted areas 
@@ -94,7 +94,7 @@ need database access and preprocessing.
 Some processing steps require a single parameter value per spatio-temporal location, which is not guaranteed in the COMFORT dataset.
 For example, there can be different instruments and multiple bottles on a conductivity-temperature-depth (CTD) rosette at the same time, depth and coordinates. 
 Also, there are measurements that were contributed by more than one of the merged source datasets under different station IDs.
-Therefore, `average_duplicate_locations` averages the records of each parameter by longitude, latitude, depth and time, 
+Therefore, `average_duplicates_by_location` averages the records of each parameter by longitude, latitude, depth and time, 
 irrespective of station ID, profile, instrument or bottle number. 
 Records that the dataset itself flagged as duplicates (PQF2=-1) can be removed by applying the `QC_GOOD` quality filter.
 When auxiliary temperature and salinity are added to another parameter table for unit conversions, they are first 

@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 import comfort
 from comfort.profile_analysis import (
-    average_duplicate_records_per_profile,
+    average_duplicates_by_profile,
     interpolate_depth_levels,
     mixed_layer_depth,
     profile_completeness,
@@ -45,7 +45,7 @@ if __name__ == "__main__":
         )
 
     # Average duplicates
-    averaged = average_duplicate_records_per_profile(dfs)
+    averaged = average_duplicates_by_profile(dfs)
     df_t, df_s = averaged["TEMPERATURE"], averaged["SALINITY"]
 
     # Count profiles (a profile is identified by (ID, PROFILE_NUMBER))

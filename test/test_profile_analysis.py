@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from comfort.profile_analysis import (
-    average_duplicate_records_per_profile,
+    average_duplicates_by_profile,
     detect_depth_col,
     interpolate_depth_levels,
     mixed_layer_depth,
@@ -19,7 +19,7 @@ from comfort.profile_analysis import (
 class TestAverageDuplicateRecordsPerProfile:
     # An empty input dict returns an empty dict
     def test_empty_raw_returns_empty_dict(self):
-        assert average_duplicate_records_per_profile({}) == {}
+        assert average_duplicates_by_profile({}) == {}
 
     # Two readings at the same (ID, PROFILE_NUMBER, depth) are averaged into one
     def test_averages_duplicate_reading_within_profile(self):
@@ -27,7 +27,7 @@ class TestAverageDuplicateRecordsPerProfile:
             "ID": [1, 1], "PROFILE_NUMBER": [1, 1], "LEV_M": [10.0, 10.0],
             "OXYGEN": [200.0, 220.0],
         })}
-        result = average_duplicate_records_per_profile(raw)
+        result = average_duplicates_by_profile(raw)
         assert len(result["OXYGEN"]) == 1
         assert result["OXYGEN"]["OXYGEN"].iloc[0] == pytest.approx(210.0)
 
@@ -37,7 +37,7 @@ class TestAverageDuplicateRecordsPerProfile:
             "ID": [1, 1], "PROFILE_NUMBER": [1, 1], "LEV_M": [10.0, 20.0],
             "OXYGEN": [200.0, 220.0],
         })}
-        result = average_duplicate_records_per_profile(raw)
+        result = average_duplicates_by_profile(raw)
         assert len(result["OXYGEN"]) == 2
 
     # Readings with different IDs and same profile number stay separate
@@ -47,7 +47,7 @@ class TestAverageDuplicateRecordsPerProfile:
             "ID": [1, 2], "PROFILE_NUMBER": [1, 1], "LEV_M": [10.0, 10.0],
             "OXYGEN": [200.0, 220.0],
         })}
-        result = average_duplicate_records_per_profile(raw)
+        result = average_duplicates_by_profile(raw)
         assert len(result["OXYGEN"]) == 2
 
     # Constant station metadata (e.g. LATITUDE) is kept via "first", not averaged away
@@ -57,7 +57,7 @@ class TestAverageDuplicateRecordsPerProfile:
             "LATITUDE": [45.0, 45.0], "LONGITUDE": [-30.0, -30.0],
             "OXYGEN": [200.0, 220.0],
         })}
-        result = average_duplicate_records_per_profile(raw)
+        result = average_duplicates_by_profile(raw)
         assert result["OXYGEN"]["LATITUDE"].iloc[0] == pytest.approx(45.0)
 
     # profile_col can be overridden when ID is not part of the grouping key
@@ -66,7 +66,7 @@ class TestAverageDuplicateRecordsPerProfile:
             "PROFILE_NUMBER": [1, 1], "LEV_M": [10.0, 10.0],
             "OXYGEN": [200.0, 220.0],
         })}
-        result = average_duplicate_records_per_profile(raw, profile_col="PROFILE_NUMBER")
+        result = average_duplicates_by_profile(raw, profile_col="PROFILE_NUMBER")
         assert len(result["OXYGEN"]) == 1
         assert result["OXYGEN"]["OXYGEN"].iloc[0] == pytest.approx(210.0)
 
@@ -82,7 +82,7 @@ class TestAverageDuplicateRecordsPerProfile:
                 "NITRATE": [5.0, 7.0],
             }),
         }
-        result = average_duplicate_records_per_profile(raw)
+        result = average_duplicates_by_profile(raw)
         assert result["OXYGEN"]["OXYGEN"].iloc[0] == pytest.approx(210.0)
         assert result["NITRATE"]["NITRATE"].iloc[0] == pytest.approx(6.0)
 
