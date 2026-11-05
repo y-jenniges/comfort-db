@@ -47,6 +47,9 @@ def distance_to_coast(df: pd.DataFrame, lon_col: str = "LONGITUDE",
     *resolution* to reduce the overestimate. Rows with missing or
     out-of-range coordinates get NaN.
 
+    The default Natural Earth coastlines need cartopy
+    (``pip install "comfort-db[geo]"``), which downloads them on first use.
+
     Args:
         df: DataFrame with longitude and latitude columns.
         lon_col: Longitude column [°E].

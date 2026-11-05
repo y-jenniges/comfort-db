@@ -1,9 +1,8 @@
 """Tests for comfort.scaling."""
-import sqlite3
 import pandas as pd
 import pytest
 
-from comfort.scaling import ParamScaler, DBParamScaler
+from comfort.scaling import ParamScaler
 
 _has_sklearn = True
 try:
@@ -112,85 +111,3 @@ class TestParamScaler:
         result = scaler.scale(df2)
         # 5.0 scaled with [0, 10] range -> 0.5; 15.0 -> 1.5 (extrapolated)
         assert result["VAL_SCALED"].iloc[0] == pytest.approx(0.5)
-
-
-class TestDBParamScaler:
-    @pytest.fixture
-    def db_conn(self):
-        # Create dummy database
-        conn = sqlite3.connect(":memory:")
-        conn.execute(
-            "CREATE TABLE P_NITRATE (ID INTEGER, LEV_M REAL, VAL REAL, "
-            "UNITS_ID INTEGER, PQF1 INTEGER)"
-        )
-        conn.executemany("INSERT INTO P_NITRATE VALUES (?,?,?,?,?)", [
-            (1, 0.0, 0.0, 3, 1),
-            (1, 100.0, 5.0, 3, 1),
-            (1, 200.0, 10.0, 3, 1),
-        ])
-        conn.execute(
-            "CREATE TABLE P_OXYGEN (ID INTEGER, LEV_M REAL, VAL REAL, "
-            "UNITS_ID INTEGER, PQF1 INTEGER)"
-        )
-        conn.executemany("INSERT INTO P_OXYGEN VALUES (?,?,?,?,?)", [
-            (1, 0.0, 200.0, 3, 1),
-            (1, 100.0, 250.0, 3, 1),
-            (1, 200.0, 300.0, 3, 1),
-        ])
-        conn.commit()
-        yield conn
-        conn.close()
-
-    # get_min_max reads VAL bounds straight from the database
-    def test_get_min_max(self, db_conn):
-        scaler = DBParamScaler(db_conn)
-        vmin, vmax = scaler.get_min_max("P_NITRATE", "VAL")
-        assert vmin == 0.0
-        assert vmax == 10.0
-
-    # get_min_max_depth pools the depth range across multiple tables
-    def test_get_min_max_depth(self, db_conn):
-        scaler = DBParamScaler(db_conn)
-        dmin, dmax = scaler.get_min_max_depth(["P_NITRATE", "P_OXYGEN"])
-        assert dmin == 0.0
-        assert dmax == 200.0
-
-    # scale() writes one scaled_P_* table per requested parameter
-    def test_scale_creates_tables(self, db_conn):
-        scaler = DBParamScaler(db_conn)
-        result = scaler.scale({"P_NITRATE": "NITRATE", "P_OXYGEN": "OXYGEN"})
-        assert "scaled_P_NITRATE" in result
-        assert "scaled_P_OXYGEN" in result
-        # Verify tables exist in the database
-        from comfort.database.information import does_table_exist
-        assert does_table_exist(db_conn, "scaled_P_NITRATE")
-        assert does_table_exist(db_conn, "scaled_P_OXYGEN")
-
-    # Scaled VAL values fall within the default [0, 1] bounds
-    def test_scale_values_in_range(self, db_conn):
-        scaler = DBParamScaler(db_conn)
-        scaler.scale({"P_NITRATE": "NITRATE"})
-        cur = db_conn.execute("SELECT VAL FROM scaled_P_NITRATE;")
-        vals = [row[0] for row in cur.fetchall()]
-        assert min(vals) == pytest.approx(0.0)
-        assert max(vals) == pytest.approx(1.0)
-
-    # An empty parameter dict returns empty dict
-    def test_scale_empty_dict(self, db_conn):
-        scaler = DBParamScaler(db_conn)
-        assert scaler.scale({}) == {}
-
-    # lower/upper bounds override the default [0, 1] range
-    def test_scale_custom_bounds(self, db_conn):
-        scaler = DBParamScaler(db_conn, lower=-1, upper=1)
-        scaler.scale({"P_NITRATE": "NITRATE"})
-        cur = db_conn.execute("SELECT VAL FROM scaled_P_NITRATE;")
-        vals = [row[0] for row in cur.fetchall()]
-        assert min(vals) == pytest.approx(-1.0)
-        assert max(vals) == pytest.approx(1.0)
-
-    # A malicious/invalid table name is rejected before it reaches SQL
-    def test_validate_identifier_rejects_bad_name(self, db_conn):
-        scaler = DBParamScaler(db_conn)
-        with pytest.raises(ValueError, match="Invalid SQL identifier"):
-            scaler.get_min_max("DROP TABLE foo; --", "VAL")

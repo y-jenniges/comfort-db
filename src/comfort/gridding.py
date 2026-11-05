@@ -6,7 +6,7 @@ from __future__ import annotations
 
 __all__ = [
     "Grid",
-    "average_duplicate_locations",
+    "average_duplicates_by_location",
     "get_missing_value_info",
     "seasonal_mean",
 ]
@@ -595,7 +595,7 @@ class Grid:
         return self.bin_time(annual, value_col, agg="mean")
 
 
-def average_duplicate_locations(
+def average_duplicates_by_location(
     raw: dict[str, pd.DataFrame],
     other_params: list[str] | None = None,
     temperature_col: str = "TEMPERATURE",
@@ -630,7 +630,7 @@ def average_duplicate_locations(
     if temperature_col in raw:
         t_avg = raw[temperature_col].groupby(loc_cols, as_index=False).agg(
             {temperature_col: "mean", "LEV_DBAR": "mean"})
-        logger.info("average_duplicate_locations: %s %d -> %d",
+        logger.info("average_duplicates_by_location: %s %d -> %d",
                      temperature_col, len(raw[temperature_col]), len(t_avg))
         averaged[temperature_col] = t_avg
 
@@ -639,7 +639,7 @@ def average_duplicate_locations(
         if param not in raw:
             continue
         avg = raw[param].groupby(loc_cols, as_index=False).agg({param: "mean"})
-        logger.info("average_duplicate_locations: %s %d -> %d", param, len(raw[param]), len(avg))
+        logger.info("average_duplicates_by_location: %s %d -> %d", param, len(raw[param]), len(avg))
         averaged[param] = avg
 
     return averaged

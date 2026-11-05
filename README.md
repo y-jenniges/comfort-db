@@ -1,6 +1,6 @@
 # comfort-db
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/y-jenniges/comfort-db/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Documentation Status](https://img.shields.io/readthedocs/comfort-db)](https://comfort-db.readthedocs.io/en/latest/)
 
@@ -38,7 +38,7 @@ Optional extras add more specialised functionality:
 | Extra | Adds | Enables                                               |
 |---|---|-------------------------------------------------------|
 | `plot` | matplotlib, seaborn | `comfort.plot`                                        |
-| `geo` | shapely, geopandas, cartopy | Water masses, Longhurst provinces, coastline distance |
+| `geo` | shapely, geopandas, cartopy | Water masses, Longhurst provinces, coastline distance (`distance_to_coast`) |
 | `grid` | xarray, netcdf4 | Spatio-temporal gridding, bathymetry masking, biome classification (`load_biomes`), xarray output |
 | `scale` | scikit-learn | `ParamScaler`                                         |
 | `dash` | dash, plotly | Interactive Dash explorer app                         |
@@ -65,7 +65,7 @@ To build the documentation locally:
 sphinx-build documentation/source documentation/build/html
 ```
 
-Requires Python $\ge$ 3.10.
+Requires Python 3.10 or newer.
 
 ---
 
@@ -86,7 +86,7 @@ data = comfort.load_comfort(
     lat_min=30, lat_max=70,  # latitude filter
     date_min="2000-01-01 00:00:00",  # date filter, format YYYY-MM-DD HH:MM:SS
     target_depths=[0, 50, 100, 200, 500, 1000],  # depth interpolation
-    limit=500_000,  # safeguard for large tables
+    limit=500_000,  # first 500,000 rows per parameter (a warning is logged if rows are cut)
     output="dict",
 )
 

@@ -59,7 +59,8 @@ class TestCreateApp:
     # Without an explicit path or COMFORT_DB_PATH an error is raised when creating the app
     def test_raises_without_path(self, monkeypatch):
         monkeypatch.delenv("COMFORT_DB_PATH", raising=False)
-        monkeypatch.setattr(explorer, "load_dotenv", None)
+        # A local .env must not provide the path
+        monkeypatch.setattr(explorer, "load_dotenv", lambda: None)
         with pytest.raises(EnvironmentError, match="COMFORT_DB_PATH"):
             explorer.create_app()
 

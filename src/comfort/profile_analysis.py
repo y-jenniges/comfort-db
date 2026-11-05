@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 __all__ = [
-    "average_duplicate_records_per_profile",
+    "average_duplicates_by_profile",
     "detect_depth_col",
     "interpolate_depth_levels",
     "mixed_layer_depth",
@@ -118,7 +118,7 @@ def detect_depth_col(df: pd.DataFrame, depth_col: str = "LEV_M") -> str:
     )
 
 
-def average_duplicate_records_per_profile(
+def average_duplicates_by_profile(
     raw: dict[str, pd.DataFrame],
     depth_col: str = "LEV_M",
     profile_col: str | list[str] | None = None,
@@ -165,7 +165,7 @@ def average_duplicate_records_per_profile(
             if c in df.columns and c not in group_cols:
                 agg[c] = "first"
         avg = df.groupby(group_cols, as_index=False).agg(agg)
-        logger.info("average_duplicate_records_per_profile: %s %d -> %d", param, len(df), len(avg))
+        logger.info("average_duplicates_by_profile: %s %d -> %d", param, len(df), len(avg))
         averaged[param] = avg
 
     return averaged

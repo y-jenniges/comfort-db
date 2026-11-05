@@ -1,6 +1,5 @@
 """Tests for comfort.units."""
 import logging
-import sqlite3
 import gsw
 import numpy as np
 import pandas as pd
@@ -10,7 +9,6 @@ from comfort.units import (
     ConversionFormulas,
     UnitsConverter,
 )
-from comfort.database.information import does_table_exist
 
 
 class TestConversionFormulas:
@@ -154,7 +152,7 @@ def _make_converter(default_unit=3, table="P_OXYGEN"):
     """UnitsConverter for DataFrame-only tests (no database access needed)."""
     default_units = pd.DataFrame({"NAME_TABLE": [table], "UNITS_ID_DEFAULT": [default_unit]})
     units = pd.DataFrame({"ID": list(range(30)), "NAME_SHORT": [str(i) for i in range(30)]})
-    return UnitsConverter(connection=None, default_units=default_units, units=units)
+    return UnitsConverter(default_units=default_units, units=units)
 
 
 class TestConvertDataframe:
@@ -431,7 +429,7 @@ class TestRequiredInputs:
         tables = {"P_OXYGEN": 3, "P_CHLOROPHYLL": 14, "P_AMMONIUM": 14, "P_DIC": 3, "P_NITRATE": 3, "P_AOU": 3, "P_SALINITY": 2}
         default_units = pd.DataFrame({"NAME_TABLE": list(tables), "UNITS_ID_DEFAULT": list(tables.values())})
         units = pd.DataFrame({"ID": list(range(30)), "NAME_SHORT": [str(i) for i in range(30)]})
-        return UnitsConverter(connection=None, default_units=default_units, units=units)
+        return UnitsConverter(default_units=default_units, units=units)
 
     # Oxygen % saturation always needs T and S (independent of density setting)
     @pytest.mark.parametrize("use_density", [False, True])
@@ -500,71 +498,6 @@ class TestDefaultUnitName:
     def test_unknown_unit_id_returns_none(self):
         uc = _make_converter(default_unit=99)
         assert uc.default_unit_name("P_OXYGEN") is None
-
-
-class TestUnitsConverter:
-    @pytest.fixture
-    def in_memory_connection(self):
-        """Return a fresh in-memory SQLite connection."""
-        conn = sqlite3.connect(":memory:")
-        yield conn
-        conn.close()
-
-    def _setup(self, conn, rows):
-        conn.execute(
-            "CREATE TABLE dummy (VAL REAL, UNITS_ID INTEGER, LATITUDE REAL, "
-            "LONGITUDE REAL, LEV_DBAR REAL, salinity REAL, temperature REAL)"
-        )
-        conn.executemany("INSERT INTO dummy VALUES (?,?,?,?,?,?,?)", rows)
-        conn.commit()
-        default_units = pd.DataFrame({"NAME_TABLE": ["dummy"], "UNITS_ID_DEFAULT": [19]})
-        units = pd.DataFrame({"ID": list(range(27))})
-        return UnitsConverter(connection=conn, default_units=default_units, units=units)
-
-    # override_old_tables=False writes a separate converted_<table>
-    def test_convert_units_no_override(self, in_memory_connection):
-        conn = in_memory_connection
-        uc = self._setup(conn, [
-            (10, 12, 50, 50, 0, 31, 4),
-            (20, 19, -10, 30, 10, 35, 10),
-        ])
-        new_tables = uc.convert_units(["dummy"], use_density=False, override_old_tables=False)
-        assert new_tables["dummy"] == "converted_dummy"
-        assert does_table_exist(conn, "converted_dummy")
-
-        unit_ids = [r[0] for r in conn.execute("SELECT DISTINCT UNITS_ID FROM converted_dummy;").fetchall()]
-        assert unit_ids == [19]
-
-    # override_old_tables=True replaces the original table in place
-    def test_convert_units_with_override(self, in_memory_connection):
-        conn = in_memory_connection
-        uc = self._setup(conn, [
-            (10, 12, 50, 50, 0, 31, 4),
-            (20, 19, -10, 30, 10, 35, 10),
-        ])
-        new_tables = uc.convert_units(["dummy"], use_density=False, override_old_tables=True)
-        assert new_tables["dummy"] == "dummy"
-        assert not does_table_exist(conn, "converted_dummy")
-
-        unit_ids = [r[0] for r in conn.execute("SELECT DISTINCT UNITS_ID FROM dummy;").fetchall()]
-        assert unit_ids == [19]
-
-    # When every row is already in the default unit, no converted_* table is created
-    def test_convert_units_noop_keeps_original_table(self, in_memory_connection):
-        conn = in_memory_connection
-        uc = self._setup(conn, [
-            (10, 19, 50, 50, 0, 31, 4),
-            (20, 19, -10, 30, 10, 35, 10),
-        ])
-        new_tables = uc.convert_units(["dummy"], use_density=False, override_old_tables=False)
-        assert new_tables["dummy"] == "dummy"
-        assert not does_table_exist(conn, "converted_dummy")
-
-    # A malicious/invalid table name is rejected before it reaches SQL
-    def test_convert_units_invalid_table_name_raises(self, in_memory_connection):
-        uc = self._setup(in_memory_connection, [(10, 19, 50, 50, 0, 31, 4)])
-        with pytest.raises(ValueError, match="identifier"):
-            uc.convert_units(["dummy; DROP TABLE dummy"])
 
 
 # Reference conversion values, hand-verified against the COMFORT dataset v3 report, Appendix C.

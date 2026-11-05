@@ -8,7 +8,7 @@ import pytest
 MODULES = [
     "comfort", "comfort.io", "comfort.qc", "comfort.gridding", "comfort.geo", "comfort.physics",
     "comfort.profile_analysis", "comfort.units", "comfort.scaling", "comfort.sections",
-    "comfort.database", "comfort.database.information", "comfort.database.structure",
+    "comfort.database", "comfort.database.information",
     "comfort.util", "comfort.util.sqlite_utils",
 ]
 

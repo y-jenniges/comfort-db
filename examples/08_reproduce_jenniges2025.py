@@ -11,7 +11,7 @@ Steps:
         and depth level)
   6. Average O2/NO3/SiO4/PO4 over identical (lat, lon, depth, time)
         - steps 3, 6 are handled by
-          comfort.gridding.average_duplicate_locations
+          comfort.gridding.average_duplicates_by_location
   7. Convert in-situ temperature to potential temperature (gsw) via
      comfort.physics.convert_to_potential_temperature
   8. Grid onto 1 deg x 12 depth intervals, averaging over all available times
@@ -50,7 +50,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 from comfort import connect
-from comfort.gridding import Grid, average_duplicate_locations
+from comfort.gridding import Grid, average_duplicates_by_location
 from comfort.io import load_comfort
 from comfort.physics import convert_to_potential_temperature
 from comfort.qc import QC_GOOD
@@ -113,7 +113,7 @@ def main():
         # Steps 3, 6: Average duplicate (lat, lon, depth, time) records      #
         # ------------------------------------------------------------------ #
         log.info("Steps 3, 6: Averaging duplicate locations...")
-        averaged = average_duplicate_locations(raw)
+        averaged = average_duplicates_by_location(raw)
         for param in PARAMETERS:
             log.info("  %-15s %10d -> %10d", param, len(raw[param]), len(averaged[param]))
         total_final = sum(len(df) for df in averaged.values())

@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 import comfort
 from comfort.database import get_num_samples
-from comfort.gridding import average_duplicate_locations
+from comfort.gridding import average_duplicates_by_location
 from comfort.physics import add_teos10_variables
 from comfort.plot import plot_ts_diagram
 from comfort.qc import flag_salinity_like_oxygen
@@ -63,7 +63,7 @@ def main():
 
     # Average duplicate (lat, lon, depth, time) records
     log.info("Averaging duplicate locations...")
-    averaged = average_duplicate_locations(raw)
+    averaged = average_duplicates_by_location(raw)
     for param, avg in averaged.items():
         log.info("  %-12s %10d -> %10d unique locations", param, len(raw[param]), len(avg))
 

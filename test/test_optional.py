@@ -1,4 +1,5 @@
 """Tests for comfort.util.optional and the install hints of the optional extras."""
+import sqlite3
 import sys
 import pytest
 
@@ -31,7 +32,11 @@ class TestInstallHints:
     # The dict output does not need xarray
     def test_load_comfort_dict_without_xarray(self, monkeypatch, tmp_path):
         monkeypatch.setitem(sys.modules, "xarray", None)
-        assert load_comfort(tmp_path / "empty.sqlite", output="dict") == {}
+        # Create empty DB file
+        db_path = tmp_path / "empty.sqlite"
+        sqlite3.connect(db_path).close()
+        # Load from empty DB returns empty
+        assert load_comfort(db_path, output="dict") == {}
 
     # Region parsing names the geo extra when shapely is missing
     def test_regions_without_shapely(self, monkeypatch):

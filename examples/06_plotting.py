@@ -30,7 +30,7 @@ from comfort.plot import (
 )
 from comfort.geo import along_track_distance
 from comfort.physics import add_teos10_variables
-from comfort.profile_analysis import average_duplicate_records_per_profile, mixed_layer_depth, pycnocline_depth
+from comfort.profile_analysis import average_duplicates_by_profile, mixed_layer_depth, pycnocline_depth
 from comfort.qc import flag_salinity_like_oxygen
 from comfort.units import UnitsConverter
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     # Average duplicate records at the same (station, profile, depth) per
     # parameter - e.g. repeated sensor readings within a single cast
-    averaged = average_duplicate_records_per_profile(dfs)
+    averaged = average_duplicates_by_profile(dfs)
     df_t, df_s, df_o = averaged["TEMPERATURE"], averaged["SALINITY"], averaged["OXYGEN"]
 
     # Print profile stats

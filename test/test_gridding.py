@@ -14,7 +14,7 @@ except ImportError:
 from comfort.gridding import (
     Grid,
     _axis_cells,
-    average_duplicate_locations,
+    average_duplicates_by_location,
     _drop_land_cells,
     get_missing_value_info,
     seasonal_mean,
@@ -111,7 +111,7 @@ class TestAverageDuplicateLocations:
             {**self._loc(), "TEMPERATURE": 4.0},
             {**self._loc(), "TEMPERATURE": 6.0},
         ])}
-        result = average_duplicate_locations(raw)
+        result = average_duplicates_by_location(raw)
         assert len(result["TEMPERATURE"]) == 1
         assert result["TEMPERATURE"]["TEMPERATURE"].iloc[0] == pytest.approx(5.0)
 
@@ -121,7 +121,7 @@ class TestAverageDuplicateLocations:
             {**self._loc(), "SALINITY": 34.0},
             {**self._loc(), "SALINITY": 36.0},
         ])}
-        result = average_duplicate_locations(raw)
+        result = average_duplicates_by_location(raw)
         assert len(result["SALINITY"]) == 1
         assert result["SALINITY"]["SALINITY"].iloc[0] == pytest.approx(35.0)
 
@@ -135,7 +135,7 @@ class TestAverageDuplicateLocations:
                 {**self._loc(), "OXYGEN": 220.0},
             ]),
         }
-        result = average_duplicate_locations(raw)
+        result = average_duplicates_by_location(raw)
         assert "OXYGEN" in result
         assert result["OXYGEN"]["OXYGEN"].iloc[0] == pytest.approx(210.0)
 
@@ -146,7 +146,7 @@ class TestAverageDuplicateLocations:
             "OXYGEN": pd.DataFrame([{**self._loc(), "OXYGEN": 200.0}]),
             "NITRATE": pd.DataFrame([{**self._loc(), "NITRATE": 5.0}]),
         }
-        result = average_duplicate_locations(raw, other_params=["OXYGEN"])
+        result = average_duplicates_by_location(raw, other_params=["OXYGEN"])
         assert "OXYGEN" in result
         assert "NITRATE" not in result
 

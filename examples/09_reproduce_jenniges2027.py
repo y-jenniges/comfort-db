@@ -38,7 +38,7 @@ import seaborn as sns
 from dotenv import load_dotenv
 
 from comfort import connect
-from comfort.gridding import Grid, average_duplicate_locations, get_missing_value_info
+from comfort.gridding import Grid, average_duplicates_by_location, get_missing_value_info
 from comfort.io import load_comfort
 from comfort.physics import add_teos10_variables, convert_to_potential_temperature, resolve_pressure
 from comfort.plot import (
@@ -138,7 +138,7 @@ def main():
         # Step 4: Average duplicate (lat, lon, depth, time) records          #
         # ------------------------------------------------------------------ #
         log.info("Step 4: Averaging duplicate locations...")
-        averaged = average_duplicate_locations(raw)
+        averaged = average_duplicates_by_location(raw)
         for param in PARAMETERS:
             log.info("  %-15s %10d -> %10d", param, len(raw[param]), len(averaged[param]))
         total = sum(len(df) for df in averaged.values())

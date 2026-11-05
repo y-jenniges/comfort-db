@@ -1,4 +1,4 @@
-"""Database access, querying and schema management for COMFORT."""
+"""Database access and querying helpers for COMFORT."""
 from __future__ import annotations
 
 from .information import (
@@ -15,14 +15,11 @@ from .information import (
     param_label,
     param_table_name,
 )
-from .structure import create_combined_parameter_table
-from ..util.sqlite_utils import vacuum
 
 __all__ = [
     "count_negative_samples",
     "count_samples_over_time",
     "count_samples_per_parameter",
-    "create_combined_parameter_table",
     "does_table_exist",
     "find_spatiotemporal_duplicates",
     "get_min_max_dates",
@@ -32,5 +29,4 @@ __all__ = [
     "get_table_as_df",
     "param_label",
     "param_table_name",
-    "vacuum",
 ]

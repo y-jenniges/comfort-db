@@ -1,27 +1,14 @@
-"""SQL safety helpers and VACUUM."""
+"""SQL safety helpers."""
 from __future__ import annotations
 
 __all__ = [
     "validate_identifier",
-    "vacuum",
 ]
 
-import logging
 import re
-import sqlite3
-
-logger = logging.getLogger(__name__)
 
 # Only allow safe SQL identifiers (letters, digits, underscores)
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def vacuum(conn: sqlite3.Connection) -> None:
-    """Run VACUUM on the database. Logs a warning if it fails (e.g. insufficient disk space)."""
-    try:
-        conn.execute("VACUUM;")
-    except sqlite3.OperationalError as e:
-        logger.warning("VACUUM failed: %s", e)
 
 
 def validate_identifier(identifier: str) -> None:

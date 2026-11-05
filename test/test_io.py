@@ -1,12 +1,13 @@
 """Tests for comfort.io, i.e. load_comfort, describe_variables, subset_region, read_parameter, info."""
 import logging
 import sqlite3
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
 
 from comfort.io import (
-    _read_with_geo, describe_variables, info, load_comfort, read_parameter, subset_region,
+    _read_with_geo, connect, describe_variables, info, load_comfort, read_parameter, subset_region,
 )
 
 _has_shapely = True
@@ -77,6 +78,31 @@ def comfort_db(tmp_path):
     conn.commit()
     conn.close()
     return db_path
+
+
+class TestOpenDatabase:
+    # A mistyped path raises and must not leave an empty database file behind
+    @pytest.mark.parametrize("opener", [
+        lambda p: connect(p).__enter__(),
+        lambda p: info(p),
+        lambda p: load_comfort(p, output="dict"),
+    ], ids=["connect", "info", "load_comfort"])
+    def test_missing_file_raises_and_creates_nothing(self, tmp_path, opener):
+        missing = tmp_path / "typo.sqlite"
+        with pytest.raises(FileNotFoundError, match="not found"):
+            opener(str(missing))
+        assert not missing.exists()
+
+    # A directory is not a database (raises)
+    def test_directory_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            info(str(tmp_path))
+
+    # An existing file opens (as a string or a Path)
+    def test_existing_file_opens(self, comfort_db):
+        with connect(comfort_db) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM station").fetchone()[0] > 0
+        assert not info(Path(comfort_db)).empty
 
 
 class TestDescribeVariables:
@@ -966,6 +992,29 @@ class TestLoadComfortLimit:
         for df in (loaded, read):
             assert list(df["ID"]) == [1, 1, 1, 2]
             assert list(df["LEV_M"]) == [0.0, 100.0, 200.0, 0.0]
+
+    # A warning is logged only when rows were really cut (the NITRATE fixture has 6 rows)
+    @pytest.mark.parametrize("limit, n_rows, warns", [
+        (2, 2, True),
+        (5, 5, True),
+        (6, 6, False),  # exact fit
+        (100, 6, False),
+        (None, 6, False),
+    ])
+    def test_warns_only_when_rows_are_cut(self, comfort_db, caplog, limit, n_rows, warns):
+        with caplog.at_level(logging.WARNING, logger="comfort.io"):
+            result = load_comfort(comfort_db, parameters=["NITRATE"], output="dict", limit=limit)
+        assert len(result["NITRATE"]) == n_rows
+        assert ("cut the result" in caplog.text) is warns
+
+    # read_parameter warns and returns exactly `limit` rows
+    def test_read_parameter_warns_when_cut(self, comfort_db, caplog):
+        conn = sqlite3.connect(comfort_db)
+        with caplog.at_level(logging.WARNING, logger="comfort.io"):
+            df = read_parameter(conn, "NITRATE", limit=3)
+        conn.close()
+        assert len(df) == 3
+        assert "P_NITRATE: limit=3 cut the result" in caplog.text
 
 
 class TestLoadComfortUnitConversion:
