@@ -38,7 +38,7 @@ Optional extras add more specialised functionality:
 | Extra | Adds | Enables                                               |
 |---|---|-------------------------------------------------------|
 | `plot` | matplotlib, seaborn | `comfort.plot`                                        |
-| `geo` | shapely, geopandas, cartopy | Water masses, Longhurst provinces, coastline distance |
+| `geo` | shapely, geopandas, cartopy | Water masses, Longhurst provinces, coastline distance (`distance_to_coast`) |
 | `grid` | xarray, netcdf4 | Spatio-temporal gridding, bathymetry masking, biome classification (`load_biomes`), xarray output |
 | `scale` | scikit-learn | `ParamScaler`                                         |
 | `dash` | dash, plotly | Interactive Dash explorer app                         |
