@@ -77,6 +77,9 @@ if __name__ == "__main__":
 
     # Merge T + S and T + O for multi-parameter plots
     df_ts = df_t.merge(df_s[JOIN_KEY + ["SALINITY"]], on=JOIN_KEY)
+
+    # TEOS-10 variables (SA, CT, sigma0): Needed for the T-S diagram contours and the density profile
+    df_ts = add_teos10_variables(df_ts, sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR")
     df_to = df_t.merge(df_o[JOIN_KEY + ["OXYGEN"]], on=JOIN_KEY)
 
     # --- Figure 1: Profiles, section, T-S, correlation (2x2 grid) ---
@@ -97,9 +100,9 @@ if __name__ == "__main__":
     plot_section(df_o, value_col="OXYGEN", colourbar_label=oxygen_label, binned=True, ax=axes[0, 1])
     axes[0, 1].set_title("Oxygen section (binned mean)")
 
-    # 1c. T-S diagram with isopycnal contours and depth colouring
-    plot_ts_diagram(df_ts, temperature_col="TEMPERATURE", salinity_col="SALINITY",
-                    ylabel="Temperature [°C]", xlabel="Salinity [PSU]",
+    # 1c. T-S diagram with isopycnal contours and depth colouring (the contours need SA and CT)
+    plot_ts_diagram(df_ts, temperature_col="CT", salinity_col="SA",
+                    ylabel="Conservative Temperature [°C]", xlabel="Absolute Salinity [g/kg]",
                     ax=axes[1, 0])
 
     # 1d. Correlation: Temperature vs. oxygen - hexbin
@@ -111,10 +114,7 @@ if __name__ == "__main__":
     fig.tight_layout()
 
     # --- Figure 2: Density profile with pycnocline depth (same 5 stations) ---
-    df_dens_sample = add_teos10_variables(
-        df_t_sample.merge(df_s[JOIN_KEY + ["SALINITY"]], on=JOIN_KEY),
-        sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR",
-    )
+    df_dens_sample = df_ts[df_ts["ID"].isin(sample_ids)]
     pyc = pycnocline_depth(df_dens_sample, density_col="sigma0", depth_col="LEV_M")
     ax_pyc = plot_profile(df_dens_sample, value_col="sigma0",
                           xlabel=r"$\sigma_0$ [kg/m$^3$]",

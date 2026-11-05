@@ -16,6 +16,7 @@ from .information import (
     param_table_name,
 )
 from .structure import create_combined_parameter_table
+from ..util.sqlite_utils import vacuum
 
 __all__ = [
     "count_negative_samples",
@@ -31,4 +32,5 @@ __all__ = [
     "get_table_as_df",
     "param_label",
     "param_table_name",
+    "vacuum",
 ]

@@ -80,7 +80,7 @@ def main():
     df = add_teos10_variables(df, sp_col="SALINITY", t_col="TEMPERATURE", pressure_col="LEV_DBAR")
 
     # Get count of remaining oxygen observations
-    num_remaining_observations =len(df.dropna())
+    num_remaining_observations = len(df.dropna())
     log.info(f"Remaining number of oxygen observations: {num_remaining_observations}")
 
     # Global T-S diagram with isopycnal contours, coloured by oxygen concentration

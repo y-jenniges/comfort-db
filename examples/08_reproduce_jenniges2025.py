@@ -212,10 +212,9 @@ def main():
         print(df_result[display_cols].head(10).to_string(index=False))
 
         out_path = Path("output/reproduced_jenniges2025/reproduced_jenniges2025.csv")
-        if out_path:
-            out_path.parent.mkdir(parents=True, exist_ok=True)  # Create dir if necessary
-            df_result.to_csv(out_path, index=False)
-            log.info("Saved to %s", out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)  # create dir if necessary
+        df_result.to_csv(out_path, index=False)
+        log.info("Saved to %s", out_path)
 
 
 if __name__ == "__main__":
