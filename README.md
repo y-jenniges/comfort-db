@@ -1,6 +1,6 @@
 # comfort-db
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/y-jenniges/comfort-db/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Documentation Status](https://img.shields.io/readthedocs/comfort-db)](https://comfort-db.readthedocs.io/en/latest/)
 
@@ -65,7 +65,7 @@ To build the documentation locally:
 sphinx-build documentation/source documentation/build/html
 ```
 
-Requires Python $\ge$ 3.10.
+Requires Python 3.10 or newer.
 
 ---
 
