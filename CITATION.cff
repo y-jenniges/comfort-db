@@ -29,6 +29,7 @@ authors:
 license: MIT
 repository-code: "https://github.com/y-jenniges/comfort-db"
 url: "https://comfort-db.readthedocs.io/"
+doi: "10.5281/zenodo.24001495"
 keywords:
   - oceanography
   - data exploration

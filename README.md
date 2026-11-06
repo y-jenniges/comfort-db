@@ -1,11 +1,12 @@
 # comfort-db
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/y-jenniges/comfort-db/blob/main/LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![Documentation Status](https://img.shields.io/readthedocs/comfort-db)](https://comfort-db.readthedocs.io/en/latest/)
+[![PyPI](https://img.shields.io/pypi/v/comfort-db)](https://pypi.org/project/comfort-db/)
+[![Python](https://img.shields.io/pypi/pyversions/comfort-db)](https://pypi.org/project/comfort-db/)
+[![Documentation Status](https://img.shields.io/readthedocs/comfort-db)](https://comfort-db.readthedocs.io/en/stable/)
 
 Python library for working with the [COMFORT](https://www.doi.org/10.11582/2022.00039)[1] oceanographic SQLite dataset 
-with [code documentation](https://comfort-db.readthedocs.io/en/latest/). 
+with [code documentation](https://comfort-db.readthedocs.io/en/stable/). 
 
 `comfort-db` wraps database access, preprocessing and basic analysis utilities into one library. 
 This includes filtering for quality and space-time ranges, unit conversions, spatiotemporal gridding, profile and water-mass analysis, 
@@ -112,7 +113,9 @@ pytest
 
 ## Citing
 
-If you use `comfort-db` in published work, please cite the COMFORT dataset [1] and this library: 
+If you use `comfort-db` in published work, please cite the COMFORT dataset [1] and this library.
+The software is archived on Zenodo (DOI [10.5281/zenodo.24001495](https://doi.org/10.5281/zenodo.24001495), 
+which always points to the latest version). The accompanying paper is in preparation:
 ```bibtex
 @article{jenniges_inprep,
     author = {Yvonne Jenniges and Are Olsen and Boris Peter Koch and Sebastian Maneth},
