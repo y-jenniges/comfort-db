@@ -9,11 +9,12 @@ name = "comfort-db"
 dynamic = ["version"]  # read from comfort.__version__, see [tool.setuptools.dynamic]
 description = "Helper library for working with the COMFORT oceanographic dataset (SQLite)"
 authors = [
-    { name = "Yvonne Jenniges", email = "yvonne.jenniges@gmail.com" },
+    { name = "Yvonne Jenniges" },
     { name = "Are Olsen" },
     { name = "Boris Peter Koch" },
     { name = "Sebastian Maneth" },
 ]
+maintainers = [{ name = "Yvonne Jenniges", email = "yvonne.jenniges@gmail.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"

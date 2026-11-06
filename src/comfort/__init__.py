@@ -1,7 +1,7 @@
 """comfort-db - helper library for the COMFORT oceanographic dataset."""
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .io import (
     connect,
