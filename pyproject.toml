@@ -18,7 +18,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10"
-keywords = ["oceanography", "hydrography", "SQLite", "COMFORT", "WOD"]
+keywords = ["oceanography", "data-exploration", "data-analysis", "COMFORT", "SQLite"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",

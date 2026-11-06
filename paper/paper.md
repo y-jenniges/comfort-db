@@ -4,7 +4,8 @@ title: 'comfort-db: A Python toolkit to access, preprocess and explore the ocean
 tags:
   - Python
   - oceanography
-  - hydrography
+  - data-exploration
+  - data-analysis
   - SQLite
   - COMFORT
   
