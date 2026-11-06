@@ -11,12 +11,16 @@ tags:
   
 authors:
   - name: Yvonne Jenniges
+    orcid: 0009-0007-7933-8002
     affiliation: "1, 2"
   - name: Are Olsen
+    orcid: 0000-0003-1696-9142
     affiliation: "3"
   - name: Boris Peter Koch
+    orcid: 0000-0002-8453-731X
     affiliation: "2, 4"
   - name: Sebastian Maneth
+    orcid: 0000-0001-8667-5436
     affiliation: "1"
 
 affiliations:
