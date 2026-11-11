@@ -200,13 +200,12 @@ def plot_parameter_map(
                 ax.coastlines()
                 ax.set_global()
                 ax.gridlines(draw_labels=True)
-                ax.scatter(
+                points = ax.scatter(
                     dft["LONGITUDE"], dft["LATITUDE"], c=dft[param],
                     cmap=cmap, norm=norm, s=0.5, marker="s", plotnonfinite=True,
                 )
-                fig.colorbar(
-                    ax.collections[0], ax=ax, location="bottom", pad=0.05,
-                )
+                # Use the scatter for the colorbar
+                fig.colorbar(points, ax=ax, location="bottom", pad=0.05)
                 title = f"{param} - {depth}m"
                 file_name = f"{param}_depth{depth}"
                 if has_time:
@@ -280,12 +279,13 @@ def plot_missing_value_info_map_over_depth(
             ax = fig.add_subplot(projection=ccrs.PlateCarree())
             ax.coastlines()
             ax.gridlines(draw_labels=True)
-            ax.scatter(
+            points = ax.scatter(
                 grouped["LONGITUDE"], grouped["LATITUDE"],
                 c=grouped[plot_col], cmap=cmap, norm=norm,
                 marker="s", plotnonfinite=True,
             )
-            fig.colorbar(ax.collections[0], ax=ax, location="bottom", pad=0.05)
+            # Use the scatter for the colorbar
+            fig.colorbar(points, ax=ax, location="bottom", pad=0.05)
             ax.set_title(f"% missing values for {param}" if relative else param)
             plt.tight_layout()
             if savefig_folder:
