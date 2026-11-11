@@ -112,6 +112,44 @@ class TestOpenDatabase:
             assert list_parameters(str(comfort_db)) == list_parameters(conn)
             pd.testing.assert_frame_equal(describe_variables(Path(comfort_db)), describe_variables(conn))
 
+    # Without a passed path, the functions use COMFORT_DB_PATH
+    def test_path_from_environment_variable(self, comfort_db, monkeypatch):
+        monkeypatch.setenv("COMFORT_DB_PATH", str(comfort_db))
+        with connect() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM station").fetchone()[0] > 0
+        assert not info().empty
+        assert list_parameters() == list_parameters(str(comfort_db))
+        assert not describe_variables().empty
+        assert load_comfort(output="dict")
+
+    # An explicit path wins over the environment variable
+    def test_argument_beats_environment_variable(self, comfort_db, monkeypatch, tmp_path):
+        monkeypatch.setenv("COMFORT_DB_PATH", str(tmp_path / "other.sqlite"))
+        assert list_parameters(str(comfort_db))
+
+    # The path can come from a .env file in the working directory
+    def test_path_from_dotenv_file(self, comfort_db, monkeypatch, tmp_path):
+        (tmp_path / ".env").write_text(f'COMFORT_DB_PATH="{Path(comfort_db).as_posix()}"\n')
+        monkeypatch.chdir(tmp_path)
+        # load_dotenv sets the variable directly, so register it with monkeypatch to remove it after the test
+        monkeypatch.setenv("COMFORT_DB_PATH", "placeholder")
+        monkeypatch.delenv("COMFORT_DB_PATH")
+        assert list_parameters()
+
+    # Without an argument and without COMFORT_DB_PATH, an error naming the variable is raised
+    def test_missing_path_raises(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("COMFORT_DB_PATH", raising=False)
+        monkeypatch.setattr("comfort.io.load_dotenv", lambda: None)
+        with pytest.raises(EnvironmentError, match="COMFORT_DB_PATH"):
+            list_parameters()
+
+    # A wrong path from the environment is reported with that path
+    def test_wrong_environment_path_raises(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("COMFORT_DB_PATH", str(tmp_path / "typo.sqlite"))
+        with pytest.raises(FileNotFoundError, match="typo.sqlite"):
+            info()
+
     # A caller-owned connection stays open after the call (only opened paths are closed)
     def test_connection_stays_open(self, comfort_db):
         conn = sqlite3.connect(comfort_db)

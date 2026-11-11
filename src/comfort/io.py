@@ -13,6 +13,7 @@ __all__ = [
 ]
 
 import logging
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -47,17 +49,47 @@ def _refine_to_region(df, region, region_name_col):
     return df[water_mass_masks(df, region, region_name_col=region_name_col)["region"].notna()]
 
 
+def _resolve_db_path(db_path: str | Path | None) -> str | Path:
+    """Return *db_path* or the ``COMFORT_DB_PATH`` environment variable if it is not given.
+    Priority follows this order:
+    1. Given *db_path*.
+    2. An environmental variable that is already set.
+    3. The envionrmental variable from  a ``.env`` file in the working directory.
+
+    Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
+    """
+    # Return the paths if given
+    if db_path:
+        return db_path
+
+    # Pick up COMFORT_DB_PATH from a .env file
+    load_dotenv()
+    env_path = os.environ.get("COMFORT_DB_PATH")
+    if not env_path:
+        raise EnvironmentError(
+            "No database path given and the COMFORT_DB_PATH environment variable is not set.\n"
+            "Pass a path or set COMFORT_DB_PATH (environment variable or .env file), e.g.\n"
+            "    export COMFORT_DB_PATH=/path/to/comfort.sqlite"
+        )
+    return env_path
+
+
 @contextmanager
-def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
+def connect(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open a connection to the COMFORT SQLite database and close it on exit.
 
     Args:
-        db_path: Path to the COMFORT SQLite database.
+        db_path: Path to the COMFORT SQLite database. ``None`` uses the path in ``COMFORT_DB_PATH``.
     Yields:
         sqlite3.Connection
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
         FileNotFoundError: If the database file does not exist.
     """
+    # Get the database path
+    db_path = _resolve_db_path(db_path)
+
     # Check if the DB file exists
     if not Path(db_path).is_file():
         raise FileNotFoundError(f"COMFORT database not found: {db_path}")
@@ -68,10 +100,10 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _open(db_path_or_conn: str | Path | sqlite3.Connection):
+def _open(db_path_or_conn: str | Path | sqlite3.Connection | None = None):
     """Context manager that yields an open connection to the DB.
 
-    A path is opened with :func:`connect` and closed on exit.
+    A path (or ``None``, see :func:`connect`) is opened with :func:`connect` and closed on exit.
     A connection given by the caller is yielded as is and stays open.
     """
     if isinstance(db_path_or_conn, sqlite3.Connection):
@@ -89,17 +121,18 @@ _DESCRIBE_COLUMNS = ["parameter", "n_samples", "n_stations", "n_profiles", "n_in
                      "units", "instruments", "platforms"]
 
 
-def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
+def info(db_path_or_conn: str | Path | sqlite3.Connection | None = None) -> pd.DataFrame:
     """Return and log a quick summary of the COMFORT database without loading data.
 
     Shows parameter names, row counts, depth range and date range.
 
     Args:
-        db_path_or_conn: Path to the
-            COMFORT SQLite database or an existing open connection.
+        db_path_or_conn: Path to the COMFORT SQLite database or an existing open connection.
+            ``None`` uses the path in ``COMFORT_DB_PATH`` (environment variable or ``.env`` file).
     Returns:
         pandas.DataFrame: Summary table (one row per parameter).
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
         FileNotFoundError: If a path is given and the database file does not exist.
     """
     with _open(db_path_or_conn) as conn:
@@ -142,14 +175,16 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
         return result
 
 
-def list_parameters(db_path_or_conn: str | Path | sqlite3.Connection) -> list[str]:
+def list_parameters(db_path_or_conn: str | Path | sqlite3.Connection | None = None) -> list[str]:
     """Return the names of all ``P_*`` parameter tables (without the ``P_`` prefix).
 
     Args:
         db_path_or_conn: Path to the COMFORT SQLite database or an existing open connection.
+            ``None`` uses the path in ``COMFORT_DB_PATH``.
     Returns:
         list[str]: Parameter names, e.g. ``['NITRATE', 'OXYGEN', ...]``.
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
         FileNotFoundError: If a path is given and the database file does not exist.
     """
     with _open(db_path_or_conn) as conn:
@@ -227,7 +262,7 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
     return df
 
 
-def describe_variables(db_path_or_conn: str | Path | sqlite3.Connection,
+def describe_variables(db_path_or_conn: str | Path | sqlite3.Connection | None = None,
                        parameters: list[str] | None = None,
                        quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Summarise available parameters: sample counts, depth range, value range,
@@ -239,6 +274,7 @@ def describe_variables(db_path_or_conn: str | Path | sqlite3.Connection,
 
     Args:
         db_path_or_conn: Path to the COMFORT SQLite database or an existing open connection.
+            ``None`` uses the path in ``COMFORT_DB_PATH``.
         parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
             ``None`` describes all available parameters.
         quality_flags: Optional QC filters applied
@@ -249,6 +285,7 @@ def describe_variables(db_path_or_conn: str | Path | sqlite3.Connection,
             depth_min_m, depth_max_m, val_min, val_max,
             units, instruments, platforms]``.
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
         FileNotFoundError: If a path is given and the database file does not exist.
         ValueError: If a requested parameter has no table in the database.
     """
@@ -484,7 +521,7 @@ def subset_region(df: pd.DataFrame, *,
 
 
 def load_comfort(
-        db_path_or_conn: str | Path | sqlite3.Connection,
+        db_path_or_conn: str | Path | sqlite3.Connection | None = None,
         parameters: list[str] | None = None,
         *,
         quality_flags: QualityFlags | None = None,
@@ -517,7 +554,8 @@ def load_comfort(
         db_path_or_conn: Path to the COMFORT
             SQLite database or an existing open connection. When a path is
             given, the connection is opened and closed automatically. When a
-            connection is passed, it is left open.
+            connection is passed, it is left open. ``None`` uses the path in
+            ``COMFORT_DB_PATH`` (environment variable or ``.env`` file).
         parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
             The result uses the upper case name without prefix.
             ``None`` loads all available parameters.
