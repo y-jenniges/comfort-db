@@ -148,39 +148,51 @@ def plot_parameter_map(
     times: list | None = None,
     savefig_folder: str | None = None,
     dpi: int = 300,
-) -> None:
+) -> list[matplotlib.axes.Axes]:
     """Geographic scatter map(s) of parameter values by depth and time slice.
     Missing cells are rendered as translucent black.
 
     Args:
-        df_wide: Wide table with ``LATITUDE``, ``LONGITUDE``, ``LEV_M``,
-            ``DATEANDTIME`` and one column per parameter.
+        df_wide: Wide table with ``LATITUDE``, ``LONGITUDE``, ``LEV_M`` and one column per parameter.
+            ``DATEANDTIME`` is optional: Without it (a grid without time axis) all rows form one time slice.
         parameters: Parameter column names to plot.
         depths: Depth levels to show (``None`` = all).
-        times: Time values to show (``None`` = all).
-        savefig_folder: Folder to save figures.
+        times: Time values to show (``None`` = all). Requires a ``DATEANDTIME`` column.
+        savefig_folder: Folder to save figures. If given, each figure is closed after saving.
         dpi: Resolution (dots per inch) used when saving.
+    Returns:
+        list[matplotlib.axes.Axes]: One Axes per parameter x time x depth combination.
     """
     ccrs, _ = _require_cartopy()
     df_wide = df_wide.copy()
-    df_wide["DATEANDTIME"] = pd.to_datetime(df_wide["DATEANDTIME"])
 
     # Default to all available depth levels and time steps
     depths = depths or list(df_wide["LEV_M"].value_counts().index)
-    times = times or list(df_wide["DATEANDTIME"].value_counts().index)
+    has_time = "DATEANDTIME" in df_wide.columns
+    if has_time:
+        df_wide["DATEANDTIME"] = pd.to_datetime(df_wide["DATEANDTIME"])
+        times = times or list(df_wide["DATEANDTIME"].value_counts().index)
+    elif times:
+        raise ValueError("times requires a DATEANDTIME column")
+    else:
+        # A single slice that holds all rows
+        times = [None]
 
     # NaN bins rendered as translucent black
     cmap = plt.colormaps["viridis"].with_extremes(bad=mcolors.to_rgba("black", alpha=0.2))
 
     # One map per parameter x time x depth combination
     parameters = resolve_param_columns(df_wide, parameters)
+    axes = []
     for param in parameters:
         # Shared colour norm for all times and depths of a parameter
         norm = plt.Normalize(df_wide[param].min(), df_wide[param].max())
         for t in times:
             for depth in depths:
                 # Filter df for depth and time
-                dft = df_wide[(df_wide["LEV_M"] == depth) & (df_wide["DATEANDTIME"] == t)]
+                dft = df_wide[df_wide["LEV_M"] == depth]
+                if has_time:
+                    dft = dft[dft["DATEANDTIME"] == t]
 
                 # Plot
                 fig = plt.figure(figsize=(10, 8))
@@ -195,12 +207,20 @@ def plot_parameter_map(
                 fig.colorbar(
                     ax.collections[0], ax=ax, location="bottom", pad=0.05,
                 )
-                ax.set_title(f"{param} - {depth}m - {t.year}")
+                title = f"{param} - {depth}m"
+                file_name = f"{param}_depth{depth}"
+                if has_time:
+                    title += f" - {t.year}"
+                    file_name += f"_time{t.year}"
+                ax.set_title(title)
                 plt.tight_layout()
+                axes.append(ax)
                 if savefig_folder:
+                    # Close saved figures
                     os.makedirs(savefig_folder, exist_ok=True)
-                    plt.savefig(f"{savefig_folder}/{param}_depth{depth}_time{t.year}.png", dpi=dpi)
-                plt.close()
+                    plt.savefig(f"{savefig_folder}/{file_name}.png", dpi=dpi)
+                    plt.close(fig)
+    return axes
 
 
 def plot_missing_value_info_map_over_depth(

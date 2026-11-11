@@ -522,6 +522,30 @@ class TestPlotParameterMap:
                            savefig_folder=str(tmp_path))
         assert list(tmp_path.iterdir())
 
+    # A wide table from a grid without time axis (no DATEANDTIME) gives one map per depth, left open
+    def test_without_time_column(self):
+        plt.close("all")
+        df = _missing_value_wide_df().drop(columns="DATEANDTIME")
+        axes = plot_parameter_map(df, ["NITRATE"], depths=[0.0])
+        assert len(axes) == 1
+        assert axes[0].get_title() == "P_NITRATE - 0.0m"
+        assert plt.get_fignums()
+        plt.close("all")
+
+    # Saved figures are closed and the file name carries no time suffix without a time axis
+    def test_without_time_column_saved(self, tmp_path):
+        plt.close("all")
+        df = _missing_value_wide_df().drop(columns="DATEANDTIME")
+        plot_parameter_map(df, ["NITRATE"], depths=[0.0], savefig_folder=str(tmp_path))
+        assert [f.name for f in tmp_path.iterdir()] == ["P_NITRATE_depth0.0.png"]
+        assert plt.get_fignums() == []
+
+    # Asking for times without a DATEANDTIME column raises an error
+    def test_times_without_time_column_raises(self):
+        df = _missing_value_wide_df().drop(columns="DATEANDTIME")
+        with pytest.raises(ValueError):
+            plot_parameter_map(df, ["NITRATE"], times=["2000-01-01"])
+
 
 @pytest.mark.skipif(not _has_cartopy, reason="cartopy not installed ([geo] extra)")
 class TestPlotMissingValueInfoMapOverDepth:
