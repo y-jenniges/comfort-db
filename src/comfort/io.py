@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -63,8 +63,8 @@ def _resolve_db_path(db_path: str | Path | None) -> str | Path:
     if db_path:
         return db_path
 
-    # Pick up COMFORT_DB_PATH from a .env file
-    load_dotenv()
+    # Pick up COMFORT_DB_PATH from a .env file, searched upwards from the user's working directory
+    load_dotenv(find_dotenv(usecwd=True))
     env_path = os.environ.get("COMFORT_DB_PATH")
     if not env_path:
         raise EnvironmentError(
