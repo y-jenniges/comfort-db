@@ -37,7 +37,8 @@ in your `.env` points to an existing GEBCO NetCDF file.
 ## Pull requests
 Branch from main and keep your PR focused. 
 Ensure to add or update the tests and the documentation to cover the branch's updates.
-When writing the PR description, include a short summary, the changes you made and if all tests passed. 
+When you open the pull request, the description is pre-filled from the [PR template](.github/pull_request_template.md). 
+Please fill it with a short summary, the changes you made and if all tests passed. 
 Ensure that the CI is green.
 
 ## Docstring and comment style
