@@ -111,6 +111,14 @@ pytest
 
 ---
 
+## Support and contributing
+For questions, bug reports and feature ideas, please open an
+[issue](https://github.com/y-jenniges/comfort-db/issues/new/choose). 
+I usually respond within a week or two. 
+If you would like to contribute, please see
+[CONTRIBUTING.md](https://github.com/y-jenniges/comfort-db/blob/main/CONTRIBUTING.md).
+The library is pre-1.0.0, so the API may still change between minor versions.
+
 ## Citing
 
 If you use `comfort-db` in published work, please cite the COMFORT dataset [1] and this library.

@@ -3,7 +3,7 @@ Thank you for your interest in contributing to `comfort-db`!
 If you would like to contribute bug reports, new feature ideas or improve/add to the existing code, please have a look
 at this document for good practices. 
 
-For a general overview and introduction to the library, please refer to the README.md.
+For a general overview and introduction to the library, please refer to the [README](https://github.com/y-jenniges/comfort-db/blob/main/README.md).
 
 ---
 
@@ -35,21 +35,18 @@ Run the tests from the repository root with `pytest`. Tests marked `needs_bathym
 in your `.env` points to an existing GEBCO NetCDF file.
 
 ## Pull requests
-Branch from main and keep your PR focused. 
-Ensure to add or update the tests and the documentation to cover the branch's updates.
-When you open the pull request, the description is pre-filled from the [PR template](.github/pull_request_template.md). 
+- Branch from main and keep your PR focused. 
+- Ensure to add or update the tests and the documentation to cover the branch's updates.
+- When you open the pull request, the description is pre-filled from the [PR template](.github/pull_request_template.md). 
 Please fill it with a short summary, the changes you made and if all tests passed. 
-Ensure that the CI is green.
+- Ensure that the CI is green.
 
 ## Docstring and comment style
-Add short comments in the code to guide the reader.
-
-Write docstrings for functions and classes in Google style. 
-
-Sphinx will infer the data types from the function signature, so include the argument types in the signature (not in the `Args` part of the docstring). 
+- Add short comments in the code to guide the reader.
+- Write docstrings for functions and classes in Google style. 
+- Sphinx will infer the data types from the function signature, so include the argument types in the signature (not in the `Args` part of the docstring). 
 If this is not possible for a specific case, add the type to the docstring. 
-
-We use British English, no Oxford commas and capitalise after colons. 
+- We use British English, no Oxford commas and capitalise after colons. 
 
 
 ---
