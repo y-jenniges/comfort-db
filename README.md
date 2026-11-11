@@ -115,13 +115,15 @@ pytest
 
 If you use `comfort-db` in published work, please cite the COMFORT dataset [1] and this library.
 The software is archived on Zenodo (DOI [10.5281/zenodo.24001495](https://doi.org/10.5281/zenodo.24001495), 
-which always points to the latest version). The accompanying paper is in preparation:
+which always points to the latest version). The accompanying paper is available as an
+[arXiv preprint](https://arxiv.org/abs/2611.09353):
 ```bibtex
-@article{jenniges_inprep,
-    author = {Yvonne Jenniges and Are Olsen and Boris Peter Koch and Sebastian Maneth},
-    title = {{comfort-db}: A Python toolkit to access, preprocess and explore the oceanographic COMFORT dataset},
-    journal = {Journal of Open Source Software},
-    year = {in prep.},
+@misc{jenniges2026_comfortdb,
+      title = {comfort-db: A Python toolkit to access, preprocess and explore the oceanographic {COMFORT} dataset},
+      author = {Yvonne Jenniges and Are Olsen and Boris Peter Koch and Sebastian Maneth},
+      year = {2026},
+      eprint = {2611.09353},
+      url = {https://arxiv.org/abs/2611.09353},
 }
 ```
 
