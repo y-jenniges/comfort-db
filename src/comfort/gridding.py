@@ -21,6 +21,7 @@ from dateutil.relativedelta import relativedelta
 
 from .util.columns import find_col, resolve_param_columns
 from .util.optional import import_optional
+from .util.paths import resolve_path
 from .util.types import Aggregation, GridMode, check_choice, check_timestamp, parse_timestamps
 from .database.information import param_label, param_table_name
 
@@ -69,7 +70,7 @@ class Grid:
     - ``'MD'``: Month and day (MM-DD) of the leap year 2000, pooling all years.
     """
 
-    def __init__(self, *, bathymetry_grid_path: str | os.PathLike,
+    def __init__(self, *, bathymetry_grid_path: str | os.PathLike | None = None,
                  lon_min: float = -180, lon_max: float = 180, dlon: float = 1,
                  lat_min: float = -90, lat_max: float = 90, dlat: float = 1,
                  z_min: float | None = None, z_max: float | None = None, dz: float | None = None,
@@ -81,7 +82,8 @@ class Grid:
         Args:
             lon_min, lon_max, dlon: Longitude range and step [°].
             lat_min, lat_max, dlat: Latitude range and step [°].
-            bathymetry_grid_path: Path to a bathymetry NetCDF file. Required.
+            bathymetry_grid_path: Path to a bathymetry NetCDF file. ``None`` uses the path in
+                ``BATHYMETRY_PATH`` (environment variable or ``.env`` file).
             z_min, z_max, dz: Depth range and step [m]. Provide either dz or z_array.
             z_array: Explicit depth nodes [m]. Mutually exclusive with dz.
             time_min, time_max: Inclusive bounds of the time dimension as 'YYYY-MM-DD HH:MM:SS'.
@@ -92,6 +94,9 @@ class Grid:
             selection: Boolean mask to sub-select the time array.
                 Requires a time axis.
             lon_variable, lat_variable, depth_variable: Variable names in the NetCDF file.
+        Raises:
+            EnvironmentError: If no bathymetry path is given and ``BATHYMETRY_PATH`` is not set.
+            FileNotFoundError: If the bathymetry file does not exist.
         """
         # Init grid params
         self.lon_min = lon_min
@@ -109,7 +114,7 @@ class Grid:
         self.mode = mode
         self.dtime = dtime
         self.selection = np.array(selection) if selection is not None else None
-        self.bathymetry_grid_path = bathymetry_grid_path
+        self.bathymetry_grid_path = resolve_path(bathymetry_grid_path, "BATHYMETRY_PATH", "bathymetry file")
 
         self._check_spatial_input()
         self._check_time_input()
@@ -210,7 +215,7 @@ class Grid:
         xr = import_optional("xarray", "grid", "gridding")
 
         # Check if filepath is valid
-        if bathymetry_grid_path is None or not os.path.isfile(bathymetry_grid_path):
+        if not os.path.isfile(bathymetry_grid_path):
             raise FileNotFoundError(f"Bathymetry file not found: {bathymetry_grid_path}")
 
         # Load bathymetry dataset

@@ -31,6 +31,7 @@ from .geo import region_bbox, water_mass_masks
 from .qc import QualityFlags, build_where_clause, qc_conditions
 from .util.columns import find_col
 from .util.optional import import_optional
+from .util.paths import resolve_path
 from .util.sqlite_utils import validate_identifier
 from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice, check_timestamp, parse_timestamps
 
@@ -48,16 +49,20 @@ def _refine_to_region(df, region, region_name_col):
 
 
 @contextmanager
-def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
+def connect(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open a connection to the COMFORT SQLite database and close it on exit.
 
     Args:
-        db_path: Path to the COMFORT SQLite database.
+        db_path: Path to the COMFORT SQLite database. ``None`` uses the path in ``COMFORT_DB_PATH``.
     Yields:
         sqlite3.Connection
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
         FileNotFoundError: If the database file does not exist.
     """
+    # Get the database path
+    db_path = resolve_path(db_path, "COMFORT_DB_PATH", "COMFORT database")
+
     # Check if the DB file exists
     if not Path(db_path).is_file():
         raise FileNotFoundError(f"COMFORT database not found: {db_path}")
@@ -66,6 +71,17 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+
+def _open(db_path_or_conn: str | Path | sqlite3.Connection | None = None):
+    """Context manager that yields an open connection to the DB.
+
+    A path (or ``None``, see :func:`connect`) is opened with :func:`connect` and closed on exit.
+    A connection given by the caller is yielded as is and stays open.
+    """
+    if isinstance(db_path_or_conn, sqlite3.Connection):
+        return nullcontext(db_path_or_conn)
+    return connect(db_path_or_conn)
 
 
 # Depth levels (similar to Jenniges et al. 2025, https://doi.org/10.1016/j.ecoinf.2025.103390)
@@ -78,26 +94,21 @@ _DESCRIBE_COLUMNS = ["parameter", "n_samples", "n_stations", "n_profiles", "n_in
                      "units", "instruments", "platforms"]
 
 
-def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
+def info(db_path_or_conn: str | Path | sqlite3.Connection | None = None) -> pd.DataFrame:
     """Return and log a quick summary of the COMFORT database without loading data.
 
     Shows parameter names, row counts, depth range and date range.
 
     Args:
-        db_path_or_conn: Path to the
-            COMFORT SQLite database or an existing open connection.
+        db_path_or_conn: Path to the COMFORT SQLite database or an existing open connection.
+            ``None`` uses the path in ``COMFORT_DB_PATH`` (environment variable or ``.env`` file).
     Returns:
         pandas.DataFrame: Summary table (one row per parameter).
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
         FileNotFoundError: If a path is given and the database file does not exist.
     """
-    # Open connection if path given
-    # (path given: connect(path) opens and closes the database)
-    # (connection given: nullcontext(conn) returns the open connection to be handled by the caller)
-    opened = (nullcontext(db_path_or_conn) if isinstance(db_path_or_conn, sqlite3.Connection)
-              else connect(db_path_or_conn))
-
-    with opened as conn:
+    with _open(db_path_or_conn) as conn:
         params = list_parameters(conn)
         if not params:
             logger.warning("info: No parameter tables found")
@@ -137,15 +148,20 @@ def info(db_path_or_conn: str | Path | sqlite3.Connection) -> pd.DataFrame:
         return result
 
 
-def list_parameters(conn: sqlite3.Connection) -> list[str]:
+def list_parameters(db_path_or_conn: str | Path | sqlite3.Connection | None = None) -> list[str]:
     """Return the names of all ``P_*`` parameter tables (without the ``P_`` prefix).
 
     Args:
-        conn: Connection to the database.
+        db_path_or_conn: Path to the COMFORT SQLite database or an existing open connection.
+            ``None`` uses the path in ``COMFORT_DB_PATH``.
     Returns:
         list[str]: Parameter names, e.g. ``['NITRATE', 'OXYGEN', ...]``.
+    Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
+        FileNotFoundError: If a path is given and the database file does not exist.
     """
-    return [param_label(table_name) for table_name in get_names_of_all_parameter_tables(conn)]
+    with _open(db_path_or_conn) as conn:
+        return [param_label(table_name) for table_name in get_names_of_all_parameter_tables(conn)]
 
 
 def read_parameter(conn: sqlite3.Connection, parameter: str, *,
@@ -219,7 +235,7 @@ def read_station(conn: sqlite3.Connection) -> pd.DataFrame:
     return df
 
 
-def describe_variables(conn: sqlite3.Connection,
+def describe_variables(db_path_or_conn: str | Path | sqlite3.Connection | None = None,
                        parameters: list[str] | None = None,
                        quality_flags: QualityFlags | None = None) -> pd.DataFrame:
     """Summarise available parameters: sample counts, depth range, value range,
@@ -230,7 +246,8 @@ def describe_variables(conn: sqlite3.Connection,
     Parameters with multiple distinct values show all names separated by ``/``.
 
     Args:
-        conn: Connection to the database.
+        db_path_or_conn: Path to the COMFORT SQLite database or an existing open connection.
+            ``None`` uses the path in ``COMFORT_DB_PATH``.
         parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
             ``None`` describes all available parameters.
         quality_flags: Optional QC filters applied
@@ -241,113 +258,116 @@ def describe_variables(conn: sqlite3.Connection,
             depth_min_m, depth_max_m, val_min, val_max,
             units, instruments, platforms]``.
     Raises:
+        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
+        FileNotFoundError: If a path is given and the database file does not exist.
         ValueError: If a requested parameter has no table in the database.
     """
-    # Get a list of all parameters
-    all_params = list_parameters(conn)
+    with _open(db_path_or_conn) as conn:
+        # Get a list of all parameters
+        all_params = list_parameters(conn)
 
-    # Iterate over given parameters
-    if parameters is not None:
-        # Canonical names (case and P_ prefix do not matter), each only once
-        params = list(dict.fromkeys(param_label(p) for p in parameters))
+        # Iterate over given parameters
+        if parameters is not None:
+            # Canonical names (case and P_ prefix do not matter), each only once
+            params = list(dict.fromkeys(param_label(p) for p in parameters))
 
-        # Fail if parameters are unknown
-        unknown = set(params) - set(all_params)
-        if unknown:
-            raise ValueError(f"Unknown parameters: {sorted(unknown)}")
-    else:
-        params = all_params
+            # Fail if parameters are unknown
+            unknown = set(params) - set(all_params)
+            if unknown:
+                raise ValueError(f"Unknown parameters: {sorted(unknown)}")
+        else:
+            params = all_params
 
-    # Warn if no parameter left
-    if not params:
-        logger.warning("describe_variables: No parameter tables found")
-        return pd.DataFrame(columns=_DESCRIBE_COLUMNS)
+        # Warn if no parameter left
+        if not params:
+            logger.warning("describe_variables: No parameter tables found")
+            return pd.DataFrame(columns=_DESCRIBE_COLUMNS)
 
-    # Compute aggregate statistics per parameter
-    where = build_where_clause(quality_flags)
-    qc_where_aliased = build_where_clause(quality_flags, "p")
-    has_platform_id = _station_has_column(conn, "PLATFORM_ID")
+        # Compute aggregate statistics per parameter
+        where = build_where_clause(quality_flags)
+        qc_where_aliased = build_where_clause(quality_flags, "p")
+        has_platform_id = _station_has_column(conn, "PLATFORM_ID")
 
-    rows = []
-    for param in params:
-        # Validate identifier
-        validate_identifier(param)
+        rows = []
+        for param in params:
+            # Validate identifier
+            validate_identifier(param)
 
-        # Define table name
-        table = param_table_name(param)
+            # Define table name
+            table = param_table_name(param)
 
-        # Fetch parameter statistics
-        cur = conn.cursor()
-        cur.execute(
-            f"SELECT COUNT(*), COUNT(DISTINCT ID), "
-            f"COUNT(DISTINCT INSTRUMENT_ID), "
-            f"MIN(LEV_M), MAX(LEV_M), MIN(VAL), MAX(VAL) "
-            f"FROM {table} {where};"
-        )
-        n, n_sta, n_inst, dmin, dmax, vmin, vmax = cur.fetchone()
-
-        # Count distinct (ID, PROFILE_NUMBER) pairs - PROFILE_NUMBER is only unique within a station
-        cur.execute(
-            f"SELECT COUNT(*) FROM "
-            f"(SELECT DISTINCT ID, PROFILE_NUMBER FROM {table} {where});"
-        )
-        n_prof = cur.fetchone()[0]
-
-        # Get IDs of units and instruments
-        cur.execute(f"SELECT DISTINCT UNITS_ID FROM {table} {where};")
-        unit_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
-        cur.execute(f"SELECT DISTINCT INSTRUMENT_ID FROM {table} {where};")
-        inst_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
-
-        # Get platform IDs via station join
-        platform_ids: list[int] = []
-        if has_platform_id:
+            # Fetch parameter statistics
+            cur = conn.cursor()
             cur.execute(
-                f"SELECT DISTINCT s.PLATFORM_ID "
-                f"FROM {table} p JOIN station s ON p.ID = s.ID "
-                f"{qc_where_aliased};"
+                f"SELECT COUNT(*), COUNT(DISTINCT ID), "
+                f"COUNT(DISTINCT INSTRUMENT_ID), "
+                f"MIN(LEV_M), MAX(LEV_M), MIN(VAL), MAX(VAL) "
+                f"FROM {table} {where};"
             )
-            platform_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
+            n, n_sta, n_inst, dmin, dmax, vmin, vmax = cur.fetchone()
 
-        rows.append({
-            "parameter": param,
-            "n_samples": n,
-            "n_stations": n_sta,
-            "n_profiles": n_prof,
-            "n_instruments": n_inst,
-            "depth_min_m": dmin,
-            "depth_max_m": dmax,
-            "val_min": vmin,
-            "val_max": vmax,
-            "units_ids": unit_ids,
-            "instrument_ids": inst_ids,
-            "platform_ids": platform_ids,
-        })
-    result = pd.DataFrame(rows)
-
-    # Resolve unit IDs to names
-    id_to_unit = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
-    result["units"] = result["units_ids"].apply(lambda ids: _join_names(ids, id_to_unit))
-    # Warn about mixed units
-    for _, row in result.iterrows():
-        if len(row["units_ids"]) > 1:
-            logger.warning(
-                "%s contains %d different units (%s) - values may not be comparable",
-                row["parameter"], len(row["units_ids"]), row["units"],
+            # Count distinct (ID, PROFILE_NUMBER) pairs - PROFILE_NUMBER is only unique within a station
+            cur.execute(
+                f"SELECT COUNT(*) FROM "
+                f"(SELECT DISTINCT ID, PROFILE_NUMBER FROM {table} {where});"
             )
-    result = result.drop(columns="units_ids")
+            n_prof = cur.fetchone()[0]
 
-    # Resolve instrument IDs to names
-    id_to_instrument = _load_lookup_map(conn, "INSTRUMENT")
-    result["instruments"] = result["instrument_ids"].apply(lambda ids: _join_names(ids, id_to_instrument))
-    result = result.drop(columns="instrument_ids")
+            # Get IDs of units and instruments
+            cur.execute(f"SELECT DISTINCT UNITS_ID FROM {table} {where};")
+            unit_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
+            cur.execute(f"SELECT DISTINCT INSTRUMENT_ID FROM {table} {where};")
+            inst_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
 
-    # Resolve platform IDs to names
-    id_to_platform = _load_lookup_map(conn, "PLATFORM")
-    result["platforms"] = result["platform_ids"].apply(lambda ids: _join_names(ids, id_to_platform))
-    result = result.drop(columns="platform_ids")
+            # Get platform IDs via station join
+            platform_ids: list[int] = []
+            if has_platform_id:
+                cur.execute(
+                    f"SELECT DISTINCT s.PLATFORM_ID "
+                    f"FROM {table} p JOIN station s ON p.ID = s.ID "
+                    f"{qc_where_aliased};"
+                )
+                platform_ids = [row[0] for row in cur.fetchall() if row[0] is not None]
 
-    return result
+            rows.append({
+                "parameter": param,
+                "n_samples": n,
+                "n_stations": n_sta,
+                "n_profiles": n_prof,
+                "n_instruments": n_inst,
+                "depth_min_m": dmin,
+                "depth_max_m": dmax,
+                "val_min": vmin,
+                "val_max": vmax,
+                "units_ids": unit_ids,
+                "instrument_ids": inst_ids,
+                "platform_ids": platform_ids,
+            })
+        result = pd.DataFrame(rows)
+
+        # Resolve unit IDs to names
+        id_to_unit = _load_lookup_map(conn, "UNITS", "ID", "NAME_SHORT")
+        result["units"] = result["units_ids"].apply(lambda ids: _join_names(ids, id_to_unit))
+        # Warn about mixed units
+        for _, row in result.iterrows():
+            if len(row["units_ids"]) > 1:
+                logger.warning(
+                    "%s contains %d different units (%s) - values may not be comparable",
+                    row["parameter"], len(row["units_ids"]), row["units"],
+                )
+        result = result.drop(columns="units_ids")
+
+        # Resolve instrument IDs to names
+        id_to_instrument = _load_lookup_map(conn, "INSTRUMENT")
+        result["instruments"] = result["instrument_ids"].apply(lambda ids: _join_names(ids, id_to_instrument))
+        result = result.drop(columns="instrument_ids")
+
+        # Resolve platform IDs to names
+        id_to_platform = _load_lookup_map(conn, "PLATFORM")
+        result["platforms"] = result["platform_ids"].apply(lambda ids: _join_names(ids, id_to_platform))
+        result = result.drop(columns="platform_ids")
+
+        return result
 
 
 def _load_lookup_map(conn, table: str, id_col: str = "ID", name_col: str = "NAME") -> dict:
@@ -474,7 +494,7 @@ def subset_region(df: pd.DataFrame, *,
 
 
 def load_comfort(
-        db_path_or_conn: str | Path | sqlite3.Connection,
+        db_path_or_conn: str | Path | sqlite3.Connection | None = None,
         parameters: list[str] | None = None,
         *,
         quality_flags: QualityFlags | None = None,
@@ -507,7 +527,8 @@ def load_comfort(
         db_path_or_conn: Path to the COMFORT
             SQLite database or an existing open connection. When a path is
             given, the connection is opened and closed automatically. When a
-            connection is passed, it is left open.
+            connection is passed, it is left open. ``None`` uses the path in
+            ``COMFORT_DB_PATH`` (environment variable or ``.env`` file).
         parameters: Parameter names. Insensitive to casing and ``P_`` prefix.
             The result uses the upper case name without prefix.
             ``None`` loads all available parameters.
@@ -598,11 +619,7 @@ def load_comfort(
         region_box=region_bbox(region, region_name_col) if region is not None else None,
     )
 
-    # Open connection if path given (leave caller-owned connections open)
-    opened = (nullcontext(db_path_or_conn) if isinstance(db_path_or_conn, sqlite3.Connection)
-              else connect(db_path_or_conn))
-
-    with opened as conn:
+    with _open(db_path_or_conn) as conn:
         # Default to all available parameters
         available = list_parameters(conn)
         if parameters is None:

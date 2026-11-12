@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from comfort.io import (
-    _read_with_geo, connect, describe_variables, info, load_comfort, read_parameter, subset_region,
+    _read_with_geo, connect, describe_variables, info, list_parameters, load_comfort, read_parameter, subset_region,
 )
 
 _has_shapely = True
@@ -85,8 +85,10 @@ class TestOpenDatabase:
     @pytest.mark.parametrize("opener", [
         lambda p: connect(p).__enter__(),
         lambda p: info(p),
+        lambda p: list_parameters(p),
+        lambda p: describe_variables(p),
         lambda p: load_comfort(p, output="dict"),
-    ], ids=["connect", "info", "load_comfort"])
+    ], ids=["connect", "info", "list_parameters", "describe_variables", "load_comfort"])
     def test_missing_file_raises_and_creates_nothing(self, tmp_path, opener):
         missing = tmp_path / "typo.sqlite"
         with pytest.raises(FileNotFoundError, match="not found"):
@@ -103,6 +105,41 @@ class TestOpenDatabase:
         with connect(comfort_db) as conn:
             assert conn.execute("SELECT COUNT(*) FROM station").fetchone()[0] > 0
         assert not info(Path(comfort_db)).empty
+
+    # list_parameters and describe_variables accept a path, same result as with a connection
+    def test_path_and_connection_agree(self, comfort_db):
+        with connect(comfort_db) as conn:
+            assert list_parameters(str(comfort_db)) == list_parameters(conn)
+            pd.testing.assert_frame_equal(describe_variables(Path(comfort_db)), describe_variables(conn))
+
+    # Without a passed path, the functions use COMFORT_DB_PATH
+    def test_path_from_environment_variable(self, comfort_db, monkeypatch):
+        monkeypatch.setenv("COMFORT_DB_PATH", str(comfort_db))
+        with connect() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM station").fetchone()[0] > 0
+        assert not info().empty
+        assert list_parameters() == list_parameters(str(comfort_db))
+        assert not describe_variables().empty
+        assert load_comfort(output="dict")
+
+    # An explicit path wins over the environment variable
+    def test_argument_beats_environment_variable(self, comfort_db, monkeypatch, tmp_path):
+        monkeypatch.setenv("COMFORT_DB_PATH", str(tmp_path / "other.sqlite"))
+        assert list_parameters(str(comfort_db))
+
+    # A wrong path from the environment is reported with that path
+    def test_wrong_environment_path_raises(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("COMFORT_DB_PATH", str(tmp_path / "typo.sqlite"))
+        with pytest.raises(FileNotFoundError, match="typo.sqlite"):
+            info()
+
+    # A caller-owned connection stays open after the call (only opened paths are closed)
+    def test_connection_stays_open(self, comfort_db):
+        conn = sqlite3.connect(comfort_db)
+        list_parameters(conn)
+        describe_variables(conn)
+        assert conn.execute("SELECT COUNT(*) FROM station").fetchone()[0] > 0
+        conn.close()
 
 
 class TestDescribeVariables:

@@ -35,11 +35,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
-from dotenv import load_dotenv
 
 from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
+from ..util.paths import resolve_path
 from ..util.types import parse_timestamps
 
 logger = logging.getLogger(__name__)
@@ -995,15 +995,8 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
     """
     global _db_path
 
-    # Pick up COMFORT_DB_PATH from a .env file
-    load_dotenv()
-
-    tmp_path = db_path or os.environ.get("COMFORT_DB_PATH")
-    if not tmp_path:
-        raise EnvironmentError(
-            "No database path given and COMFORT_DB_PATH environment variable is not set.\n"
-            "    export COMFORT_DB_PATH=/path/to/comfort.sqlite"
-        )
+    # Resolve the DB path
+    tmp_path = resolve_path(db_path, "COMFORT_DB_PATH", "COMFORT database")
 
     # Check if passed DB file exists
     if not os.path.isfile(tmp_path):

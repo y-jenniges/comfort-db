@@ -24,6 +24,7 @@ import pandas as pd
 
 from .util.columns import find_col, resolve_param_columns
 from .util.optional import import_optional
+from .util.paths import resolve_path
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -217,7 +218,7 @@ def _extract_coords(geom, coords):
         coords.extend(geom.coords)
 
 
-def load_longhurst(path: str | Path, code_col: str | None = None,
+def load_longhurst(path: str | Path | None = None, code_col: str | None = None,
                    region_name_col: str | None = None) -> gpd.GeoDataFrame:
     """Load Longhurst province boundaries from a shapefile.
 
@@ -228,16 +229,19 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     Requires geopandas (``pip install "comfort-db[geo]"``).
 
     Args:
-        path: Path to the Longhurst ``.shp`` file.
+        path: Path to the Longhurst ``.shp`` file. ``None`` uses the path in
+            ``LONGHURST_SHP_PATH`` (environment variable or ``.env`` file).
         code_col: Province code column. Auto-detected when ``None``.
         region_name_col: Province description column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Standardised province boundaries.
+    Raises:
+        EnvironmentError: If no path is given and ``LONGHURST_SHP_PATH`` is not set.
     """
     gpd = import_optional("geopandas", "geo", "load_longhurst")
 
     # Read shapefile
-    gdf = gpd.read_file(path)
+    gdf = gpd.read_file(resolve_path(path, "LONGHURST_SHP_PATH", "Longhurst shapefile"))
 
     _CODE_CANDIDATES = ["ProvCode", "PROVCODE", "code", "CODE"]
     _NAME_CANDIDATES = ["ProvDescr", "PROVDESCR", "LongName", "name", "NAME"]
@@ -264,7 +268,7 @@ def load_longhurst(path: str | Path, code_col: str | None = None,
     )
 
 
-def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.GeoDataFrame:
+def load_basins(path: str | Path | None = None, region_name_col: str | None = None) -> gpd.GeoDataFrame:
     """Load "Global Oceans and Seas" basin boundaries from a shapefile
     (Flanders Marine Institute (2021). Global Oceans and Seas, version 1.
     Available online at https://www.marineregions.org/. https://doi.org/10.14284/542).
@@ -272,15 +276,18 @@ def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.Geo
     Requires geopandas (``pip install "comfort-db[geo]"``).
 
     Args:
-        path: Path to the basins ``.shp`` file.
+        path: Path to the basins ``.shp`` file. ``None`` uses the path in
+            ``BASINS_SHP_PATH`` (environment variable or ``.env`` file).
         region_name_col: Basin name column. Auto-detected when ``None``.
     Returns:
         geopandas.GeoDataFrame: Basin boundaries with columns ``basin_name`` and ``geometry``.
+    Raises:
+        EnvironmentError: If no path is given and ``BASINS_SHP_PATH`` is not set.
     """
     gpd = import_optional("geopandas", "geo", "load_basins")
 
     # Read shapefile
-    gdf = gpd.read_file(path)
+    gdf = gpd.read_file(resolve_path(path, "BASINS_SHP_PATH", "basins shapefile"))
 
     # Define basin name column (case-insensitive match)
     if region_name_col is None:
@@ -293,7 +300,7 @@ def load_basins(path: str | Path, region_name_col: str | None = None) -> gpd.Geo
     return gdf[[region_name_col, "geometry"]].rename(columns={region_name_col: "basin_name"})
 
 
-def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
+def load_biomes(path: str | Path | None = None, *, biome_var: str) -> pd.DataFrame:
     """Load Fay and McKinley (2014) global ocean biomes from a gridded NetCDF file.
 
     Reference: Fay, A. R. and McKinley, G. A.: Global open-ocean biomes:
@@ -303,17 +310,20 @@ def load_biomes(path: str | Path, biome_var: str) -> pd.DataFrame:
     Requires xarray (``pip install "comfort-db[grid]"``).
 
     Args:
-        path: Path to the biomes NetCDF file.
+        path: Path to the biomes NetCDF file. ``None`` uses the path in
+            ``FAY_NC_PATH`` (environment variable or ``.env`` file).
         biome_var: Biome-ID variable (``"MeanBiomes"``, ``"CoreBiomes"`` or
-            ``"TimeVaryingBiomes"``).
+            ``"TimeVaryingBiomes"``). Keyword-only.
     Returns:
         pandas.DataFrame: Columns ``LONGITUDE``, ``LATITUDE``, ``label``
         (and ``YEAR`` if *biome_var* is ``"TimeVaryingBiomes"``).
+    Raises:
+        EnvironmentError: If no path is given and ``FAY_NC_PATH`` is not set.
     """
     xr = import_optional("xarray", "grid", "load_biomes")
 
     # Read NetCDF file
-    with xr.open_dataset(path) as ds:
+    with xr.open_dataset(resolve_path(path, "FAY_NC_PATH", "biomes NetCDF file")) as ds:
         # Filter for the requested biome data
         if biome_var not in ds.data_vars:
             raise ValueError(
@@ -605,7 +615,7 @@ def _parse_regions(regions, region_name_col):
     )
 
 
-def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.DataFrame:
+def load_jenniges_provinces(path: str | Path | None = None, depth: float | None = None) -> pd.DataFrame:
     """Load Jenniges biogeochemical provinces from a cluster CSV file.
 
     The CSV must have columns ``LONGITUDE``, ``LATITUDE``,
@@ -613,16 +623,20 @@ def load_jenniges_provinces(path: str | Path, depth: float | None = None) -> pd.
     from `Zenodo record 15201767 <https://zenodo.org/records/15201767>`_.
 
     Args:
-        path: Path to the cluster CSV file.
+        path: Path to the cluster CSV file. ``None`` uses the path in
+            ``JENNIGES_CSV_PATH`` (environment variable or ``.env`` file).
         depth: Depth level [m] to select. When ``None`` all depths
             are returned. Uses closest available level if exact match
             is unavailable.
     Returns:
         pandas.DataFrame: The grid cells with ``LONGITUDE``, ``LATITUDE``, ``LEV_M`` and ``label``
             (one depth level if *depth* is given).
+    Raises:
+        EnvironmentError: If no path is given and ``JENNIGES_CSV_PATH`` is not set.
+        FileNotFoundError: If the file does not exist.
     """
     # Check if file exists
-    path = Path(path)
+    path = Path(resolve_path(path, "JENNIGES_CSV_PATH", "Jenniges provinces CSV file"))
     if not path.exists():
         raise FileNotFoundError(f"Jenniges provinces file not found: {path}")
 

@@ -697,6 +697,11 @@ class TestLoadJennigesProvinces:
         with pytest.raises(FileNotFoundError):
             load_jenniges_provinces(tmp_path / "nonexistent.csv")
 
+    # Without a path, the file in JENNIGES_CSV_PATH is loaded
+    def test_path_from_environment_variable(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JENNIGES_CSV_PATH", str(self._jenniges_csv(tmp_path)))
+        assert not load_jenniges_provinces().empty
+
     # A required column absent from the CSV raises with its name in the message
     def test_missing_column(self, tmp_path):
         path = tmp_path / "bad.csv"
