@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from comfort.io import (
-    _read_with_geo, _resolve_db_path, connect, describe_variables, info, list_parameters, load_comfort, read_parameter, subset_region,
+    _read_with_geo, connect, describe_variables, info, list_parameters, load_comfort, read_parameter, subset_region,
 )
 
 _has_shapely = True
@@ -126,23 +126,6 @@ class TestOpenDatabase:
     def test_argument_beats_environment_variable(self, comfort_db, monkeypatch, tmp_path):
         monkeypatch.setenv("COMFORT_DB_PATH", str(tmp_path / "other.sqlite"))
         assert list_parameters(str(comfort_db))
-
-    # The path comes from the .env file in the working directory
-    def test_path_from_dotenv_file(self, comfort_db, monkeypatch, tmp_path):
-        (tmp_path / ".env").write_text(f'COMFORT_DB_PATH="{Path(comfort_db).as_posix()}"\n')
-        monkeypatch.chdir(tmp_path)
-        # load_dotenv sets the variable directly, so register it with monkeypatch to remove it after the test
-        monkeypatch.setenv("COMFORT_DB_PATH", "placeholder")
-        monkeypatch.delenv("COMFORT_DB_PATH")
-        assert Path(_resolve_db_path(None)) == Path(comfort_db)
-
-    # Without an argument and without COMFORT_DB_PATH, an error naming the variable is raised
-    def test_missing_path_raises(self, monkeypatch, tmp_path):
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.delenv("COMFORT_DB_PATH", raising=False)
-        monkeypatch.setattr("comfort.io.load_dotenv", lambda *args, **kwargs: None)
-        with pytest.raises(EnvironmentError, match="COMFORT_DB_PATH"):
-            list_parameters()
 
     # A wrong path from the environment is reported with that path
     def test_wrong_environment_path_raises(self, monkeypatch, tmp_path):

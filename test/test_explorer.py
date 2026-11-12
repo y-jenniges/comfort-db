@@ -60,7 +60,7 @@ class TestCreateApp:
     def test_raises_without_path(self, monkeypatch):
         monkeypatch.delenv("COMFORT_DB_PATH", raising=False)
         # A local .env must not provide the path
-        monkeypatch.setattr("comfort.io.load_dotenv", lambda *args, **kwargs: None)
+        monkeypatch.setattr("comfort.util.paths.load_dotenv", lambda *args, **kwargs: None)
         with pytest.raises(EnvironmentError, match="COMFORT_DB_PATH"):
             explorer.create_app()
 

@@ -307,16 +307,12 @@ class TestGridValidation:
         with pytest.raises(FileNotFoundError):
             Grid(**self._COMMON_PARAMS)
 
-    # The bathymetry path is a required argument
-    def test_bathymetry_path_required(self):
+    # The bathymetry path falls back to BATHYMETRY_PATH
+    def test_bathymetry_path_from_environment_variable(self, monkeypatch):
         params = {k: v for k, v in self._COMMON_PARAMS.items() if k != "bathymetry_grid_path"}
-        with pytest.raises(TypeError, match="bathymetry_grid_path"):
+        monkeypatch.setenv("BATHYMETRY_PATH", "/nonexistent/from_environment.nc")
+        with pytest.raises(FileNotFoundError, match="from_environment"):
             Grid(**params)
-
-    # An explicit None bathymetry path gives the same FileNotFoundError as a missing file
-    def test_none_bathymetry_path_raises(self):
-        with pytest.raises(FileNotFoundError):
-            Grid(**{**self._COMMON_PARAMS, "bathymetry_grid_path": None})
 
     # An unrecognised time mode is rejected up front
     def test_invalid_mode_raises(self):

@@ -13,7 +13,6 @@ __all__ = [
 ]
 
 import logging
-import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
@@ -21,7 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 import pandas as pd
-from dotenv import find_dotenv, load_dotenv
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -33,6 +31,7 @@ from .geo import region_bbox, water_mass_masks
 from .qc import QualityFlags, build_where_clause, qc_conditions
 from .util.columns import find_col
 from .util.optional import import_optional
+from .util.paths import resolve_path
 from .util.sqlite_utils import validate_identifier
 from .util.types import DensityFallback, InterpMethod, LoadOutput, OnMissing, check_choice, check_timestamp, parse_timestamps
 
@@ -49,32 +48,6 @@ def _refine_to_region(df, region, region_name_col):
     return df[water_mass_masks(df, region, region_name_col=region_name_col)["region"].notna()]
 
 
-def _resolve_db_path(db_path: str | Path | None) -> str | Path:
-    """Return *db_path* or the ``COMFORT_DB_PATH`` environment variable if it is not given.
-    Priority follows this order:
-    1. Given *db_path*.
-    2. An environmental variable that is already set.
-    3. The envionrmental variable from  a ``.env`` file in the working directory.
-
-    Raises:
-        EnvironmentError: If no path is given and ``COMFORT_DB_PATH`` is not set.
-    """
-    # Return the paths if given
-    if db_path:
-        return db_path
-
-    # Pick up COMFORT_DB_PATH from a .env file, searched upwards from the user's working directory
-    load_dotenv(find_dotenv(usecwd=True))
-    env_path = os.environ.get("COMFORT_DB_PATH")
-    if not env_path:
-        raise EnvironmentError(
-            "No database path given and the COMFORT_DB_PATH environment variable is not set.\n"
-            "Pass a path or set COMFORT_DB_PATH (environment variable or .env file), e.g.\n"
-            "    export COMFORT_DB_PATH=/path/to/comfort.sqlite"
-        )
-    return env_path
-
-
 @contextmanager
 def connect(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open a connection to the COMFORT SQLite database and close it on exit.
@@ -88,7 +61,7 @@ def connect(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
         FileNotFoundError: If the database file does not exist.
     """
     # Get the database path
-    db_path = _resolve_db_path(db_path)
+    db_path = resolve_path(db_path, "COMFORT_DB_PATH", "COMFORT database")
 
     # Check if the DB file exists
     if not Path(db_path).is_file():

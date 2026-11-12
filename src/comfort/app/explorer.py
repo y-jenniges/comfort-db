@@ -36,9 +36,10 @@ import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
-from ..io import _resolve_db_path, list_parameters, read_parameter
+from ..io import list_parameters, read_parameter
 from ..qc import QC_GOOD
 from ..units import UnitsConverter
+from ..util.paths import resolve_path
 from ..util.types import parse_timestamps
 
 logger = logging.getLogger(__name__)
@@ -995,7 +996,7 @@ def create_app(db_path: str | os.PathLike | None = None) -> Dash:
     global _db_path
 
     # Resolve the DB path
-    tmp_path = _resolve_db_path(db_path)
+    tmp_path = resolve_path(db_path, "COMFORT_DB_PATH", "COMFORT database")
 
     # Check if passed DB file exists
     if not os.path.isfile(tmp_path):
