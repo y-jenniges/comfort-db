@@ -41,6 +41,7 @@ Install extras:
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -74,7 +75,10 @@ GRID_DEG = 1
 KNN_K = 5
 
 
-def main():
+DEFAULT_OUT_DIR = "output/reproduced_jenniges2025"
+
+
+def main(output_dir=DEFAULT_OUT_DIR):
     # Get DB and bathymetry paths
     db_path = os.environ.get("COMFORT_DB_PATH", "")
     bathy_path = os.environ.get("BATHYMETRY_PATH", "")
@@ -211,11 +215,13 @@ def main():
         display_cols = ["LATITUDE", "LONGITUDE", "LEV_M"] + param_cols + ["pct_imputed"]
         print(df_result[display_cols].head(10).to_string(index=False))
 
-        out_path = Path("output/reproduced_jenniges2025/reproduced_jenniges2025.csv")
+        out_path = Path(output_dir) / "reproduced_jenniges2025.csv"
         out_path.parent.mkdir(parents=True, exist_ok=True)  # create dir if necessary
         df_result.to_csv(out_path, index=False)
         log.info("Saved to %s", out_path)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Reproduce the dataset of Jenniges et al. (2025).")
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Directory to save the result CSV in.")
+    main(parser.parse_args().out_dir)

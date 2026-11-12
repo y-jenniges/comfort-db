@@ -28,6 +28,7 @@ Install extras:
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -78,10 +79,12 @@ def _save_path(output_dir: str, filename: str) -> str | None:
     return os.path.join(output_dir, filename)
 
 
-def main():
+DEFAULT_OUT_DIR = "output/reproduced_jenniges2027/"
+
+
+def main(output_dir=DEFAULT_OUT_DIR):
     db_path = os.environ.get("COMFORT_DB_PATH", "")
     bathy_path = os.environ.get("BATHYMETRY_PATH", "")
-    output_dir = "output/reproduced_jenniges2027/"
 
     if not db_path:
         sys.exit("COMFORT_DB_PATH is not set.")
@@ -288,4 +291,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Reproduce the North Atlantic dataset of Jenniges et al. (2027).")
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Directory to save figures and the CSV in.")
+    main(parser.parse_args().out_dir)

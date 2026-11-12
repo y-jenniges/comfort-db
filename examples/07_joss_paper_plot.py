@@ -12,6 +12,7 @@ Install extras:
 """
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -30,7 +31,10 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s  %(m
 log = logging.getLogger(__name__)
 
 
-def main():
+DEFAULT_OUT_DIR = "output"
+
+
+def main(output_dir=DEFAULT_OUT_DIR):
     # Get DB path from .env
     db_path = os.environ.get("COMFORT_DB_PATH", "")
     if not db_path:
@@ -117,11 +121,13 @@ def main():
     )
 
     # Save
-    save_as = Path("output/ts_oxygen_global.png")
+    save_as = Path(output_dir) / "ts_oxygen_global.png"
     save_as.parent.mkdir(parents=True, exist_ok=True)
     ax.figure.savefig(save_as, dpi=1000, bbox_inches="tight")
     log.info("Saved figure to %s", save_as)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Generate the global T-S/oxygen figure for the JOSS paper.")
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Directory to save the figure in.")
+    main(parser.parse_args().out_dir)
