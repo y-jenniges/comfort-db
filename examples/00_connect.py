@@ -54,8 +54,10 @@ dfs = comfort.load_comfort(
     output="dict",
 )
 for parameter, df in dfs.items():
+    # A profile is identified by (ID, PROFILE_NUMBER)
+    n_profiles = len(df[["ID", "PROFILE_NUMBER"]].drop_duplicates())
     print(
-        f"{parameter}: {len(df)} rows, profiles {df['PROFILE_NUMBER'].nunique()}, "
+        f"{parameter}: {len(df)} rows, profiles {n_profiles}, "
         f"n instruments {df['INSTRUMENT_ID'].nunique()}")
 print()
 

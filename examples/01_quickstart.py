@@ -68,7 +68,9 @@ if __name__ == "__main__":
         )
         df_nit = dfs_filtered.get("NITRATE")
         if df_nit is not None:
-            print(f"  Profiles: {df_nit['PROFILE_NUMBER'].nunique()}, rows: {len(df_nit)}")
+            # A profile is identified by (ID, PROFILE_NUMBER)
+            n_profiles = len(df_nit[["ID", "PROFILE_NUMBER"]].drop_duplicates())
+            print(f"  Profiles: {n_profiles}, rows: {len(df_nit)}")
 
         # Post-load subsetting on an already-loaded DataFrame
         print("\n=== subset_region ===")
