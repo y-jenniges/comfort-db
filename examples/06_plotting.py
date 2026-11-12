@@ -10,8 +10,10 @@ Install extras:
 """
 from __future__ import annotations
 
+import argparse
 import os
 import sys
+from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -39,8 +41,14 @@ load_dotenv()
 # A profile is identified by (ID, PROFILE_NUMBER), LEV_M adds the depth
 JOIN_KEY = ["ID", "PROFILE_NUMBER", "LEV_M"]
 
+DEFAULT_OUT_DIR = "output/plotting"
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Create the example plots of comfort.plot.")
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Directory to save the figures in.")
+    out_dir = Path(parser.parse_args().out_dir)
+
     # Get path to DB from .env
     db_path = os.environ.get("COMFORT_DB_PATH", "")
     if not db_path:
@@ -153,7 +161,7 @@ if __name__ == "__main__":
     )
     df_combined = df_combined.dropna(subset=["depth_bin"])
 
-    compare_stats(
+    ax_compare = compare_stats(
         df_combined, group_col="depth_bin",
         value_cols=["TEMPERATURE", "SALINITY", "OXYGEN"],
         value_labels={
@@ -164,6 +172,20 @@ if __name__ == "__main__":
     )
 
     # --- Figure 6: Annual observation coverage ---
-    plot_annual_coverage({"TEMPERATURE": df_t, "SALINITY": df_s, "OXYGEN": df_o})
+    ax_coverage = plot_annual_coverage({"TEMPERATURE": df_t, "SALINITY": df_s, "OXYGEN": df_o})
+
+    # Save all figures
+    out_dir.mkdir(parents=True, exist_ok=True)
+    figures = {
+        "overview": fig,
+        "density_profiles": ax_pyc.figure,
+        "oxygen_transect": ax_transect.figure,
+        "distributions": fig2,
+        "compare_stats": ax_compare.figure,
+        "annual_coverage": ax_coverage.figure,
+    }
+    for name, figure in figures.items():
+        figure.savefig(out_dir / f"{name}.png", dpi=150, bbox_inches="tight")
+    print(f"Saved {len(figures)} figures to {out_dir}")
 
     plt.show()
